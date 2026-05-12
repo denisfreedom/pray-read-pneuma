@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "name": "Authorized King James Version",
+    "shortname": "KJV",
+    "module": "kjv",
+    "year": 1769,
+    "lang": "English",
+    "lang_short": "en"
+  },
+  "verses": [
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 1,
+      "text": "In the beginning God created the heaven and the earth."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 2,
+      "text": "And the earth was without form, and void; and darkness was upon the face of the deep. And the Spirit of God moved upon the face of the waters."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 3,
+      "text": "And God said, Let there be light: and there was light."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 4,
+      "text": "And God saw the light, that it was good: and God divided the light from the darkness."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 5,
+      "text": "And God called the light Day, and the darkness he called Night. And the evening and the morning were the first day."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 2,
+      "verse": 1,
+      "text": "Thus the heavens and the earth were finished, and all the host of them."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 2,
+      "verse": 2,
+      "text": "And on the seventh day God ended his work which he had made; and he rested on the seventh day from all his work which he had made."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 2,
+      "verse": 3,
+      "text": "And God blessed the seventh day, and sanctified it: because that in it he had rested from all his work which God created and made."
+    }
+  ]
+}

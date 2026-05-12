@@ -1,0 +1,106 @@
+{
+  "project": "Ruth Prayer Bible Project",
+  "version": "1.0",
+  "languages": ["english", "luganda"],
+  "book": {
+    "name_english": "Ruth",
+    "name_luganda": "Luusi",
+    "testament": "Old Testament",
+    "book_number": 8,
+    "abbreviation_english": "Ru",
+    "abbreviation_luganda": "Lu",
+    "book_introduction": {
+      "en_introduction": "The Book of Ruth is a short narrative work set in the time of the Judges, probably to be dated sometime in the monarchic period, though some scholars place it later. The story concerns the relationship between the Moabite woman Ruth and her Judean mother-in-law Naomi. Having lost her husband, Naomi returned from Moab to her native Bethlehem, taking Ruth with her. There Ruth's moral fortitude and her acceptance of the Lord, the God of Israel, were rewarded by her marriage to Boaz, a distant relative of her former husband, and by the birth of a son. Hence, she became the great-grandmother of King David and an ancestor of Jesus.",
+      "lu_introduction": "Kitabo kya Luusi kiri mu ntambula ennene ya Bayuda. Luno lwamusikiiriza okukira mu budde bwa Bajaji. Nkola ya Rusi n'eya Naomi babagazi ab'amaanyi gaagali mu ndagano ezije mu budde bwo. Rusi yali Omumoabi naye ateekawo okukwata Katonda wa Bayuda. Mu nsonga ya Rusi, Katonda yampeekawo okuwasa Boazi ne kuzaala omwana eyali jjajja wa Kabaka Devide."
+    },
+    "book_prayer": {
+      "en_prayer": "Lord, grant us the grace to see your faithfulness in all circumstances, just as Ruth trusted in you. Help us to be faithful and righteous like Ruth, and to trust in your provision even in difficult times. Amen.",
+      "lu_prayer": "Katonda, tukumpa ekisa lyo tusobole okumanya empalirizo yo mu buli kintu, gamba lwe Rusi yateekawo. Tuteekeze okukwata ku busika bwo n'okuwekeddwa nyo mu budde bwa byetaaga. Amen."
+    },
+    "chapters": [
+      {
+        "chapter_number": 1,
+        "chapter_introduction": {
+          "en_introduction": "Naomi, an Israelite woman, was living in Moab with her husband and two sons. When her husband and both sons died, she decided to return to her homeland with her daughter-in-law Ruth. This chapter sets the stage for a story of loyalty, faithfulness, and God's providential care.",
+          "lu_introduction": "Naomi yali omukazi wa Bayuda eyali e Moabi n'omusajja we ne batabani be babiri. Naye omukazi we ne batabani be ne boleka. Naomi n'okutegeeza okuyimba mu nsi ye eyali Yuda, ne Rusi ye muzadde we n'amwambako."
+        },
+        "chapter_prayer": {
+          "en_prayer": "Teach us to trust you in times of loss and uncertainty, as Ruth and Naomi did.",
+          "lu_prayer": "Tuteekeze okukwata ku Katonda mu budde bwa bukozi bwetaaga."
+        },
+        "verses": [
+          {
+            "verse_number": 1,
+            "text_english": "In the days when the judges ruled, there was a famine in the land. And a certain man of Bethlehem in Judah went to sojourn in the country of Moab, he, and his wife, and his two sons.",
+            "text_luganda": "Mu budde bwa Bajaji, kwali envuuma mu nsi. Omuntu omu okuva mu Betilehemu mu Yuda, n'omusajja we, ne batabani be babiri, ne bagenda okukira mu nsi ya Moabi.",
+            "commentary": {
+              "en_commentary": "The famine forced families to leave their homeland to find food. This was a common occurrence during the time of the judges.",
+              "lu_commentary": "Envuuma yali kifo ekikira mu nsi, kale abantu ne bagenda mu maddala okukira ne ffenna ne bagezi."
+            }
+          },
+          {
+            "verse_number": 2,
+            "text_english": "The name of the man was Elimelech, and the name of his wife Naomi, and the names of his two sons were Mahlon and Chilion; they were Ephrathites of Bethlehem in Judah. And they went into the country of Moab and remained there.",
+            "text_luganda": "Erinnya lya muntu yali Elimuleeki, n'erinnya lya mukazi we Naomi, n'erinnya lya batabani be babiri kwe Malone ne Kilyoni; baali Efelatayo okuva Betilehemu mu Yuda. Ne bagenda mu nsi ya Moabi ne bakira."
+          },
+          {
+            "verse_number": 3,
+            "text_english": "But Elimelech, the husband of Naomi, died, and she was left with her two sons.",
+            "text_luganda": "Naye Elimuleeki omusajja wa Naomi ne fa, Naomi ne akira ne batabani be babiri."
+          },
+          {
+            "verse_number": 4,
+            "text_english": "They took Moabite wives; the name of the one was Orpah and the name of the other Ruth. When they had lived there about ten years,",
+            "text_luganda": "Ne batwala abakazi ba Mumoabi; erinnya lya emu kwali Olupa n'erinnya lya yenda kwali Rusi. Baakira mu nsi eyo emyaka okukira 10,"
+          },
+          {
+            "verse_number": 5,
+            "text_english": "both Mahlon and Chilion died, so that the woman was left without her two sons and her husband.",
+            "text_luganda": "Malone ne Kilyoni ne bomala olaba okuvva, Naomi ne akira ayisi n'omusajja we era batabani be."
+          }
+        ],
+        "outlines": [
+          {
+            "title": "Elimelech's Family",
+            "content": "Introduces the family of Elimelech who fled to Moab during a famine",
+            "order_index": 1
+          },
+          {
+            "title": "Death of Elimelech and Sons",
+            "content": "Describes how Elimelech and his two sons died, leaving Naomi a widow",
+            "order_index": 2
+          },
+          {
+            "title": "Naomi's Plan to Return",
+            "content": "Naomi decides to return to Judah with Ruth accompanying her",
+            "order_index": 3
+          }
+        ]
+      },
+      {
+        "chapter_number": 2,
+        "chapter_introduction": {
+          "en_introduction": "Ruth goes to glean in the fields of Boaz, and finds favor in his eyes. This chapter shows how God providentially guided Ruth to meet Boaz, who would become her kinsman-redeemer.",
+          "lu_introduction": "Rusi n'agenda okukuza mu nsimu za Boazi, n'akakasa ekisa mu maaso ge. Kabunabudde Katonda n'akira Rusi okusobola okukwata Boazi."
+        },
+        "verses": [
+          {
+            "verse_number": 1,
+            "text_english": "Now Naomi had a kinsman of her husband's, a man of great wealth, of the family of Elimelech, and his name was Boaz.",
+            "text_luganda": "Naomi yali n'omusajja wa sekindi w'omusajja we, omuntu wa buggagali bungi, w'ennyumba ya Elimuleeki, erinnya lye kwali Boazi."
+          },
+          {
+            "verse_number": 2,
+            "text_english": "And Ruth the Moabite said to Naomi, 'Let me go to the field and glean among the ears of grain after him in whose sight I shall find favor.' And she said to her, 'Go, my daughter.'",
+            "text_luganda": "Rusi Omumoabi n'agamba Naomi, 'Nkaze ndyoke mu nsimu ne ndikuze mu kye ewedde wansi wa bunene bwe n'akaba anzibu nzira nnyo.' Naomi n'amukwata nti, 'Yimba mwanakazi wange.'"
+          },
+          {
+            "verse_number": 3,
+            "text_english": "So she set out and went and gleaned in the field after the reapers, and she happened to come to the part of the field belonging to Boaz, who was of the family of Elimelech.",
+            "text_luganda": "Rusi n'asitula n'agenda okukuza mu nsimu, ate mu maaso ga babezi, n'agasobola okufika ku nsimu ya Boazi, eyali w'ennyumba ya Elimuleeki."
+          }
+        ]
+      }
+    ]
+  }
+}

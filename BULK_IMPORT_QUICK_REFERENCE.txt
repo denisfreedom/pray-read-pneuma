@@ -1,0 +1,92 @@
+================================================================================
+                 BULK IMPORT QUICK REFERENCE CARD
+================================================================================
+
+🎯 LOCATION
+  Admin Panel → Scroll to "📤 Bulk Import Bible Content"
+
+📋 JSON FORMAT
+  {
+    "metadata": {
+      "name": "Bible Name",
+      "lang": "English",
+      "lang_short": "en"
+    },
+    "verses": [
+      {
+        "book_name": "Genesis",
+        "chapter": 1,
+        "verse": 1,
+        "text": "Verse text..."
+      }
+    ]
+  }
+
+⚙️  LANGUAGE CODES
+  "en"  → English (stores in text_english)
+  "lg"  → Luganda (stores in text_luganda)
+
+✅ TEST FILES
+  1. test-genesis-kjv-complete.json (8 English verses)
+  2. test-genesis-luganda-complete.json (8 Luganda verses)
+
+🚀 QUICK TEST
+  1. Go to /admin-panel
+  2. Upload test-genesis-kjv-complete.json
+  3. Expect: "✅ Import complete: 8 verses imported, 0 errors"
+  4. Go to /bible-reader/Genesis/1
+  5. Verify: Both English and Luganda text appear
+
+📊 IMPORT RESPONSE
+  {
+    "success": true,
+    "message": "Import complete: 8 verses imported, 0 errors",
+    "successCount": 8,
+    "errorCount": 0,
+    "successRate": "100%",
+    "totalBooksProcessed": 1,
+    "totalChaptersProcessed": 2
+  }
+
+❌ COMMON ERRORS
+  • "Book not found" → Check book_name matches database (e.g., "Genesis")
+  • Invalid JSON → Use online JSON validator
+  • Wrong language → Verify lang_short is "en" or "lg"
+  • Missing fields → Ensure all required fields present
+
+📁 DOCUMENTATION FILES
+  • BULK_IMPORT_READY.md - Complete system overview
+  • BULK_IMPORT_TEST_GUIDE.md - Detailed testing instructions
+  • BULK_IMPORT_QUICK_REFERENCE.txt - This file
+
+🔍 VERIFY IN DATABASE
+  Admin Panel → "🔍 Find & Edit Verses"
+  Select: Genesis, Chapter: 1, Click "Search"
+  Should show: Genesis 1:1-5 with both English + Luganda
+
+📞 TROUBLESHOOTING
+  1. Check import response for error messages
+  2. Verify JSON is valid (no syntax errors)
+  3. Ensure book exists in system
+  4. Check language code is correct ("en" or "lg")
+  5. Look at browser console for details
+
+✨ KEY FEATURES
+  ✓ Auto-detects language from metadata
+  ✓ Supports both English and Luganda
+  ✓ Updates existing verses instead of creating duplicates
+  ✓ Handles large files (up to 50MB)
+  ✓ Shows progress bar (0% → 100%)
+  ✓ Returns detailed success statistics
+  ✓ Reports first 20 errors for debugging
+
+🎯 SUCCESS CRITERIA
+  • Import shows 100% success rate
+  • No errors reported
+  • Verses appear in Bible reader
+  • Both languages visible in admin panel
+  • Database stores all verses
+
+================================================================================
+                         READY TO IMPORT!
+================================================================================

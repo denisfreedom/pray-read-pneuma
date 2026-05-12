@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Light mode (default) */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f9fafb;
+  --text-primary: #111827;
+  --text-secondary: #6b7280;
+  --border-color: #e5e7eb;
+  --accent-color: #c9900a;
+  color-scheme: light;
+}
+
+/* Dark mode */
+.dark {
+  --bg-primary: #06090f;
+  --bg-secondary: #0a0e17;
+  --text-primary: #e8e2d4;
+  --text-secondary: rgba(220, 200, 160, 0.6);
+  --border-color: rgba(180, 140, 60, 0.15);
+  --accent-color: #f0c060;
+  color-scheme: dark;
+}
+
+html.dark {
+  background-color: var(--bg-primary);
+}
+
+body {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Dark mode adjustments for better contrast */
+.dark body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Ensure text contrast in dark mode */
+.dark p, .dark span, .dark div, .dark a {
+  color: inherit;
+}
