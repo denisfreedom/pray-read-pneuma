@@ -4,6 +4,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import MiniPlayer from "@/app/components/MiniPlayer";
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 export const metadata: Metadata = {
   title: 'Pray-Read Bible',
@@ -61,8 +62,7 @@ export default function RootLayout({
           <ThemeProvider>
             {children}
             <MiniPlayer />
-            
-
+            <SpeedInsights />
           </ThemeProvider>
         </AppGenProvider>
         <Script src="https://unpkg.com/@phosphor-icons/web" strategy="afterInteractive" />
