@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "name": "Biblia Entukuvu",
+    "shortname": "LU",
+    "module": "luganda",
+    "year": 2000,
+    "lang": "Luganda",
+    "lang_short": "lg"
+  },
+  "verses": [
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 1,
+      "text": "Mu maso okusooka Katonda akola embeera n'ensi."
+    },
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 2,
+      "text": "N'ensi ye yali etaali na ndowooza, era etaali na kasita; n'ekizikiza kyali ku nsi. N'Omwoyo gwa Katonda gwali gukubaganya ku nsi."
+    },
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 3,
+      "text": "Katonda n'akubaganya nti: 'Kale kale ne kyalima okukoza,' n'okukoza okukozibwa."
+    },
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 4,
+      "text": "Katonda n'alabe okukoza ko nti kyali kirungi, n'akigabanya okukoza ku kizikiza."
+    },
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 5,
+      "text": "Katonda n'akawo okukoza erinnya 'Okumaaga,' n'ekizikiza n'akawo erinnya 'Ekiro.' Era ekiro n'okumaaga kwali mbe erisooka."
+    },
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 6,
+      "text": "Katonda n'akubaganya nti: 'Kale kale ne kyalima embeera mu maaso g'amazzi, ekigabanya amazzi n'amazzi.'"
+    },
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 7,
+      "text": "Katonda n'akola embeera, era n'agabanya amazzi agali wansi wa embeera n'amazzi agali waggulu wa embeera; era kyali kifo."
+    },
+    {
+      "book_name": "Genesisi",
+      "chapter": 1,
+      "verse": 8,
+      "text": "Katonda n'akawo embeera erinnya 'Enjuba.' Era ekiro n'okumaaga kwali mbe eyokubiri."
+    }
+  ]
+}

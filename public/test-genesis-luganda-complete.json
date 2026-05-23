@@ -1,0 +1,60 @@
+{
+  "metadata": {
+    "name": "Luganda Bible Translation",
+    "shortname": "LUG",
+    "module": "luganda",
+    "year": 2023,
+    "lang": "Luganda",
+    "lang_short": "lg"
+  },
+  "verses": [
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 1,
+      "text": "Mu nsi ennyimba, Katonda n'akola ggulu ne nsi."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 2,
+      "text": "Era nsi yali etali bulijjo, era yali tuufu; n'ekizira kyali ku maaso g'ebifo ebikira. Era Mwoyo gwa Katonda gwaakubaganya waggulu w'amazzi."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 3,
+      "text": "Era Katonda n'agamba nti, \"Eri okuva.\" Era ekiwatu kyakva."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 4,
+      "text": "Era Katonda n'alaba ekiwatu, nti kyakola bulungi: era Katonda n'awamu ekiwatu n'ekizira."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 1,
+      "verse": 5,
+      "text": "Era Katonda n'atta ekiwatu erinnya lya Ggulo, era ekizira n'atta erinnya lyayo Kiro. Era akawuunungu ne kumakya kyakola nnaku yokusooka."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 2,
+      "verse": 1,
+      "text": "Kale ggulu ne nsi ne zisooka, ne kabinja kyonna ekyari."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 2,
+      "verse": 2,
+      "text": "Era ku nnaku nnya Katonda n'imalidde omulimu gwe gwe yali akola; era n'amalira ku nnaku nnya okuva mu mulimu gwe gwonna gwe yali akola."
+    },
+    {
+      "book_name": "Genesis",
+      "chapter": 2,
+      "verse": 3,
+      "text": "Era Katonda n'aweebwa nnaku nnya okubeera n'agumu: kubanga mu nnaku nnya yali amalire okuva mu mulimu gwe gwonna gwe Katonda yali akola n'akola."
+    }
+  ]
+}

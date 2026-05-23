@@ -1,0 +1,65 @@
+{
+  "project": "Prayer Bible Project",
+  "version": "1.0",
+  "languages": ["english", "luganda"],
+  "book": {
+    "name_english": "Matthew",
+    "name_luganda": "Matteyо",
+    "book_introduction": {
+      "en_introduction": "The Gospel of Matthew presents Jesus as the King of the Jews and emphasizes His teachings through the Sermon on the Mount and various parables.",
+      "lu_introduction": "Eyigobbo lya Matteyо lye linyama nneekaawa ezokuweza Yesu ng'Omwami w'Abayudaaya..."
+    },
+    "book_prayer": {
+      "en_prayer": "Help us to understand and live by the teachings of Jesus Christ as revealed in this Gospel.",
+      "lu_prayer": "Tuwezeeko okutegeeza n'okufa ng'ekigendereza kya Yesu Kristo..."
+    }
+  },
+  "chapters": [
+    {
+      "chapter_number": 1,
+      "en_chapter_introduction": "The genealogy of Jesus Christ and His birth narrative.",
+      "lu_chapter_introduction": "Okuva mu bantu ba Daaviidi okwa Yesu...",
+      "en_chapter_prayer": "Thank You for the promise of Jesus Christ our Savior.",
+      "lu_chapter_prayer": "Webale okuwayo endwadde y'Yesu Kristo Omulokozi waffe...",
+      "outlines": [
+        {
+          "en_title": "Genealogy of Jesus (1:1-17)",
+          "lu_title": "Amakula ga Yesu (1:1-17)",
+          "en_content": "I. Genealogy from Abraham to David\n   A. Patriarchs and judges\n   B. Kings of Judah\nII. Genealogy from David to Jesus\n   A. Kings and captivity\n   B. Return and restoration",
+          "lu_content": "I. Amakula okuva e Abraham okwa Daaviidi\n   A. Bantu ba mwetaano\n   B. Kabaka ba Yuda\nII. Amakula okuva e Daaviidi okwa Yesu\n   A. Kabaka n'okukwataganya\n   B. Okwoddayo n'okubudiliza",
+          "order_index": 1
+        },
+        {
+          "en_title": "Birth of Jesus (1:18-25)",
+          "lu_title": "Okubadde kwa Yesu (1:18-25)",
+          "en_content": "I. Mary's pregnancy and Joseph's dilemma\n   A. Mary found with child\n   B. Joseph's considerations\nII. Angel's announcement\n   A. Fear not\n   B. The child is from the Holy Spirit\nIII. Joseph's obedience\n   A. Takes Mary as wife\n   B. Jesus is born",
+          "lu_content": "I. Oyafuu gwa Mariyamu n'ekikwata Yosefa\n   A. Mariyamu ayinza\n   B. Yosefa akikubaganya\nII. Obubaka bwa malaika\n   A. Tasanga\n   B. Omwana ono awa Mwoyo Omugezi",
+          "order_index": 2
+        }
+      ],
+      "verses": [
+        {
+          "verse_number": 1,
+          "text_english": "The book of the genealogy of Jesus Christ, the son of David, the son of Abraham.",
+          "text_luganda": "Akawandiko k'amakula ga Yesu Kristo, mutwe wa Daaviidi, mutwe wa Ibulayimu.",
+          "en_commentary": "Matthew opens his gospel with genealogy, establishing Jesus' rightful claim to the throne of David and His descent from Abraham.",
+          "lu_commentary": "Matteyо atandika eyigobbo lye ng'akawayo amakula g'asobola okukikira nti Yesu owa Daaviidi n'owa Ibulayimu."
+        },
+        {
+          "verse_number": 2,
+          "text_english": "Abraham was the father of Isaac, and Isaac the father of Jacob, and Jacob the father of Judah and his brothers.",
+          "text_luganda": "Ibulayimu ye yabadde fi ya Isaka; Isaka ye yabadde fi ya Yakobo; Yakobo ye yabadde fi ya Yuda n'abakyala be.",
+          "en_commentary": "The genealogy begins with the patriarchs, showing Jesus' connection to God's covenant people.",
+          "lu_commentary": "Amakula gatandikidde kubadde omusolo gw'ensi okutegeeza nti Yesu ali mu nsi ey'endagamuntu y'Okwagala kwa Katonda."
+        },
+        {
+          "verse_number": 3,
+          "text_english": "Judah the father of Perez and Zerah by Tamar, and Perez the father of Hezron, and Hezron the father of Ram.",
+          "text_luganda": "Yuda ye yabadde fi ya Pereeza n'Zeula okuva eri Tamali; Pereeza ye yabadde fi ya Hezulooni; Hezulooni ye yabadde fi ya Llamu.",
+          "en_commentary": "The genealogy includes women, emphasizing God's grace toward all people.",
+          "lu_commentary": "Amakula aganza n'abakazi, n'eyo kusomesa nti Katonda ayagala bonna."
+        }
+      ]
+    }
+  ]
+}
