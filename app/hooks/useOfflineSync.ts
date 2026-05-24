@@ -1,138 +1,274 @@
-// Custom hook for offline data synchronization
-import { useState, useEffect } from 'react';
-import { isOffline } from '@/app/utils/offlineStorage';
+'use client';
 
-interface UseOfflineSyncOptions {
-  onlineCallback?: () => void;
-  offlineCallback?: () => void;
+import { useState, useEffect, useCallback } from 'react';
+import {
+  saveChapterVerses,
+  saveChapterContent,
+  saveBooks,
+  getBooks,
+  saveDevotional,
+  getAllDevotionals,
+  saveVerseOfTheDay,
+} from '@/app/utils/offlineStorage';
+
+export interface SyncStatus {
+  isSyncing: boolean;
+  lastSyncTime: Date | null;
+  itemsSynced: number;
+  totalItems: number;
+  error: string | null;
 }
 
-export function useOfflineSync(options: UseOfflineSyncOptions = {}) {
-  const [offline, setOffline] = useState(false);
-  const [syncing, setSyncing] = useState(false);
+export function useOfflineSync() {
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({
+    isSyncing: false,
+    lastSyncTime: null,
+    itemsSynced: 0,
+    totalItems: 0,
+    error: null,
+  });
 
+  // Load last sync time from localStorage
   useEffect(() => {
-    // Check initial status
-    setOffline(isOffline());
-
-    const handleOnline = () => {
-      setOffline(false);
-      options.onlineCallback?.();
-      syncOfflineData();
-    };
-
-    const handleOffline = () => {
-      setOffline(true);
-      options.offlineCallback?.();
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, [options]);
-
-  const syncOfflineData = async () => {
-    if (offline || syncing) return;
-
-    setSyncing(true);
-    try {
-      // Sync any pending data here
-      console.log('Syncing offline data...');
-      
-      // You can implement sync logic for:
-      // - Highlights
-      // - Notes
-      // - Reading progress
-      // - Bookmarks
-      
-    } catch (error) {
-      console.error('Sync error:', error);
-    } finally {
-      setSyncing(false);
+    const lastSync = localStorage.getItem('lastSyncTime');
+    if (lastSync) {
+      setSyncStatus(prev => ({
+        ...prev,
+        lastSyncTime: new Date(lastSync),
+      }));
     }
-  };
+  }, []);
 
-  return {
-    offline,
-    syncing,
-    syncOfflineData,
-  };
-}
+  // Sync all Bible books
+  const syncBibleBooks = useCallback(async () => {
+    try {
+      const response = await fetch('/api/bible-books');
+      if (!response.ok) throw new Error('Failed to fetch books');
+      
+      const books = await response.json();
+      await saveBooks(books);
+      
+      return books.length;
+    } catch (error) {
+      console.error('Error syncing books:', error);
+      throw error;
+    }
+  }, []);
 
-// Hook for fetching data with offline support
-export function useOfflineFetch<T>(
-  url: string,
-  cacheGetter: () => Promise<T | null>,
-  cacheSetter: (data: T) => Promise<void>
-) {
-  const [data, setData] = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
-  const { offline } = useOfflineSync();
+  // Sync a specific chapter
+  const syncChapter = useCallback(async (bookId: number, chapter: number) => {
+    try {
+      // Fetch verses
+      const versesResponse = await fetch(`/api/bible-verses?bookId=${bookId}&chapter=${chapter}`);
+      if (versesResponse.ok) {
+        const verses = await versesResponse.json();
+        await saveChapterVerses(bookId, chapter, verses);
+      }
 
-  useEffect(() => {
-    let isMounted = true;
+      // Fetch chapter content (commentary, prayers, etc.)
+      const contentResponse = await fetch(`/api/bible-content?bookId=${bookId}&chapter=${chapter}`);
+      if (contentResponse.ok) {
+        const content = await contentResponse.json();
+        await saveChapterContent(bookId, chapter, content);
+      }
 
-    const fetchData = async () => {
-      setLoading(true);
-      setError(null);
+      return true;
+    } catch (error) {
+      console.error(`Error syncing chapter ${bookId}:${chapter}:`, error);
+      throw error;
+    }
+  }, []);
 
+  // Sync a full book (all chapters)
+  const syncBook = useCallback(async (bookId: number, totalChapters: number) => {
+    const results = [];
+    
+    for (let chapter = 1; chapter <= totalChapters; chapter++) {
       try {
-        // Try to fetch from network first
-        if (!offline) {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        await syncChapter(bookId, chapter);
+        results.push(true);
+        
+        // Update progress
+        setSyncStatus(prev => ({
+          ...prev,
+          itemsSynced: results.length,
+        }));
+      } catch (error) {
+        results.push(false);
+      }
+    }
+
+    return results.filter(r => r).length;
+  }, [syncChapter]);
+
+  // Sync devotionals
+  const syncDevotionals = useCallback(async () => {
+    try {
+      const response = await fetch('/api/devotional-plans');
+      if (!response.ok) throw new Error('Failed to fetch devotionals');
+      
+      const devotionals = await response.json();
+      
+      for (const devotional of devotionals) {
+        await saveDevotional(devotional);
+      }
+      
+      return devotionals.length;
+    } catch (error) {
+      console.error('Error syncing devotionals:', error);
+      throw error;
+    }
+  }, []);
+
+  // Sync verse of the day
+  const syncVerseOfTheDay = useCallback(async () => {
+    try {
+      const response = await fetch('/api/verse-of-the-day');
+      if (!response.ok) throw new Error('Failed to fetch verse of the day');
+      
+      const verse = await response.json();
+      const today = new Date().toISOString().split('T')[0];
+      await saveVerseOfTheDay(today, verse);
+      
+      return true;
+    } catch (error) {
+      console.error('Error syncing verse of the day:', error);
+      throw error;
+    }
+  }, []);
+
+  // Full sync - sync everything
+  const syncAll = useCallback(async (onProgress?: (progress: number) => void) => {
+    setSyncStatus({
+      isSyncing: true,
+      lastSyncTime: null,
+      itemsSynced: 0,
+      totalItems: 0,
+      error: null,
+    });
+
+    try {
+      // Step 1: Sync books (metadata)
+      const bookCount = await syncBibleBooks();
+      onProgress?.(10);
+
+      // Step 2: Get books to determine total chapters
+      const books = await getBooks();
+      const totalChapters = books.reduce((sum, book) => sum + (book.total_chapters || 0), 0);
+      
+      setSyncStatus(prev => ({
+        ...prev,
+        totalItems: totalChapters + bookCount + 10, // +10 for devotionals/misc
+      }));
+
+      // Step 3: Sync all chapters for all books
+      let syncedChapters = 0;
+      for (const book of books) {
+        if (book.total_chapters) {
+          const synced = await syncBook(book.id, book.total_chapters);
+          syncedChapters += synced;
           
-          const jsonData = await response.json();
-          
-          // Cache the data
-          await cacheSetter(jsonData);
-          
-          if (isMounted) {
-            setData(jsonData);
-          }
-        } else {
-          // We're offline, try cache
-          const cachedData = await cacheGetter();
-          
-          if (cachedData && isMounted) {
-            setData(cachedData);
-          } else {
-            throw new Error('No cached data available offline');
-          }
-        }
-      } catch (err) {
-        // Try cache as fallback
-        try {
-          const cachedData = await cacheGetter();
-          if (cachedData && isMounted) {
-            setData(cachedData);
-            setError(null);
-          } else {
-            throw err;
-          }
-        } catch (cacheErr) {
-          if (isMounted) {
-            setError(err instanceof Error ? err : new Error('Unknown error'));
-          }
-        }
-      } finally {
-        if (isMounted) {
-          setLoading(false);
+          const progress = 10 + (syncedChapters / totalChapters) * 70;
+          onProgress?.(Math.min(progress, 80));
         }
       }
-    };
 
-    fetchData();
+      // Step 4: Sync devotionals
+      await syncDevotionals();
+      onProgress?.(90);
 
-    return () => {
-      isMounted = false;
-    };
-  }, [url, offline, cacheGetter, cacheSetter]);
+      // Step 5: Sync verse of the day
+      await syncVerseOfTheDay();
+      onProgress?.(95);
 
-  return { data, loading, error, offline };
+      // Complete
+      const now = new Date();
+      localStorage.setItem('lastSyncTime', now.toISOString());
+      
+      setSyncStatus({
+        isSyncing: false,
+        lastSyncTime: now,
+        itemsSynced: syncedChapters + bookCount,
+        totalItems: totalChapters + bookCount,
+        error: null,
+      });
+
+      onProgress?.(100);
+      
+      return true;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Sync failed';
+      setSyncStatus(prev => ({
+        ...prev,
+        isSyncing: false,
+        error: errorMessage,
+      }));
+      throw error;
+    }
+  }, [syncBibleBooks, syncBook, syncDevotionals, syncVerseOfTheDay]);
+
+  // Sync specific content
+  const syncSpecificContent = useCallback(async (
+    type: 'book' | 'chapter' | 'devotionals' | 'votd',
+    params?: { bookId?: number; chapter?: number; totalChapters?: number }
+  ) => {
+    setSyncStatus(prev => ({ ...prev, isSyncing: true, error: null }));
+
+    try {
+      let result = false;
+
+      switch (type) {
+        case 'book':
+          if (params?.bookId && params?.totalChapters) {
+            await syncBook(params.bookId, params.totalChapters);
+            result = true;
+          }
+          break;
+        case 'chapter':
+          if (params?.bookId && params?.chapter) {
+            await syncChapter(params.bookId, params.chapter);
+            result = true;
+          }
+          break;
+        case 'devotionals':
+          await syncDevotionals();
+          result = true;
+          break;
+        case 'votd':
+          await syncVerseOfTheDay();
+          result = true;
+          break;
+      }
+
+      const now = new Date();
+      localStorage.setItem('lastSyncTime', now.toISOString());
+      
+      setSyncStatus(prev => ({
+        ...prev,
+        isSyncing: false,
+        lastSyncTime: now,
+      }));
+
+      return result;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Sync failed';
+      setSyncStatus(prev => ({
+        ...prev,
+        isSyncing: false,
+        error: errorMessage,
+      }));
+      throw error;
+    }
+  }, [syncBook, syncChapter, syncDevotionals, syncVerseOfTheDay]);
+
+  return {
+    syncStatus,
+    syncAll,
+    syncSpecificContent,
+    syncBibleBooks,
+    syncBook,
+    syncChapter,
+    syncDevotionals,
+    syncVerseOfTheDay,
+  };
 }

@@ -1,11 +1,14 @@
 import "./globals.css";
+import "@/utils/route-change-detector";
 import { AppGenProvider } from "@/components/appgen-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import MiniPlayer from "@/app/components/MiniPlayer";
 import GlobalScriptureClickHandler from "@/app/components/GlobalScriptureClickHandler";
 import CopyProtection from "@/app/components/CopyProtection";
 import OfflineIndicator from "@/app/components/OfflineIndicator";
+import OfflineBanner from "@/app/components/OfflineBanner";
 import InstallPWA from "@/app/components/InstallPWA";
+import InstallPrompt from "@/app/components/InstallPrompt";
 import SplashScreen from "@/app/components/SplashScreen";
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
@@ -67,10 +70,12 @@ export default function RootLayout({
             <SplashScreen />
             <CopyProtection />
             <OfflineIndicator />
+            <OfflineBanner />
             {children}
             <MiniPlayer />
             <GlobalScriptureClickHandler />
             <InstallPWA />
+            <InstallPrompt />
           </ThemeProvider>
         </AppGenProvider>
         <Script src="https://unpkg.com/@phosphor-icons/web" strategy="afterInteractive" />

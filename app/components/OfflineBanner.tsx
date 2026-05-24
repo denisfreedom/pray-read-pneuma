@@ -1,0 +1,78 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { WifiOff, Download, X } from 'lucide-react';
+import Link from 'next/link';
+
+export default function OfflineBanner() {
+  const [isOffline, setIsOffline] = useState(false);
+  const [showBanner, setShowBanner] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    // Check if user has dismissed the banner
+    const isDismissed = localStorage.getItem('offline-banner-dismissed');
+    if (isDismissed) {
+      setDismissed(true);
+    }
+
+    const updateOnlineStatus = () => {
+      const offline = !navigator.onLine;
+      setIsOffline(offline);
+      
+      if (offline && !isDismissed) {
+        setShowBanner(true);
+      }
+    };
+
+    updateOnlineStatus();
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+    };
+  }, [dismissed]);
+
+  const handleDismiss = () => {
+    setShowBanner(false);
+    setDismissed(true);
+    localStorage.setItem('offline-banner-dismissed', 'true');
+  };
+
+  if (!showBanner || !isOffline || dismissed) return null;
+
+  return (
+    <div className="fixed bottom-20 left-4 right-4 z-40 md:left-auto md:right-4 md:max-w-md animate-slide-up">
+      <div className="bg-gradient-to-r from-orange-600 to-red-600 rounded-2xl shadow-2xl p-4 text-white">
+        <div className="flex items-start gap-3">
+          <div className="flex-shrink-0">
+            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+              <WifiOff className="w-5 h-5" />
+            </div>
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold mb-1">You're Offline</h3>
+            <p className="text-sm text-white/90 mb-3">
+              Download Bible content to read without internet connection
+            </p>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-white text-orange-600 rounded-lg font-semibold text-sm hover:bg-gray-100 transition-colors"
+            >
+              <Download className="w-4 h-4" />
+              Download Content
+            </Link>
+          </div>
+          <button
+            onClick={handleDismiss}
+            className="flex-shrink-0 text-white/80 hover:text-white"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

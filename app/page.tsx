@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { BookOpen, Users, Heart, Sparkles, ArrowRight, Search, Bookmark, Calendar, Flame, Grid, BookMarked, FileText, Clock, Lightbulb, MessageCircle, Link as LinkIcon, HelpCircle, Music } from 'lucide-react';
+import { BookOpen, Users, Heart, Sparkles, ArrowRight, Search, Bookmark, Calendar, Flame, Grid, BookMarked, FileText, Clock, Lightbulb, MessageCircle, Link as LinkIcon, HelpCircle, Music, Download, Smartphone } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
@@ -232,12 +232,46 @@ export default function Home() {
               </Link>
             </motion.div>
 
+            {/* PWA Install Banner */}
+            <motion.div
+              className="mt-8 sm:mt-12"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, delay: 0.7 }}
+            >
+              <Link href="/install-prompt">
+                <div className="group max-w-2xl mx-auto p-4 sm:p-6 rounded-2xl bg-gradient-to-r from-blue-600/20 to-purple-600/20 backdrop-blur-md border border-blue-400/30 hover:border-blue-400/60 transition-all duration-300 cursor-pointer">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-shrink-0">
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform duration-300">
+                        <Smartphone className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-white font-bold text-sm sm:text-lg mb-1 flex items-center gap-2">
+                        Install Our App
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-green-500/20 text-green-300 border border-green-400/30">
+                          FREE
+                        </span>
+                      </h3>
+                      <p className="text-gray-300 text-xs sm:text-sm">
+                        Read offline, faster loading, home screen access
+                      </p>
+                    </div>
+                    <div className="flex-shrink-0">
+                      <Download className="w-5 h-5 sm:w-6 sm:h-6 text-blue-400 group-hover:scale-110 transition-transform duration-300" />
+                    </div>
+                  </div>
+                </div>
+              </Link>
+            </motion.div>
+
             {/* Feature Pills */}
             <motion.div
               className="mt-10 sm:mt-16 md:mt-20 flex flex-wrap items-center justify-center gap-2 xs:gap-3 sm:gap-6"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, delay: 0.7 }}
+              transition={{ duration: 0.6, delay: 0.8 }}
             >
               {[
                 { icon: BookOpen, text: 'Interactive Bible Study', color: 'from-blue-500 to-cyan-500', link: '/bible-reader' },
@@ -250,7 +284,7 @@ export default function Home() {
                     whileHover={{ scale: 1.05, y: -2 }}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 0.8 + index * 0.1 }}
+                    transition={{ duration: 0.4, delay: 0.9 + index * 0.1 }}
                   >
                     <div className="flex items-center gap-1.5 xs:gap-2 sm:gap-3">
                       <div className={`p-1 xs:p-1.5 sm:p-2 rounded-full bg-gradient-to-br ${feature.color} group-hover:scale-110 transition-transform duration-300`}>

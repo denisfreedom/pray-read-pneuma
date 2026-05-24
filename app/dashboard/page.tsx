@@ -7,11 +7,12 @@ import {
   BookOpen, Book, Users, MessageCircle, Heart, Calendar,
   TrendingUp, LogOut, Bell, Bookmark, Clock, Flame,
   ExternalLink, Eye, RefreshCw, Music, HelpCircle,
-  ChevronRight, Activity, Star, Zap
+  ChevronRight, Activity, Star, Zap, Download
 } from 'lucide-react';
 
 import AppNavbar from '@/app/components/AppNavbar';
 import NotificationManager from '@/app/components/NotificationManager';
+import DownloadManager from '@/app/components/DownloadManager';
 
 const LOGO = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
 const BG_IMAGE = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/dashboard-bg_png.jpeg';
@@ -140,6 +141,7 @@ export default function DashboardPage() {
   const [activityLoading, setActivityLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [stats, setStats] = useState({ booksVisited: 0, savedVerses: 0, streak: 0, daysActive: 0 });
+  const [showDownloadManager, setShowDownloadManager] = useState(false);
 
   useEffect(() => { checkSession(); }, []);
 
@@ -349,18 +351,24 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Settings & Profile quick links */}
-            <div className="mt-4 grid grid-cols-2 gap-3">
+            {/* Settings, Profile & Download quick links */}
+            <div className="mt-4 grid grid-cols-3 gap-2">
               <Link href="/settings"
                 className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-white/70 hover:text-white text-sm">
                 <Users className="w-4 h-4" />
-                <span>Profile</span>
+                <span className="hidden sm:inline">Profile</span>
               </Link>
               <Link href="/reminders"
                 className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all text-white/70 hover:text-white text-sm">
                 <Bell className="w-4 h-4" />
-                <span>Reminders</span>
+                <span className="hidden sm:inline">Alerts</span>
               </Link>
+              <button
+                onClick={() => setShowDownloadManager(true)}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-blue-500/20 bg-blue-500/10 hover:bg-blue-500/20 transition-all text-blue-400 hover:text-blue-300 text-sm">
+                <Download className="w-4 h-4" />
+                <span className="hidden sm:inline">Offline</span>
+              </button>
             </div>
           </div>
         </div>
@@ -388,6 +396,9 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
+
+      {/* Download Manager Modal */}
+      <DownloadManager isOpen={showDownloadManager} onClose={() => setShowDownloadManager(false)} />
     </div>
   );
 }
