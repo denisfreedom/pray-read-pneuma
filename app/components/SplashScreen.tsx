@@ -3,12 +3,23 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 
 export default function SplashScreen() {
   const [isVisible, setIsVisible] = useState(true);
   const [isLoaded, setIsLoaded] = useState(false);
+  const pathname = usePathname();
+
+  // Don't show splash screen on bible reader pages
+  const isBibleReader = pathname?.startsWith('/bible-reader');
 
   useEffect(() => {
+    // If on bible reader, immediately hide the splash screen
+    if (isBibleReader) {
+      setIsVisible(false);
+      return;
+    }
+
     // Mark as loaded after a short delay to ensure smooth transition
     const loadTimer = setTimeout(() => {
       setIsLoaded(true);
@@ -23,7 +34,10 @@ export default function SplashScreen() {
       clearTimeout(loadTimer);
       clearTimeout(hideTimer);
     };
-  }, []);
+  }, [isBibleReader]);
+
+  // Don't render anything if on bible reader
+  if (isBibleReader) return null;
 
   return (
     <AnimatePresence>

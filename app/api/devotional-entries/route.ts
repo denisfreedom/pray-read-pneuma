@@ -8,6 +8,34 @@ export async function GET(request: Request) {
     const date = searchParams.get('date');
     const showAll = searchParams.get('showAll') === 'true';
     const userEmail = searchParams.get('userEmail');
+    const entryId = searchParams.get('entryId');
+
+    // Handle fetching by entryId (for deep linking)
+    if (entryId) {
+      if (userEmail) {
+        const result = await sql`
+          SELECT e.*, 
+            CASE WHEN udp.completed IS NOT NULL THEN udp.completed ELSE false END as user_completed,
+            udp.completed_at as user_completed_at
+          FROM devotional_entries e
+          LEFT JOIN user_devotional_progress udp 
+            ON e.id = udp.entry_id AND udp.user_email = ${userEmail}
+          WHERE e.id = ${entryId}
+            AND e.is_published = true
+        `;
+        return NextResponse.json(result);
+      } else {
+        const result = await sql`
+          SELECT e.*,
+            false as user_completed,
+            NULL as user_completed_at
+          FROM devotional_entries e
+          WHERE e.id = ${entryId}
+            AND e.is_published = true
+        `;
+        return NextResponse.json(result);
+      }
+    }
 
     if (date && planId) {
       // Get entry for specific date and plan (compare only date part, ignore time)

@@ -33,8 +33,9 @@ export interface ScriptureContext {
 //    - Allows optional whitespace/newlines between book name and chapter number
 //    - Handles both full book names and abbreviations
 //    - Must have word boundaries to avoid matching partial text
+//    - Enhanced with more boundary characters for better detection
 export const FULL_REF_RE =
-  /(?:^|(?<=[^a-zA-Z0-9]))((?:\d\s*)?[A-Z][a-zA-Z]*(?:\.|\\b)(?:\s+[A-Za-z]+(?:\.|\\b))*|Song\s+of\s+Solomon|Song\s+of\s+Songs)\s+(\d+):(\d+)(?:\s*(?:[–\-—]|to)\s*(\d+))?(?=[^a-zA-Z0-9]|$)/g;
+  /(?:^|(?<=[^a-zA-Z0-9])|(?<=[\\(\\[\\{,;:\\.\\?!\\s]))((?:\\d\\s*)?[A-Z][a-zA-Z]*(?:\\.|\\\\b)(?:\\s+[A-Za-z]+(?:\\.|\\\\b))*|Song\\s+of\\s+Solomon|Song\\s+of\\s+Songs)\\s+(\\d+):(\\d+)(?:\\s*(?:[–\\-—]|to)\\s*(\\d+))?(?=[^a-zA-Z0-9]|[\\)\\]\\},;:\\.\\?!\\s]|$)/g;
 
 // 2. Chapter:Verse range without book name (context-based): "2:11", "2:11-25"
 //    Must be standalone, not part of a larger number or word
@@ -516,14 +517,15 @@ export function ScriptureHtml({ html, onVerseClick, className = '', context }: S
 
     // Replace verse references - match them across simple tags like <span style="color:red">
     // Pattern: optionally preceded by >, then the verse reference, optionally followed by <
+    // Enhanced to handle more book name variations and edge cases
     processed = processed.replace(
-      /(>|^|\s)(((?:\d\s*)?[A-Z][a-zA-Z]*(?:\.\s?)?(?:\s+[A-Za-z]+(?:\.\s?)?)*)\s+(\d+):(\d+)(?:\s*(?:[–\-—]|to)\s*(\d+))?)([\s<])/gi,
+      /(>|^|\\s|[\\(\\[\\{,;:\\.\\?!])(((?:\\d\\s*)?[A-Z][a-zA-Z]*(?:\\.\\s?)?(?:\\s+[A-Za-z]+(?:\\.\\s?)?)*)\\s+(\\d+):(\\d+)(?:\\s*(?:[–\\-—]|to)\\s*(\\d+))?)([\\s<\\)\\]\\},;:\\.\\?!]|$)/gi,
       (fullMatch, before, verseRef, book, chapter, verse, verseEnd, after) => {
         // Skip if we're inside an HTML tag attribute (e.g., inside href="" or data-*)
         if (before.includes('=') || before.includes('"')) return fullMatch;
         
         const ref: ScriptureRef = {
-          book: book.trim().replace(/\.$/, '').replace(/\s+/g, ' '),
+          book: book.trim().replace(/\\.$/, '').replace(/\\s+/g, ' '),
           chapter: parseInt(chapter),
           verse: parseInt(verse),
           verseEnd: verseEnd ? parseInt(verseEnd) : undefined,
@@ -560,15 +562,15 @@ export function ScriptureHtml({ html, onVerseClick, className = '', context }: S
 
     // Handle context-based references if context is provided
     if (context) {
-      // Context chapter:verse refs
+      // Context chapter:verse refs - enhanced to handle more boundary cases
       processed = processed.replace(
-        /(>|^|\s)(\d+:\d+(?:\s*(?:[–\-—]|to)\s*\d+)?)([\s<])/g,
+        /(>|^|\\s|[\\(\\[\\{,;:\\.\\?!])(\\d+:\\d+(?:\\s*(?:[–\\-—]|to)\\s*\\d+)?)([\\s<\\)\\]\\},;:\\.\\?!]|$)/g,
         (fullMatch, before, verseRef, after) => {
           if (before.includes('=') || before.includes('"')) return fullMatch;
           // Skip if already inside a scripture button
           if (fullMatch.includes('data-scripture-ref')) return fullMatch;
           
-          const parts = verseRef.match(/^(\d+):(\d+)(?:\s*(?:[–\-—]|to)\s*(\d+))?$/);
+          const parts = verseRef.match(/^(\\d+):(\\d+)(?:\\s*(?:[–\\-—]|to)\\s*(\\d+))?$/);
           if (parts) {
             const chapter = parseInt(parts[1]);
             const verse = parseInt(parts[2]);

@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
     });
 
     // Get book details for thematic recommendations
-    let recommendations = [];
+    let recommendations: any[] = [];
     
     if (thematicRecommendations.size > 0) {
       const thematicArray = Array.from(thematicRecommendations).slice(0, 3);

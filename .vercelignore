@@ -1,0 +1,16 @@
+# Build artifacts
+node_modules
+.next
+.vercel
+
+# Documentation
+public/*.md
+public/*.txt
+public/*.json
+
+# Environment
+.env
+.env*.local
+
+# Logs
+*.log

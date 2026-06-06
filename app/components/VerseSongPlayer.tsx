@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Shuffle, Repeat, Repeat1, Share2, Minimize2, ChevronRight } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, Shuffle, Repeat, Repeat1, Share2, Minimize2, ChevronRight, List, X } from 'lucide-react';
 import { usePlayerStore } from '@/app/store/playerStore';
 
 interface VerseSongPlayerProps {
@@ -226,9 +226,20 @@ export default function VerseSongPlayer({
 
   return (
     <div className="w-full relative">
-      <div className="flex gap-6 items-start">
+      {/* Floating "Up Next" button on mobile */}
+      {!showQueue && (
+        <button
+          onClick={() => setShowQueue(true)}
+          className="lg:hidden fixed bottom-24 right-4 z-50 p-4 rounded-full bg-gradient-to-br from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white shadow-2xl transition-all hover:scale-110 active:scale-95 border border-white/20"
+          aria-label="Show playlist"
+        >
+          <List className="w-6 h-6" />
+        </button>
+      )}
+      
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
       {/* Glassy Player Container */}
-      <div className="flex-1 relative bg-gradient-to-br from-purple-500/20 via-indigo-500/20 to-purple-600/20 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/20 overflow-hidden">
+      <div className="w-full lg:flex-1 relative bg-gradient-to-br from-purple-500/20 via-indigo-500/20 to-purple-600/20 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/20 overflow-hidden">
         {/* Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-br from-purple-400/10 via-transparent to-indigo-400/10 pointer-events-none" />
         
@@ -399,29 +410,31 @@ export default function VerseSongPlayer({
         </div>
       </div>
 
-      {/* Queue Sidebar */}
-      <div className={`w-80 rounded-3xl border border-white/20 overflow-hidden transition-all duration-300 ${
-        showQueue 
+      {/* Queue Sidebar - modal on mobile, sidebar on desktop */}
+      <div className={`
+        ${showQueue ? 'fixed inset-0 z-50 lg:relative lg:inset-auto' : 'hidden lg:block'}
+        w-full lg:w-80 rounded-none lg:rounded-3xl border-0 lg:border border-white/20 overflow-hidden transition-all duration-300
+        ${showQueue 
           ? 'bg-gradient-to-br from-purple-500/20 via-indigo-500/20 to-purple-600/20 backdrop-blur-2xl shadow-2xl' 
           : 'bg-slate-800/50 backdrop-blur-sm'
       }`}>
         {/* Queue Header */}
-        <div className="sticky top-0 p-4 bg-slate-900/80 backdrop-blur border-b border-white/10 z-10">
+        <div className="sticky top-0 p-4 bg-slate-900/90 backdrop-blur border-b border-white/10 z-10">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-bold text-white">Up Next</h3>
             <button
               onClick={() => setShowQueue(!showQueue)}
-              className="p-1 rounded hover:bg-white/10 transition-colors"
-              aria-label="Toggle queue"
+              className="lg:hidden p-2 rounded-full bg-white/10 hover:bg-white/20 transition-all"
+              aria-label="Close queue"
             >
-              <ChevronRight className={`w-5 h-5 text-white/60 transition-transform ${showQueue ? 'rotate-90' : ''}`} />
+              <X className="w-5 h-5 text-white" />
             </button>
           </div>
           <p className="text-xs text-white/50 mt-1">{allPlaylistSongs.length} song{allPlaylistSongs.length !== 1 ? 's' : ''} in playlist</p>
         </div>
 
         {/* Queue Items */}
-        <div className="overflow-y-auto max-h-96 p-3 space-y-2">
+        <div className="overflow-y-auto h-[calc(100vh-180px)] lg:max-h-96 p-3 space-y-2">
           {allPlaylistSongs.length > 0 ? (
             allPlaylistSongs.map((song, index) => {
               const isActive = song.id === currentSong?.id;

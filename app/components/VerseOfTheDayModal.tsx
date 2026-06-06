@@ -7,7 +7,7 @@ import { stripHtml } from '@/app/utils/stripHtml';
 
 const lora = Lora({
   subsets: ['latin'],
-  weight: ['300', '400'],
+  weight: ['400'],
   display: 'swap',
 });
 
@@ -149,7 +149,7 @@ export default function VerseOfTheDayModal() {
     if (isOpen && verse && verse.book && verse.chapter !== null && verse.verse !== null) {
       const checkBookmark = async () => {
         try {
-          const response = await fetch(`/api/verse-bookmarks?book=${encodeURIComponent(verse.book)}&chapter=${verse.chapter}&verse=${verse.verse}`);
+            const response = await fetch(`/api/verse-bookmarks?book=${encodeURIComponent(verse.book || '')}&chapter=${verse.chapter ?? 0}&verse=${verse.verse ?? 0}`);
           if (response.ok) {
             const data = await response.json();
             setIsBookmarked(data.bookmarked || false);
@@ -170,7 +170,7 @@ export default function VerseOfTheDayModal() {
     try {
       if (isBookmarked) {
         // Remove bookmark
-        await fetch(`/api/verse-bookmarks?book=${encodeURIComponent(verse.book)}&chapter=${verse.chapter}&verse=${verse.verse}`, {
+        await fetch(`/api/verse-bookmarks?book=${encodeURIComponent(verse.book || '')}&chapter=${verse.chapter ?? 0}&verse=${verse.verse ?? 0}`, {
           method: 'DELETE',
         });
         setIsBookmarked(false);

@@ -4,7 +4,7 @@ import { AppGenProvider } from "@/components/appgen-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import MiniPlayer from "@/app/components/MiniPlayer";
 import GlobalScriptureClickHandler from "@/app/components/GlobalScriptureClickHandler";
-import CopyProtection from "@/app/components/CopyProtection";
+import EnableCopyPaste from "@/app/components/EnableCopyPaste";
 import OfflineIndicator from "@/app/components/OfflineIndicator";
 import OfflineBanner from "@/app/components/OfflineBanner";
 import InstallPWA from "@/app/components/InstallPWA";
@@ -15,7 +15,7 @@ import Script from 'next/script';
 
 export const metadata: Metadata = {
   title: 'Pray-Read Bible',
-  description: 'Read and study the Bible offline with dual-language support',
+  description: 'A Digital Sanctuary — A living Altar where the Word of God ceases to be mere text and becomes Spirit and Life in the daily experience of every believer.',
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
@@ -68,7 +68,7 @@ export default function RootLayout({
         <AppGenProvider>
           <ThemeProvider>
             <SplashScreen />
-            <CopyProtection />
+            <EnableCopyPaste />
             <OfflineIndicator />
             <OfflineBanner />
             {children}

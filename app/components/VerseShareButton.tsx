@@ -6,40 +6,116 @@ import { stripHtml } from '@/app/utils/stripHtml';
 
 interface VerseShareButtonProps {
   bookName: string;
+  bookNumber: number;
   chapter: number;
   verse: number;
   verseText: string;
+  prayerText?: string;
   className?: string;
 }
 
 export default function VerseShareButton({
   bookName,
+  bookNumber,
   chapter,
   verse,
   verseText,
+  prayerText,
   className = ''
 }: VerseShareButtonProps) {
   const [showShareMenu, setShowShareMenu] = useState(false);
 
   // Strip HTML from verse text before sharing
   const cleanVerseText = stripHtml(verseText);
-  const shareUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/bible-reader/${encodeURIComponent(bookName)}/${chapter}?verse=${verse}`;
-  const shareText = `${bookName} ${chapter}:${verse} - ${cleanVerseText}`;
+  const cleanPrayerText = prayerText ? stripHtml(prayerText) : '';
+  const shareUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/bible-reader/${bookNumber}/${chapter}?verse=${verse}`;
+  
+  // Detect if both languages are present (when text contains double newlines as separator)
+  const hasBothLanguages = cleanVerseText.includes('\n\n') && cleanPrayerText.includes('\n\n');
+  
+  let formattedShareText = '';
+  if (hasBothLanguages) {
+    // Split verse and prayer into English and Luganda parts
+    const [englishVerse, lugandaVerse] = cleanVerseText.split('\n\n');
+    const [englishPrayer, lugandaPrayer] = cleanPrayerText.split('\n\n');
+    
+    // Format: English verse + English prayer, then Luganda verse + Luganda prayer
+    formattedShareText = `${bookName} ${chapter}:${verse}
+
+📖 ENGLISH
+"${englishVerse}"
+
+🙏 Prayer:
+${englishPrayer}
+
+━━━━━━━━━━━━━━━━
+
+📖 LUGANDA
+"${lugandaVerse}"
+
+🙏 Okusaba:
+${lugandaPrayer}
+
+${shareUrl}`;
+  } else {
+    // Single language format
+    formattedShareText = cleanPrayerText
+      ? `${bookName} ${chapter}:${verse}
+
+"${cleanVerseText}"
+
+🙏 Prayer:
+${cleanPrayerText}
+
+${shareUrl}`
+      : `${bookName} ${chapter}:${verse}
+
+"${cleanVerseText}"
+
+${shareUrl}`;
+  }
+  
+  const shareText = formattedShareText;
 
   const handleShare = async (platform: 'facebook' | 'twitter' | 'whatsapp' | 'telegram' | 'email' | 'copy') => {
-    const truncatedText = cleanVerseText.length > 280 ? cleanVerseText.substring(0, 277) + '...' : cleanVerseText;
-    const encodedText = encodeURIComponent(truncatedText);
-    const encodedUrl = encodeURIComponent(shareUrl);
+    // For social media, build combined text (verse + prayer if available)
+    let combinedText = '';
+    
+    if (hasBothLanguages && cleanPrayerText) {
+      const [englishVerse, lugandaVerse] = cleanVerseText.split('\n\n');
+      const [englishPrayer, lugandaPrayer] = cleanPrayerText.split('\n\n');
+      
+      combinedText = `📖 ENGLISH
+"${englishVerse}"
+
+🙏 Prayer:
+${englishPrayer}
+
+━━━━━━━━━━━━━━━━
+
+📖 LUGANDA
+"${lugandaVerse}"
+
+🙏 Okusaba:
+${lugandaPrayer}`;
+    } else {
+      combinedText = cleanPrayerText 
+        ? `${cleanVerseText}
+
+🙏 Prayer: ${cleanPrayerText}`
+        : cleanVerseText;
+    }
+    
+    // Only truncate for Twitter (280 char limit), keep full text for other platforms
+    const truncatedText = combinedText.length > 280 ? combinedText.substring(0, 277) + '...' : combinedText;
     const referenceText = `${bookName} ${chapter}:${verse}`;
 
     let url = '';
 
     if (platform === 'copy') {
       try {
-        await navigator.clipboard.writeText(`${shareText}
-
-${shareUrl}`);
-        alert('Verse copied to clipboard!');
+        await navigator.clipboard.writeText(shareText);
+        alert(cleanPrayerText ? 'Verse & Prayer copied to clipboard!' : 'Verse copied to clipboard!');
         setShowShareMenu(false);
         return;
       } catch {
@@ -50,19 +126,28 @@ ${shareUrl}`);
 
     switch (platform) {
       case 'facebook':
-        url = `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}&quote=${encodedText}%20-%20${referenceText}`;
+        // Facebook supports long text - use full combined text
+        url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}&quote=${encodeURIComponent(combinedText)}%20-%20${referenceText}`;
         break;
       case 'twitter':
-        url = `https://twitter.com/intent/tweet?text=${encodedText}%20(${referenceText})&url=${encodedUrl}`;
+        // Twitter has 280 char limit - use truncated text
+        url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(truncatedText)}%20(${referenceText})&url=${encodeURIComponent(shareUrl)}`;
         break;
       case 'whatsapp':
-        url = `https://wa.me/?text=${encodedText}%20(${referenceText})%20${encodedUrl}`;
+        // WhatsApp supports long text - use organized format
+        url = `https://wa.me/?text=${encodeURIComponent(shareText)}`;
         break;
       case 'telegram':
-        url = `https://t.me/share/url?url=${encodedUrl}&text=${encodedText}%20(${referenceText})`;
+        // Telegram supports long text - use organized format
+        url = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(combinedText)}`;
         break;
       case 'email':
-        url = `mailto:?subject=Scripture Verse: ${referenceText}&body=${encodeURIComponent(cleanVerseText)}%0A%0A${referenceText}%0A${shareUrl}`;
+        // Email supports long text - use organized format
+        const emailBody = `${combinedText}
+
+${referenceText}
+${shareUrl}`;
+        url = `mailto:?subject=Scripture Verse: ${referenceText}&body=${encodeURIComponent(emailBody)}`;
         break;
     }
 

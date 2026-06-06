@@ -1,24 +1,48 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { BookOpen, Users, Heart, Sparkles, ArrowRight, Search, Bookmark, Calendar, Flame, Grid, BookMarked, FileText, Clock, Lightbulb, MessageCircle, Link as LinkIcon, HelpCircle, Music, Download, Smartphone } from 'lucide-react';
+import { BookOpen, Users, Heart, Sparkles, ArrowRight, Search, Bookmark, Calendar, Flame, Grid, BookMarked, FileText, Clock, Lightbulb, MessageCircle as MessageCircleIcon, Link as LinkIcon, HelpCircle, Music, Download, Smartphone, Mic, Link2 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useState, useEffect } from 'react';
 import VerseOfTheDayModal from '@/components/VerseOfTheDayModal';
 import AuthProtectedLink from '@/components/AuthProtectedLink';
 import OfflineManager from '@/components/OfflineManager';
-import ThemeToggle from '@/components/ThemeToggle';
 import AppFooter from '@/app/components/AppFooter';
 import RecommendedForYou from '@/app/components/RecommendedForYou';
+import SessionTracker from '@/app/components/SessionTracker';
+import ContentNotificationBell from '@/app/components/ContentNotificationBell';
+
+// Icon mapping function
+const getFeatureIcon = (iconName: string) => {
+  const icons: Record<string, JSX.Element> = {
+    messageCircle: <MessageCircleIcon className="w-6 h-6 text-amber-400" />,
+    bookOpen: <BookOpen className="w-6 h-6 text-amber-400" />,
+    music: <Music className="w-6 h-6 text-amber-400" />,
+    heart: <Heart className="w-6 h-6 text-amber-400" />,
+    sparkles: <Sparkles className="w-6 h-6 text-amber-400" />,
+    clock: <Clock className="w-6 h-6 text-amber-400" />,
+    users: <Users className="w-6 h-6 text-amber-400" />,
+    lightbulb: <Lightbulb className="w-6 h-6 text-amber-400" />,
+    mic: <Mic className="w-6 h-6 text-amber-400" />,
+    fileText: <FileText className="w-6 h-6 text-amber-400" />,
+    link2: <Link2 className="w-6 h-6 text-amber-400" />,
+  };
+  return icons[iconName] || <BookOpen className="w-6 h-6 text-amber-400" />;
+};
 
 export default function Home() {
   const [particles, setParticles] = useState<Array<{x: number, y: number, scale: number}>>([]);
   const [isMounted, setIsMounted] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     // Mark component as mounted to prevent hydration mismatch
     setIsMounted(true);
+    
+    // Get user email for notifications
+    const email = localStorage.getItem('userEmail');
+    setUserEmail(email || undefined);
     
     // Generate particles only on client side - after mount
     // Use actual window dimensions
@@ -34,6 +58,7 @@ export default function Home() {
 
   return (
     <>
+      <SessionTracker />
       <VerseOfTheDayModal />
       <OfflineManager />
       <div className="min-h-screen relative overflow-hidden">
@@ -76,7 +101,7 @@ export default function Home() {
       {/* Content */}
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Navigation */}
-        <nav className="w-full px-3 sm:px-6 lg:px-8 pt-8 pb-3 sm:pt-10 sm:pb-6">
+        <nav className="w-full px-3 sm:px-6 lg:px-8 pt-4 pb-3 sm:pt-6 sm:pb-4">
           <div className="max-w-7xl mx-auto flex items-center justify-between">
             <motion.div 
               className="flex items-center gap-2 sm:gap-3"
@@ -85,70 +110,58 @@ export default function Home() {
               transition={{ duration: 0.5 }}
             >
               <Link href="/" className="flex items-center gap-2 sm:gap-3">
-                <div className="w-8 h-8 sm:w-14 sm:h-14 relative transform hover:scale-110 transition-transform duration-300">
+                <div className="w-8 h-8 sm:w-12 sm:h-12 relative transform hover:scale-110 transition-transform duration-300">
                   <Image 
                     src="https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png"
                     alt="Pray-Read Bible Logo"
-                    width={56}
-                    height={56}
+                    width={48}
+                    height={48}
                     className="object-contain drop-shadow-lg"
                   />
                 </div>
-                <span className="hidden sm:inline text-lg sm:text-xl font-bold text-white">Pray-Read Bible</span>
+                <span className="hidden sm:inline text-base sm:text-lg font-bold text-white">Pray-Read</span>
               </Link>
             </motion.div>
 
             <motion.div 
-              className="flex items-center gap-1 xs:gap-2 sm:gap-4"
+              className="flex items-center gap-1.5 sm:gap-3"
               initial={{ opacity: 0, x: 20 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.5, delay: 0.2 }}
             >
-              <ThemeToggle />
+              <ContentNotificationBell userEmail={userEmail} />
               <Link href="/about">
                 <motion.button 
-                  className="px-2 py-1.5 xs:px-3 xs:py-2 sm:px-4 sm:py-2 text-xs xs:text-sm sm:text-base text-white hover:text-amber-300 transition-all duration-300 font-medium relative group"
+                  className="px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm text-white hover:text-amber-300 transition-all duration-300 font-medium"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   About
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-amber-400 group-hover:w-full transition-all duration-300"></span>
                 </motion.button>
               </Link>
-              <Link href="/community">
+              <Link href="/community" className="hidden sm:block">
                 <motion.button 
-                  className="hidden xs:block px-2 py-1.5 xs:px-3 xs:py-2 sm:px-4 sm:py-2 text-xs xs:text-sm sm:text-base text-white hover:text-amber-300 transition-all duration-300 font-medium relative group"
+                  className="px-3 py-2 text-sm text-white hover:text-amber-300 transition-all duration-300 font-medium"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   Community
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-amber-400 group-hover:w-full transition-all duration-300"></span>
-                </motion.button>
-              </Link>
-              <Link href="/qa">
-                <motion.button 
-                  className="hidden sm:block px-2 py-1.5 xs:px-3 xs:py-2 sm:px-4 sm:py-2 text-xs xs:text-sm sm:text-base text-white hover:text-amber-300 transition-all duration-300 font-medium relative group"
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  Q&amp;A
-                  <span className="absolute bottom-0 left-0 w-0 h-0.5 bg-amber-400 group-hover:w-full transition-all duration-300"></span>
                 </motion.button>
               </Link>
 
               <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer">
                 <motion.button 
-                  className="px-2 py-1.5 xs:px-3 xs:py-2 sm:px-4 sm:py-2 text-xs xs:text-sm sm:text-base bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-all shadow-md hover:shadow-xl active:scale-95 font-medium flex items-center gap-1 sm:gap-2"
+                  className="px-2 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-all shadow-md hover:shadow-xl font-medium flex items-center gap-1 sm:gap-1.5 whitespace-nowrap"
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
-                  <Heart className="w-3 h-3 sm:w-4 sm:h-4" /> <span className="hidden xs:inline">Donate</span>
+                  <Heart className="w-3 h-3 sm:w-4 sm:h-4" /> Donate
                 </motion.button>
               </a>
               <Link href="/signup">
                 <motion.button 
-                  className="px-2.5 py-1.5 xs:px-4 xs:py-2 sm:px-6 sm:py-2.5 text-xs xs:text-sm sm:text-base bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-full font-semibold shadow-lg shadow-amber-500/40 hover:shadow-xl hover:shadow-amber-500/60 transform hover:scale-105 transition-all duration-300"
-                  whileHover={{ scale: 1.08 }}
+                  className="px-3 py-1.5 sm:px-5 sm:py-2 text-xs sm:text-sm bg-gradient-to-r from-amber-500 to-amber-600 text-white rounded-full font-semibold shadow-lg whitespace-nowrap"
+                  whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                 >
                   Sign Up
@@ -275,6 +288,7 @@ export default function Home() {
             >
               {[
                 { icon: BookOpen, text: 'Interactive Bible Study', color: 'from-blue-500 to-cyan-500', link: '/bible-reader' },
+                { icon: MessageCircleIcon, text: 'Q&A', color: 'from-green-500 to-emerald-500', link: '/qa' },
                 { icon: Music, text: 'Verse-Songs', color: 'from-purple-500 to-pink-500', link: '/verse-songs' },
                 { icon: Heart, text: 'Daily Devotionals', color: 'from-rose-500 to-red-500', link: '/devotional-plans' },
               ].map((feature, index) => (
@@ -372,103 +386,31 @@ export default function Home() {
             </p>
           </motion.div>
 
-          {/* Features Grid */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+          {/* Feature Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
-              {
-                icon: Search,
-                title: 'Full-Text Search',
-                description: 'Search across all Bible verses using keywords or phrases',
-                link: '/bible-reader',
-                buttonText: 'Try Now'
-              },
-              {
-                icon: Bookmark,
-                title: 'Bookmarks',
-                description: 'Save your favorite verses for quick reference and study',
-                link: '/dashboard',
-                buttonText: 'View Bookmarks'
-              },
-              {
-                icon: Calendar,
-                title: 'Devotional Plans',
-                description: 'Inspiring devotional journeys with scripture and meditation',
-                link: '/devotional-plans',
-                buttonText: 'View Plans'
-              },
-              {
-                icon: Flame,
-                title: 'Prayer Passages',
-                description: 'Inspirational prayers and passages for daily devotion',
-                link: '/bible-reader',
-                buttonText: 'Explore'
-              },
-              {
-                icon: Grid,
-                title: 'Verse Collections',
-                description: 'Organize verses into themed collections for study',
-                link: '/verse-collections',
-                buttonText: 'Create Collection'
-              },
-              {
-                icon: BookMarked,
-                title: 'Commentary',
-                description: 'Deep scholarly insights and explanations for each verse',
-                link: '/bible-reader',
-                buttonText: 'Read Commentary'
-              },
-              {
-                icon: FileText,
-                title: 'Verse Notes',
-                description: 'Add personal study notes and annotations to verses',
-                link: '/bible-reader',
-                buttonText: 'Take Notes'
-              },
-              {
-                icon: Clock,
-                title: 'Historical Context',
-                description: 'Understand the cultural and historical background of scriptures',
-                link: '/historical-context',
-                buttonText: 'Learn More'
-              },
-              {
-                icon: Lightbulb,
-                title: 'Theological Insights',
-                description: 'Explore doctrinal analysis and biblical themes',
-                link: '/theological-insights',
-                buttonText: 'Discover'
-              },
-              {
-                icon: HelpCircle,
-                title: 'Study Questions',
-                description: 'Reflection prompts to deepen your understanding',
-                link: '/qa',
-                buttonText: 'Start Study'
-              },
-              {
-                icon: LinkIcon,
-                title: 'Cross References',
-                description: 'Find related verses that connect and reinforce concepts',
-                link: '/bible-reader',
-                buttonText: 'View Links'
-              },
-              {
-                icon: Music,
-                title: 'Verse-Songs',
-                description: 'Listen to Bible verses turned into beautiful worship songs',
-                link: '/verse-songs',
-                buttonText: 'Listen Now'
-              },
-            ].map((feature, index) => (
+              { icon: 'messageCircle', title: "Study Questions", desc: "Dive deeper with contextual Q&A", route: "/qa", color: "from-green-500 to-emerald-500" },
+              { icon: 'bookOpen', title: "Devotional Plans", desc: "Daily spiritual journeys", route: "/devotional-plans", color: "from-amber-400 to-orange-500" },
+              { icon: 'bookOpen', title: "Commentary", desc: "Scholarly insights", route: "#", color: "from-blue-400 to-indigo-500" },
+              { icon: 'music', title: "Verse-Songs", desc: "Worship through scripture music", route: "/verse-songs", color: "from-violet-400 to-purple-600" },
+              { icon: 'heart', title: "Prayer Passages", desc: "Daily devotion", route: "#", color: "from-rose-400 to-red-500" },
+              { icon: 'sparkles', title: "Theological Insights", desc: "Doctrinal analysis", route: "/theological-insights", color: "from-yellow-400 to-amber-500" },
+              { icon: 'clock', title: "Historical Context", desc: "Cultural background", route: "/historical-context", color: "from-teal-400 to-cyan-500" },
+              { icon: 'users', title: "Open Discussion", desc: "Join community conversations", route: "/discussion-groups", color: "from-blue-500 to-indigo-600" },
+              { icon: 'lightbulb', title: "Share Revelations", desc: "Post spiritual insights", route: "/community/revelations", color: "from-violet-500 to-purple-600" },
+              { icon: 'mic', title: "Live Schedule", desc: "Weekly teaching sessions", route: "/community/live-teaching", color: "from-emerald-500 to-teal-600" },
+              { icon: 'fileText', title: "Verse Notes", desc: "Personal annotations", route: "#", color: "from-orange-400 to-amber-500" },
+              { icon: 'link2', title: "Cross References", desc: "Related verses", route: "#", color: "from-cyan-400 to-teal-500" },
+            ].map((feature, i) => (
               <motion.div
-                key={index}
+                key={i}
                 initial={{ opacity: 0, y: 20 }}
                 whileInView={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: index * 0.05 }}
+                transition={{ duration: 0.5, delay: i * 0.05 }}
                 viewport={{ once: true, margin: "-100px" }}
                 whileHover={{ y: -8 }}
               >
-                <Link href={feature.link}>
+                <Link href={feature.route}>
                   <div className="group relative h-full p-6 sm:p-8 rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 border border-white/10 hover:border-amber-400/50 transition-all duration-300 cursor-pointer overflow-hidden">
                     {/* Background gradient on hover */}
                     <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-amber-500/0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -478,7 +420,7 @@ export default function Home() {
                       {/* Icon */}
                       <div className="mb-4 inline-flex">
                         <div className="p-3 rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/10 border border-amber-400/30 group-hover:border-amber-400/60 group-hover:from-amber-500/30 transition-all duration-300">
-                          <feature.icon className="w-6 h-6 text-amber-400" />
+                          {getFeatureIcon(feature.icon)}
                         </div>
                       </div>
 
@@ -489,12 +431,12 @@ export default function Home() {
 
                       {/* Description */}
                       <p className="text-gray-400 text-sm sm:text-base flex-grow mb-6">
-                        {feature.description}
+                        {feature.desc}
                       </p>
 
                       {/* Button */}
                       <button className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-600 to-amber-700 text-white rounded-lg font-medium text-sm hover:from-amber-500 hover:to-amber-600 transition-all duration-300 group-hover:shadow-lg group-hover:shadow-amber-500/20">
-                        {feature.buttonText}
+                        Start Study
                         <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" />
                       </button>
                     </div>

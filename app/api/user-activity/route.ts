@@ -47,39 +47,55 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Get user's reading history
+// Get user activity stats
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const userEmail = searchParams.get('email');
+    const userEmail = searchParams.get('userEmail') || searchParams.get('email');
 
     if (!userEmail) {
       return NextResponse.json(
-        { error: 'Missing email parameter' },
+        { error: 'Missing userEmail parameter' },
         { status: 400 }
       );
     }
 
-    const history = await sql`
-      SELECT 
-        h.book_id,
-        h.chapter,
-        h.read_at,
-        h.reading_duration_seconds,
-        b.name_english as book_name,
-        b.book_number
-      FROM user_reading_history h
-      LEFT JOIN bible_books b ON h.book_id = b.id
-      WHERE h.user_email = ${userEmail}
-      ORDER BY h.read_at DESC
-      LIMIT 100
+    // Get unique books visited
+    const visitedBooksResult = await sql`
+      SELECT DISTINCT book_id
+      FROM book_visit_log
+      WHERE user_email = ${userEmail}
+      AND book_id IS NOT NULL
     `;
 
-    return NextResponse.json({ history });
+    // Get bookmark count
+    const bookmarkResult = await sql`
+      SELECT COUNT(*) as count
+      FROM verse_bookmarks
+      WHERE user_email = ${userEmail}
+    `;
+
+    // Calculate days active (unique calendar dates with any activity)
+    const daysActiveResult = await sql`
+      SELECT COUNT(DISTINCT DATE(visited_at)) as days_count
+      FROM book_visit_log
+      WHERE user_email = ${userEmail}
+    `;
+
+    const stats = {
+      visitedBooks: visitedBooksResult,
+      bookmarkCount: bookmarkResult[0]?.count || 0,
+      days_active: daysActiveResult[0]?.days_count || 0
+    };
+
+    return NextResponse.json({ 
+      success: true,
+      ...stats
+    });
   } catch (error) {
-    console.error('Error fetching reading history:', error);
+    console.error('Error fetching user activity:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch history' },
+      { error: 'Failed to fetch activity' },
       { status: 500 }
     );
   }

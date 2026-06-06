@@ -92,23 +92,25 @@ class OfflineStorage {
     }
 
     // Mark as downloaded
+    const downloadKey: any = [bookId, chapter];
     await tx.objectStore('downloads').put({
       bookId,
       chapter,
       downloadedAt: Date.now(),
-    });
+    } as any, downloadKey);
 
     await tx.done;
   }
 
   async getChapterVerses(bookId: number, chapter: number): Promise<BibleDB['verses']['value'][]> {
     const db = await this.getDB();
-    return await db.getAllFromIndex('verses', 'by-book-chapter', [bookId, chapter]);
+    return await db.getAllFromIndex('verses', 'by-book-chapter', IDBKeyRange.only([bookId, chapter]));
   }
 
   async isChapterDownloaded(bookId: number, chapter: number): Promise<boolean> {
     const db = await this.getDB();
-    const download = await db.get('downloads', [bookId, chapter]);
+    const key: any = [bookId, chapter];
+    const download = await db.get('downloads', key);
     return !!download;
   }
 
@@ -117,13 +119,14 @@ class OfflineStorage {
     const tx = db.transaction(['verses', 'downloads'], 'readwrite');
 
     // Delete verses
-    const verses = await tx.objectStore('verses').index('by-book-chapter').getAll([bookId, chapter]);
+    const verses = await tx.objectStore('verses').index('by-book-chapter').getAll(IDBKeyRange.only([bookId, chapter]));
     for (const verse of verses) {
       await tx.objectStore('verses').delete(verse.id);
     }
 
     // Remove download record
-    await tx.objectStore('downloads').delete([bookId, chapter]);
+    const key: any = [bookId, chapter];
+    await tx.objectStore('downloads').delete(key);
 
     await tx.done;
   }

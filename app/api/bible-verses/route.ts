@@ -15,7 +15,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
 
     const bookId = searchParams.get('bookId');
-    const book = searchParams.get('book'); // Can be book ID or book name
+    const book = searchParams.get('book'); // Can be book ID or book_number
+    const bookName = searchParams.get('bookName'); // Book name for deep linking
     const chapter = searchParams.get('chapter');
     const verse = searchParams.get('verse');
     const recent = searchParams.get('recent');
@@ -96,39 +97,54 @@ export async function GET(request: NextRequest) {
     }
 
     // Get verses by book and chapter
-    if ((book || bookId) && chapter) {
-      let bookIdInt: number;
+    if ((book || bookId || bookName) && chapter) {
+      let actualBookId: number;
       
-      // Resolve book parameter
-      if (book) {
-        bookIdInt = parseInt(book);
+      // Resolve book parameter - support bookName for deep linking
+      if (bookName) {
+        const decodedName = decodeURIComponent(bookName);
+        console.log(`📖 Resolving book name: "${decodedName}"`);
+        const bookResult = await sql`
+          SELECT id, book_number 
+          FROM bible_books 
+          WHERE LOWER(name_english) = LOWER(${decodedName}) 
+             OR LOWER(name_luganda) = LOWER(${decodedName})
+          LIMIT 1
+        `;
+        
+        if (bookResult.length === 0) {
+          return NextResponse.json(
+            { success: false, message: `Book not found: "${decodedName}"` },
+            { status: 404, headers }
+          );
+        }
+        
+        actualBookId = bookResult[0].id;
+        console.log(`📖 Resolved "${decodedName}" to book_id=${actualBookId}`);
+      } else if (book) {
+        const bookNum = parseInt(book);
+        // First try as book_number, then as book_id
+        const bookResult = await sql`
+          SELECT id 
+          FROM bible_books 
+          WHERE book_number = ${bookNum} OR id = ${bookNum}
+          LIMIT 1
+        `;
+        actualBookId = bookResult.length > 0 ? bookResult[0].id : bookNum;
       } else {
-        bookIdInt = parseInt(bookId!);
+        actualBookId = parseInt(bookId!);
       }
       
       const chapterInt = parseInt(chapter);
 
-      if (isNaN(bookIdInt) || isNaN(chapterInt)) {
+      if (isNaN(actualBookId) || isNaN(chapterInt)) {
         return NextResponse.json(
-          { success: false, message: `Invalid parameters: book="${book || bookId}", chapter="${chapter}"` },
+          { success: false, message: `Invalid parameters: book="${book || bookId || bookName}", chapter="${chapter}"` },
           { status: 400 }
         );
       }
 
-      console.log(`📖 Fetching verses for book_number=${bookIdInt}, chapter=${chapterInt}`);
-
-      // First, get the actual book_id from the book_number
-      const bookLookup = await sql`
-        SELECT id FROM bible_books WHERE book_number = ${bookIdInt}
-      `;
-
-      if (bookLookup.length === 0) {
-        console.error(`❌ No book found with book_number=${bookIdInt}`);
-        return NextResponse.json({ success: true, verses: [] }, { headers });
-      }
-
-      const actualBookId = bookLookup[0].id;
-      console.log(`📖 Resolved book_number ${bookIdInt} to book_id ${actualBookId}`);
+      console.log(`📖 Fetching verses for book_id=${actualBookId}, chapter=${chapterInt}`);
 
       const verses = await sql`
         SELECT 

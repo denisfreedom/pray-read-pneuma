@@ -7,9 +7,9 @@ interface ThemeStore {
   toggleTheme: () => void;
 }
 
-export const useThemeStore = create<ThemeStore>(
+export const useThemeStore = create<ThemeStore>()(
   persist(
-    (set, get) => (({
+    (set, get) => ({
       theme: 'light',
       setTheme: (theme) => set({ theme }),
       toggleTheme: () => {
@@ -17,7 +17,7 @@ export const useThemeStore = create<ThemeStore>(
         const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
         set({ theme: newTheme });
       },
-    })),
+    }),
     {
       name: 'theme-storage',
     }

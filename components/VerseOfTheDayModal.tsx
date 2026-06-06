@@ -154,10 +154,55 @@ export default function VerseOfTheDayModal() {
         setNotificationsEnabled(true);
         localStorage.setItem('notificationsEnabled', 'true');
         
+        // For mobile: register service worker and subscribe to push notifications
+        if ('serviceWorker' in navigator && 'PushManager' in window && userEmail) {
+          try {
+            const registration = await navigator.serviceWorker.register('/service-worker.js');
+            await navigator.serviceWorker.ready;
+
+            // Check if already subscribed
+            let subscription = await registration.pushManager.getSubscription();
+            
+            if (!subscription) {
+              // Subscribe to push notifications
+              const vapidPublicKey = 'BOQbzCzPQW0hBEOgzE7U5YewXP-MkiHYgG8gGEogrgX6xOc3_s9EYQUKeJ11JIB1UKuJ6lc0S075Poeq9rfmLMo';
+              
+              const urlBase64ToUint8Array = (base64String: string) => {
+                const padding = '='.repeat((4 - base64String.length % 4) % 4);
+                const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                const rawData = window.atob(base64);
+                const outputArray = new Uint8Array(rawData.length);
+                for (let i = 0; i < rawData.length; ++i) {
+                  outputArray[i] = rawData.charCodeAt(i);
+                }
+                return outputArray;
+              };
+
+              subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+              });
+
+              // Save subscription to server
+              await fetch('/api/notifications/subscribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  subscription,
+                  userEmail
+                })
+              });
+            }
+          } catch (pushError) {
+            console.error('Push notification setup error:', pushError);
+            // Continue with basic notifications even if push fails
+          }
+        }
+        
         // Send a test notification
         new Notification('Pray Read Bible', {
-          body: 'Daily verse notifications enabled! You\'ll receive a verse every day.',
-          icon: '/logo.png',
+          body: "Daily verse notifications enabled! You'll receive a verse every day.",
+          icon: '/icon-192x192.png',
         });
       }
     } catch (error) {
@@ -217,8 +262,8 @@ export default function VerseOfTheDayModal() {
   const handlePrayRead = () => {
     // Navigate to the exact verse in the bible reader
     setIsOpen(false);
-    // Use window.location for navigation to avoid RSC payload errors
-    window.location.href = `/bible-reader/${verse.book_number}/${verse.chapter}?verse=${verse.verse}#verse-${verse.verse}`;
+    // Use router for smooth navigation
+    router.push(`/bible-reader/${verse.book_number}/${verse.chapter}?verse=${verse.verse}#verse-${verse.verse}`);
   };
 
   return (

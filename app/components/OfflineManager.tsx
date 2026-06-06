@@ -30,10 +30,7 @@ export default function OfflineManager() {
         });
     }
 
-    // Initialize offline storage
-    offlineStorage.init().catch((error) => {
-      console.error('Failed to initialize offline storage:', error);
-    });
+    // Offline storage initializes automatically on first use
 
     return () => {
       window.removeEventListener('online', handleOnline);

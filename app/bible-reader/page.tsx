@@ -21,18 +21,82 @@ function BibleReaderContent() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'old' | 'new'>('old');
+  const [isOffline, setIsOffline] = useState(false);
+  const [downloadedBookIds, setDownloadedBookIds] = useState<Set<number>>(new Set());
   const router = useRouter();
   const ntRef = useRef<HTMLDivElement>(null);
   const otRef = useRef<HTMLDivElement>(null);
 
+  // Check offline status
   useEffect(() => {
-    fetch('/api/bible-books')
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data)) setBooks(data);
-      })
-      .finally(() => setLoading(false));
+    const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
+    updateOnlineStatus();
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+    };
   }, []);
+
+  // Load books (online or offline)
+  useEffect(() => {
+    const loadBooks = async () => {
+      try {
+        // Try online first
+        const response = await fetch('/api/bible-books');
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data)) {
+            setBooks(data);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (error) {
+        console.log('Online fetch failed, trying offline cache');
+      }
+
+      // Fallback to IndexedDB for offline
+      try {
+        const { getBooks } = await import('@/app/utils/offlineStorage');
+        const cachedBooks = await getBooks();
+        if (cachedBooks && cachedBooks.length > 0) {
+          setBooks(cachedBooks);
+        }
+      } catch (error) {
+        console.error('Failed to load books from offline storage:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadBooks();
+  }, []);
+
+  // Check which books are downloaded
+  useEffect(() => {
+    const checkDownloadedBooks = async () => {
+      try {
+        const { getAllFromStore } = await import('@/app/utils/offlineStorage');
+        const allVerses = await getAllFromStore('verses');
+        
+        // Get unique book IDs from verses
+        const bookIds = new Set<number>();
+        allVerses.forEach((verse: any) => {
+          if (verse.book_id) bookIds.add(verse.book_id);
+        });
+        
+        setDownloadedBookIds(bookIds);
+      } catch (error) {
+        console.error('Error checking downloaded books:', error);
+      }
+    };
+
+    if (books.length > 0) {
+      checkDownloadedBooks();
+    }
+  }, [books]);
 
   const filtered = searchTerm.trim()
     ? books.filter(b =>
@@ -68,28 +132,39 @@ function BibleReaderContent() {
     const isOT = testament === 'old';
     return (
       <div className={`grid gap-2`} style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))' }}>
-        {bookList.map(book => (
-          <Link
-            key={book.id}
-            href={`/bible-reader/${book.book_number}`}
-            className={`group flex flex-col items-center justify-center rounded-lg p-2.5 text-center transition-all duration-150 active:scale-95 touch-manipulation
-              ${isOT
-                ? 'border border-amber-400/30 hover:border-amber-400/70 hover:bg-amber-400/20'
-                : 'border border-blue-400/30 hover:border-blue-400/70 hover:bg-blue-400/20'
-              }`}
-            style={{ background: 'rgba(255,255,255,0.08)' }}
-          >
-            <span className={`text-sm font-bold leading-tight mb-0.5 ${isOT ? 'text-amber-300' : 'text-blue-300'}`}>
-              {book.abbreviation_english || book.name_english.substring(0, 4)}
-            </span>
-            <span className="text-xs text-white/50 leading-tight truncate w-full text-center">
-              {book.name_luganda?.substring(0, 8)}
-            </span>
-            <span className={`text-xs mt-0.5 ${isOT ? 'text-amber-500' : 'text-blue-500'}`}>
-              {book.total_chapters}ch
-            </span>
-          </Link>
-        ))}
+        {bookList.map(book => {
+          const isDownloaded = downloadedBookIds.has(book.id);
+          return (
+            <Link
+              key={book.id}
+              href={`/bible-reader/${book.book_number}`}
+              className={`group relative flex flex-col items-center justify-center rounded-lg p-2.5 text-center transition-all duration-150 active:scale-95 touch-manipulation
+                ${isOT
+                  ? 'border border-amber-400/30 hover:border-amber-400/70 hover:bg-amber-400/20'
+                  : 'border border-blue-400/30 hover:border-blue-400/70 hover:bg-blue-400/20'
+                }`}
+              style={{ background: 'rgba(255,255,255,0.08)' }}
+            >
+              {isDownloaded && (
+                <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border border-white/20">
+                  <span className="text-white text-xs">✓</span>
+                </div>
+              )}
+              <span className={`text-sm font-bold leading-tight mb-0.5 ${isOT ? 'text-amber-300' : 'text-blue-300'}`}>
+                {book.abbreviation_english || book.name_english.substring(0, 4)}
+              </span>
+              <span className="text-xs text-white/50 leading-tight truncate w-full text-center">
+                {book.name_luganda?.substring(0, 8)}
+              </span>
+              <span className={`text-xs mt-0.5 ${isOT ? 'text-amber-500' : 'text-blue-500'}`}>
+                {book.total_chapters}ch
+              </span>
+              {isDownloaded && (
+                <span className="text-xs text-green-400 mt-0.5">Offline</span>
+              )}
+            </Link>
+          );
+        })}
       </div>
     );
   };
@@ -98,6 +173,19 @@ function BibleReaderContent() {
     <div className="min-h-screen relative" style={{ backgroundImage: 'url(https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1778322511425_qx7i4a.jpeg)', backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
       {/* Dark overlay for readability */}
       <div className="absolute inset-0 z-0" style={{ background: 'rgba(0,0,0,0.65)' }} />
+      
+      {/* Offline Banner */}
+      {isOffline && (
+        <div className="relative z-40 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 text-center text-sm font-medium">
+          📵 You're offline · Only downloaded books are available
+          {downloadedBookIds.size > 0 && (
+            <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
+              {downloadedBookIds.size} book{downloadedBookIds.size > 1 ? 's' : ''} available
+            </span>
+          )}
+        </div>
+      )}
+      
       {/* Top bar */}
       <div className="sticky top-0 z-30 backdrop-blur-md border-b border-white/10 shadow-lg" style={{ background: 'rgba(0,0,0,0.75)' }}>
         <div className="max-w-3xl mx-auto px-3 py-2">
@@ -195,8 +283,14 @@ function BibleReaderContent() {
         )}
 
         {/* Legend */}
-        <div className="text-center text-xs text-white/30 pb-4">
-          Tap any book to open · abbreviation · luganda · chapters
+        <div className="text-center text-xs text-white/30 pb-4 space-y-1">
+          <div>Tap any book to open · abbreviation · luganda · chapters</div>
+          {downloadedBookIds.size > 0 && (
+            <div className="flex items-center justify-center gap-2 text-green-400">
+              <span className="inline-block w-3 h-3 bg-green-500 rounded-full border border-white/20"></span>
+              Books with green checkmark are available offline
+            </div>
+          )}
         </div>
       </div>
     </div>

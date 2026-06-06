@@ -14,8 +14,41 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const id = searchParams.get('id');
+    const name = searchParams.get('name');
     const language = searchParams.get('language') || 'english';
     const full = searchParams.get('full');
+
+    // If requesting a specific book by name (for deep linking)
+    if (name) {
+      const decodedName = decodeURIComponent(name);
+      const books = await sql`
+        SELECT 
+          id,
+          book_number,
+          name_english,
+          name_luganda,
+          abbreviation_english,
+          abbreviation_luganda,
+          testament,
+          total_chapters AS chapters
+        FROM bible_books 
+        WHERE LOWER(name_english) = LOWER(${decodedName}) 
+           OR LOWER(name_luganda) = LOWER(${decodedName})
+        LIMIT 1
+      `;
+
+      if (books.length === 0) {
+        return NextResponse.json(
+          { success: false, message: 'Book not found' },
+          { status: 404, headers: cacheHeaders }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        book: books[0]
+      }, { headers: cacheHeaders });
+    }
 
     // If requesting a specific book by ID or book_number
     if (id) {

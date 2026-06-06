@@ -11,15 +11,18 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: 'User email is required' }, { status: 400 });
     }
 
-    let query = 'SELECT * FROM user_verse_song_progress WHERE user_email = $1';
-    const params: any[] = [userEmail];
-
+    let progress;
     if (verseSongId) {
-      query += ' AND verse_song_id = $2';
-      params.push(parseInt(verseSongId));
+      progress = await sql`
+        SELECT * FROM user_verse_song_progress 
+        WHERE user_email = ${userEmail} AND verse_song_id = ${parseInt(verseSongId)}
+      `;
+    } else {
+      progress = await sql`
+        SELECT * FROM user_verse_song_progress WHERE user_email = ${userEmail}
+      `;
     }
 
-    const progress = await sql(query, params);
     return NextResponse.json(progress);
   } catch (error) {
     console.error('Error fetching progress:', error);

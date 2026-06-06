@@ -6,6 +6,7 @@ import { Search, ChevronDown, ChevronUp, BookOpen, X, Share2, Check, Heart } fro
 import HighlightableText from '@/app/components/HighlightableText';
 import AppNavbar from '@/app/components/AppNavbar';
 import { ScriptureHtml, useScripturePopup, ScriptureVersePopup } from '@/components/ScriptureVersePopup';
+import QAShareButton from '@/app/components/QAShareButton';
 
 
 interface ScriptureRef {
@@ -116,14 +117,65 @@ export default function QAPage() {
   const { popup, openVerse, closePopup } = useScripturePopup();
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/bible-qa').then(r => r.json()),
-      fetch('/api/bible-qa?type=topics').then(r => r.json()),
-    ]).then(([qaData, topicsData]) => {
-      setQaList(Array.isArray(qaData) ? qaData.filter((q: QA) => q.is_published) : []);
-      setTopics(Array.isArray(topicsData) ? topicsData : []);
-      setLoading(false);
-    }).catch(() => setLoading(false));
+    const fetchQAData = async () => {
+      try {
+        // Check if offline
+        if (!navigator.onLine) {
+          console.log('[QA] Device is offline, loading from IndexedDB...');
+          const { getAllFromStore } = await import('@/app/utils/offlineStorage');
+          const offlineQA = await getAllFromStore('qa');
+          const offlineTopics = offlineQA
+            .map((q: any) => q.topic)
+            .filter((t: string, i: number, arr: string[]) => arr.indexOf(t) === i)
+            .map((t: string, i: number) => ({ id: i + 1, name_en: t, name_lu: null }));
+          
+          setQaList(Array.isArray(offlineQA) ? offlineQA.filter((q: QA) => q.is_published) : []);
+          setTopics(offlineTopics);
+          setLoading(false);
+          console.log(`[QA] Loaded ${offlineQA.length} Q&A entries from offline storage`);
+          return;
+        }
+
+        // Online: fetch from API
+        const [qaData, topicsData] = await Promise.all([
+          fetch('/api/bible-qa').then(r => r.json()),
+          fetch('/api/bible-qa?type=topics').then(r => r.json()),
+        ]);
+
+        setQaList(Array.isArray(qaData) ? qaData.filter((q: QA) => q.is_published) : []);
+        setTopics(Array.isArray(topicsData) ? topicsData : []);
+        setLoading(false);
+
+        // Cache the data in IndexedDB for offline use
+        const { saveToStore } = await import('@/app/utils/offlineStorage');
+        for (const qa of qaData) {
+          await saveToStore('qa', qa);
+        }
+        console.log(`[QA] Cached ${qaData.length} Q&A entries to offline storage`);
+      } catch (error) {
+        console.error('[QA] Error loading Q&A data:', error);
+        
+        // On error, try to load from offline storage as fallback
+        try {
+          const { getAllFromStore } = await import('@/app/utils/offlineStorage');
+          const offlineQA = await getAllFromStore('qa');
+          const offlineTopics = offlineQA
+            .map((q: any) => q.topic)
+            .filter((t: string, i: number, arr: string[]) => arr.indexOf(t) === i)
+            .map((t: string, i: number) => ({ id: i + 1, name_en: t, name_lu: null }));
+          
+          setQaList(Array.isArray(offlineQA) ? offlineQA.filter((q: QA) => q.is_published) : []);
+          setTopics(offlineTopics);
+          console.log(`[QA] Loaded ${offlineQA.length} Q&A entries from offline storage (fallback)`);
+        } catch (offlineError) {
+          console.error('[QA] Error loading from offline storage:', offlineError);
+        }
+        
+        setLoading(false);
+      }
+    };
+
+    fetchQAData();
   }, []);
 
   useEffect(() => {
@@ -369,11 +421,20 @@ export default function QAPage() {
 
                             {/* Share */}
                             <div className="mt-5 ml-11 flex items-center gap-3">
+                              <QAShareButton
+                                question={qa.question}
+                                answer={qa.answer}
+                                questionLu={qa.question_lu || undefined}
+                                answerLu={qa.answer_lu || undefined}
+                                slug={qa.slug}
+                                lang={lang}
+                                topic={qa.topic}
+                              />
                               <button onClick={() => shareLink(qa.slug, qa.id)}
                                 className="flex items-center gap-1.5 text-xs text-white/30 hover:text-amber-400 transition-colors">
                                 {copied === qa.id
                                   ? <><Check className="w-3.5 h-3.5 text-emerald-400" /><span className="text-emerald-400">Link copied!</span></>
-                                  : <><Share2 className="w-3.5 h-3.5" />Share permalink</>}
+                                  : <><Share2 className="w-3.5 h-3.5" />Copy permalink</>}
                               </button>
                             </div>
                           </div>

@@ -22,6 +22,8 @@ import {
   getChapterVerses,
   getChapterContent,
   getBooks,
+  getCommentary,
+  getPrayer,
 } from '@/app/utils/offlineStorage';
 
 // Add glitter animation styles
@@ -39,9 +41,11 @@ const glitterStyle = `
   .text-highlight-pink { background-color: rgba(249, 168, 212, 0.6) !important; border-radius: 2px; }
   .text-highlight-orange { background-color: rgba(253, 186, 116, 0.6) !important; border-radius: 2px; }
   .text-underline { text-decoration: underline !important; text-decoration-color: #f97316 !important; text-underline-offset: 3px; }
-  /* Ensure verse text is selectable on mobile */
-  [data-verse] { -webkit-user-select: text; user-select: text; }
-  [data-verse] p { -webkit-user-select: text; user-select: text; cursor: text; }
+  /* Enable text selection on mobile/tablet for highlight feature */
+  [data-verse] { -webkit-user-select: text; user-select: text; -webkit-touch-callout: none; }
+  [data-verse] p { -webkit-user-select: text; user-select: text; -webkit-touch-callout: none; cursor: text; }
+  /* Allow selection in specific contexts (like note inputs) */
+  [data-verse] input, [data-verse] textarea { -webkit-user-select: text; user-select: text; }
 `;
 
 interface Verse {
@@ -89,7 +93,13 @@ function ChapterContent() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const bookNumber = parseInt(params.book as string);
+  
+  // Handle both book_number (integer) and book_name (string) for backward compatibility
+  const bookParam = params.book as string;
+  const parsedBookNumber = parseInt(bookParam);
+  const bookNumber = isNaN(parsedBookNumber) ? null : parsedBookNumber;
+  const bookName = bookNumber === null ? decodeURIComponent(bookParam) : null;
+  
   const chapterNum = parseInt(params.chapter as string);
 
   // Reading plan context (passed via query params from /reading-plans/[id])
@@ -184,7 +194,7 @@ function ChapterContent() {
     setTimeout(checkSelection, 10);
   }, [checkSelection]);
 
-  // Listen for selectionchange (fires on mobile after touch-drag selection)
+  // Listen for selectionchange (fires on mobile after touch-drag selection) and contextmenu
   useEffect(() => {
     // Load saved preferences from localStorage
     try {
@@ -199,7 +209,28 @@ function ChapterContent() {
     // Get user email for highlights
     const email = localStorage.getItem('userEmail');
     setUserEmail(email || undefined);
-  }, []);
+
+    // Listen for selectionchange event on mobile (fires after text selection completes)
+    const handleSelectionChange = () => {
+      setTimeout(checkSelection, 50);
+    };
+    document.addEventListener('selectionchange', handleSelectionChange);
+
+    // Prevent default browser context menu when text is selected
+    const handleContextMenu = (e: MouseEvent) => {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && sel.toString().trim().length >= 2) {
+        e.preventDefault();
+        setTimeout(checkSelection, 10);
+      }
+    };
+    document.addEventListener('contextmenu', handleContextMenu);
+
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, [checkSelection]);
 
   // Helper: find verse number from a DOM node by walking up to [data-verse]
   const getVerseFromNode = (node: Node): { verseNumber: number; sectionType: string } | null => {
@@ -441,9 +472,12 @@ function ChapterContent() {
     return () => clearTimeout(timer);
   }, [targetVerse, loading, verses]);
 
-  // Offline detection
+  // Offline detection (informational only, not blocking)
   useEffect(() => {
-    const update = () => setIsOffline(!navigator.onLine);
+    const update = () => {
+      const offline = !navigator.onLine;
+      setIsOffline(offline);
+    };
     update();
     window.addEventListener('online', update);
     window.addEventListener('offline', update);
@@ -579,8 +613,38 @@ function ChapterContent() {
 
     // ── PHASE 1: Critical path — book + verses only ──────────────────────────
     const fetchPrimary = async () => {
-      const timeoutId = setTimeout(() => {
+      const timeoutId = setTimeout(async () => {
         if (!cancelled) {
+          // Try IndexedDB first for offline-first behavior
+          try {
+            const [booksList, offlineVerses] = await Promise.all([
+              getBooks(),
+              getChapterVerses(bookNumber, chapterNum)
+            ]);
+            
+            if (offlineVerses && offlineVerses.length > 0) {
+              const cachedBook = booksList.find((b: any) => b.book_number === bookNumber);
+              if (cachedBook && !cancelled) {
+                const bookObj: Book = {
+                  id: cachedBook.id,
+                  book_number: cachedBook.book_number,
+                  name_english: cachedBook.name_english,
+                  name_luganda: cachedBook.name_luganda,
+                  testament: cachedBook.testament,
+                  total_chapters: cachedBook.total_chapters
+                };
+                setBook(bookObj);
+                setVerses(offlineVerses);
+                setServedFromCache(true);
+                setLoading(false);
+                return;
+              }
+            }
+          } catch (err) {
+            console.warn('⚠️ IndexedDB timeout fallback failed:', err);
+          }
+          
+          // Fallback to localStorage
           const cached = loadFromCache(bookNumber, chapterNum);
           if (cached && cached.verses.length > 0) {
             setBook(cached.book);
@@ -615,11 +679,14 @@ function ChapterContent() {
             if (cancelled) return;
             if (sessionData.success && sessionData.user?.email) {
               setUserEmail(sessionData.user.email);
-              fetch('/api/activity-log', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_email: sessionData.user.email, activity_type: 'book_visit', book_id: bookNumber, chapter: chapterNum })
-              }).catch(() => {});
+              // Log activity once we have the actual book data
+              if (bookNumber !== null) {
+                fetch('/api/activity-log', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ user_email: sessionData.user.email, activity_type: 'book_visit', book_id: bookNumber, chapter: chapterNum })
+                }).catch(() => {});
+              }
             }
           }).catch(() => {});
 
@@ -632,11 +699,21 @@ function ChapterContent() {
         }
 
         // Fetch book + verses in parallel
-        // Use `book=` (book_number path) NOT `bookId=` (raw id path) so the API resolves book_number → book_id correctly
-        console.log(`📚 [Chapter] Phase 1: fetching book=${bookNumber} chapter=${chapterNum}`);
+        // Support both book_number (integer) and book_name (string) for deep linking
+        let bookQueryParam = '';
+        if (bookNumber !== null) {
+          bookQueryParam = `id=${bookNumber}`;
+          console.log(`📚 [Chapter] Phase 1: fetching book_number=${bookNumber} chapter=${chapterNum}`);
+        } else if (bookName) {
+          bookQueryParam = `name=${encodeURIComponent(bookName)}`;
+          console.log(`📚 [Chapter] Phase 1: fetching book_name="${bookName}" chapter=${chapterNum}`);
+        }
+        
         const [bookRes, versesRes] = await Promise.all([
-          fetch(`/api/bible-books?id=${bookNumber}`),
-          fetch(`/api/bible-verses?book=${bookNumber}&chapter=${chapterNum}`)
+          fetch(`/api/bible-books?${bookQueryParam}`),
+          bookNumber !== null 
+            ? fetch(`/api/bible-verses?book=${bookNumber}&chapter=${chapterNum}`)
+            : fetch(`/api/bible-verses?bookName=${encodeURIComponent(bookName!)}&chapter=${chapterNum}`)
         ]);
 
         console.log(`📚 Book API: ${bookRes.status} | Verses API: ${versesRes.status}`);
@@ -667,14 +744,14 @@ function ChapterContent() {
         setVerses(versesList);
 
         // ── Cache to localStorage for offline use ─────────────────────────
-        if (versesList.length > 0) {
-          saveToCache(bookNumber, chapterNum, bookObj, versesList);
+        if (versesList.length > 0 && bookObj.book_number) {
+          saveToCache(bookObj.book_number, chapterNum, bookObj, versesList);
         }
 
         // ── Cache to IndexedDB for robust offline PWA support ─────────────
         try {
-          if (versesList.length > 0) {
-            await saveChapterVerses(bookNumber, chapterNum, versesList);
+          if (versesList.length > 0 && bookObj.book_number) {
+            await saveChapterVerses(bookObj.book_number, chapterNum, versesList);
             await saveChapterContent(bookObj.id, chapterNum, {
               verses: versesList,
               book: bookObj,
@@ -751,17 +828,87 @@ function ChapterContent() {
       } catch (error) {
         clearTimeout(timeoutId);
         if (!cancelled) {
-          console.warn('⚠️ [Chapter] Primary fetch error, trying cache:', error);
-          // ── Fallback: serve from localStorage cache ────────────────────
-          const cached = loadFromCache(bookNumber, chapterNum);
-          if (cached && cached.verses.length > 0) {
-            setBook(cached.book);
-            setVerses(cached.verses);
-            setServedFromCache(true);
-            setLoading(false);
-          } else {
-            setLoadError(`Failed to load chapter data. Please connect to the internet and try again.`);
-            setLoading(false);
+          console.warn('⚠️ [Chapter] Primary fetch error, trying offline cache:', error);
+          
+          // ── Fallback 1: Try IndexedDB (robust offline storage) ────────────────────
+          try {
+            const [booksList, offlineVerses] = await Promise.all([
+              getBooks(),
+              getChapterVerses(bookNumber, chapterNum)
+            ]);
+            
+            if (offlineVerses && offlineVerses.length > 0) {
+              console.log(`✅ [OFFLINE] Loaded ${offlineVerses.length} verses from IndexedDB`);
+              
+              // Find the book from cached books
+              const cachedBook = booksList.find((b: any) => b.book_number === bookNumber);
+              
+              if (cachedBook) {
+                const bookObj: Book = {
+                  id: cachedBook.id,
+                  book_number: cachedBook.book_number,
+                  name_english: cachedBook.name_english,
+                  name_luganda: cachedBook.name_luganda,
+                  testament: cachedBook.testament,
+                  total_chapters: cachedBook.total_chapters
+                };
+                setBook(bookObj);
+                setVerses(offlineVerses);
+                setServedFromCache(true);
+                setLoading(false);
+                
+                // Also load offline commentaries and prayers
+                try {
+                  const [offlineCommentaries, offlinePrayers] = await Promise.all([
+                    getCommentary(cachedBook.id, chapterNum),
+                    getPrayer(cachedBook.id, chapterNum)
+                  ]);
+                  
+                  if (offlineCommentaries && offlineCommentaries.length > 0) {
+                    const map: Record<string, Commentary> = {};
+                    offlineCommentaries.forEach((c: any) => { map[`${c.verse_number}`] = c; });
+                    setCommentaries(map);
+                  }
+                  
+                  if (offlinePrayers && offlinePrayers.length > 0) {
+                    const map: Record<string, Prayer> = {};
+                    offlinePrayers.forEach((p: any) => { map[`${p.verse_number}`] = p; });
+                    setPrayers(map);
+                  }
+                } catch (err) {
+                  console.warn('⚠️ Failed to load offline commentaries/prayers:', err);
+                }
+                
+                return; // Successfully loaded from IndexedDB
+              }
+            }
+            
+            // ── Fallback 2: Try localStorage cache ────────────────────
+            const cached = loadFromCache(bookNumber, chapterNum);
+            if (cached && cached.verses.length > 0) {
+              console.log(`✅ [OFFLINE] Loaded from localStorage cache`);
+              setBook(cached.book);
+              setVerses(cached.verses);
+              setServedFromCache(true);
+              setLoading(false);
+            } else {
+              setLoadError(`This chapter is not available offline. Please download it from the Offline Content section or connect to the internet.`);
+              setLoading(false);
+            }
+          } catch (offlineError) {
+            console.error('⚠️ [OFFLINE] Failed to load from offline storage:', offlineError);
+            
+            // Final fallback: localStorage
+            const cached = loadFromCache(bookNumber, chapterNum);
+            if (cached && cached.verses.length > 0) {
+              setBook(cached.book);
+              setVerses(cached.verses);
+              setServedFromCache(true);
+              setLoading(false);
+            } else {
+              setLoadError(`Failed to load chapter data. Please download offline content or connect to the internet.`);
+              setLoading(false);
+            }
           }
         }
       }
@@ -883,48 +1030,58 @@ function ChapterContent() {
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    const start = touchStartRef.current;
-    touchStartRef.current = null;
+    // First, check if text was selected during this touch
+    setTimeout(() => {
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString().trim().length >= 2) {
+        // Text was selected - don't do swipe navigation
+        selectionActiveRef.current = true;
+        // Trigger highlight toolbar with delay
+        setTimeout(checkSelection, 50);
+        return;
+      }
+      
+      // No text selection, proceed with swipe navigation
+      selectionActiveRef.current = false;
+      const start = touchStartRef.current;
+      touchStartRef.current = null;
 
-    // Don't trigger swipe if the user is selecting text
-    if (selectionActiveRef.current) return;
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && sel.toString().trim().length >= 2) return;
-    // Don't trigger if touch originated on a button/link
-    const target = e.target as HTMLElement;
-    if (target.closest('button, a, input, textarea, [role="button"]')) return;
+      // Don't trigger if touch originated on a button/link
+      const target = e.target as HTMLElement;
+      if (target.closest('button, a, input, textarea, [role="button"]')) return;
 
-    if (!start || loading || verses.length === 0) return;
+      if (!start || loading || verses.length === 0) return;
 
-    const endX = e.changedTouches[0].clientX;
-    const endY = e.changedTouches[0].clientY;
-    const elapsed = Date.now() - start.t;
+      const endX = e.changedTouches[0].clientX;
+      const endY = e.changedTouches[0].clientY;
+      const elapsed = Date.now() - start.t;
 
-    const dx = start.x - endX;           // positive = left swipe (next)
-    const dy = start.y - endY;
-    const absDx = Math.abs(dx);
-    const absDy = Math.abs(dy);
+      const dx = start.x - endX;           // positive = left swipe (next)
+      const dy = start.y - endY;
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
 
-    // Reject taps (< 10px movement) and long presses (> 600ms — user is selecting)
-    if (absDx < 10 && absDy < 10) return;
-    if (elapsed > 600) return;
+      // Reject taps (< 10px movement) and long presses (> 600ms — user is selecting)
+      if (absDx < 10 && absDy < 10) return;
+      if (elapsed > 600) return;
 
-    // Require a clearly horizontal gesture:
-    // • at least 80px horizontal travel
-    // • horizontal component at least 2.5× the vertical component
-    // • vertical drift under 60px (rules out diagonal scrolls)
-    const isHorizontalSwipe =
-      absDx >= 80 &&
-      absDx > absDy * 2.5 &&
-      absDy < 60;
+      // Require a clearly horizontal gesture:
+      // • at least 80px horizontal travel
+      // • horizontal component at least 2.5× the vertical component
+      // • vertical drift under 60px (rules out diagonal scrolls)
+      const isHorizontalSwipe =
+        absDx >= 80 &&
+        absDx > absDy * 2.5 &&
+        absDy < 60;
 
-    if (!isHorizontalSwipe) return;
+      if (!isHorizontalSwipe) return;
 
-    if (dx > 0 && nextChapter) {
-      window.location.href = `/bible-reader/${bookNumber}/${nextChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`;
-    } else if (dx < 0 && prevChapter) {
-      window.location.href = `/bible-reader/${bookNumber}/${prevChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`;
-    }
+      if (dx > 0 && nextChapter) {
+        window.location.href = `/bible-reader/${bookNumber}/${nextChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`;
+      } else if (dx < 0 && prevChapter) {
+        window.location.href = `/bible-reader/${bookNumber}/${prevChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`;
+      }
+    }, 10);
   };
 
   // No-op — kept so nothing referencing it breaks
@@ -1013,13 +1170,13 @@ function ChapterContent() {
       <HighlightableText
         sectionKey={sectionKey}
         html={cleaned}
-        className="leading-relaxed text-sm"
+        className={`leading-relaxed ${textSizes.body}`}
         userEmail={userEmail}
         scriptureContext={ctx}
         onVerseClick={openScriptureVerse}
       />
     );
-    return <div className="leading-relaxed" dangerouslySetInnerHTML={{ __html: cleaned }} />;
+    return <div className={`leading-relaxed ${textSizes.body}`} dangerouslySetInnerHTML={{ __html: cleaned }} />;
   };
 
   const cycleTheme = () => {
@@ -1036,11 +1193,40 @@ function ChapterContent() {
 ${verse.text_luganda}`;
     // Strip HTML tags before sharing
     const cleanVerseText = stripHtml(rawVerseText);
-    const shareText = `${book?.name_english} ${chapterNum}:${verse.verse}
+    
+    // Get prayer passage for this verse
+    const prayer = prayers[verse.verse];
+    let prayerText = '';
+    
+    if (prayer) {
+      const rawPrayerText = language === 'english' 
+        ? prayer.english_prayer 
+        : language === 'luganda' 
+        ? prayer.luganda_prayer 
+        : `${prayer.english_prayer}
+
+${prayer.luganda_prayer}`;
+      prayerText = stripHtml(rawPrayerText);
+    }
+    
+    // Create deep link URL using book_number (not book name) for reliable routing
+    const shareUrl = `${window.location.origin}/bible-reader/${book?.book_number}/${chapterNum}?verse=${verse.verse}`;
+    
+    // Build share text with verse, prayer, and deep link
+    const shareText = prayer 
+      ? `${book?.name_english} ${chapterNum}:${verse.verse}
 
 "${cleanVerseText}"
 
-Read more on Bible App`;
+🙏 Prayer:
+${prayerText}
+
+${shareUrl}`
+      : `${book?.name_english} ${chapterNum}:${verse.verse}
+
+"${cleanVerseText}"
+
+${shareUrl}`;
     
     if (navigator.share) {
       navigator.share({
@@ -1050,7 +1236,7 @@ Read more on Bible App`;
     } else {
       // Fallback: copy to clipboard
       navigator.clipboard.writeText(shareText);
-      setShareMessage('Verse copied to clipboard!');
+      setShareMessage(prayer ? 'Verse & Prayer copied to clipboard!' : 'Verse copied to clipboard!');
       setTimeout(() => setShareMessage(''), 2000);
     }
   };
@@ -1475,11 +1661,15 @@ ${verse.text_luganda}`)}
                         {/* Share Button - Social Media */}
                         <VerseShareButton
                           bookName={book.name_english}
+                          bookNumber={book.book_number}
                           chapter={chapterNum}
                           verse={verse.verse}
-                          verseText={language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}\
-\
+                          verseText={language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}
+
 ${verse.text_luganda}`}
+                          prayerText={prayers[verse.verse] ? (language === 'english' ? prayers[verse.verse].english_prayer : language === 'luganda' ? prayers[verse.verse].luganda_prayer : `${prayers[verse.verse].english_prayer}
+
+${prayers[verse.verse].luganda_prayer}`) : undefined}
                         />
 
                         <button
@@ -1498,7 +1688,7 @@ ${verse.text_luganda}`}
                         <button
                           onClick={() => toggleTab(verseKey, 'commentary')}
                           className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                            activeTab === 'commentary'
+                            expandedTabs[`${verseKey}-tab`] === 'commentary'
                               ? 'bg-orange-600 text-white'
                               : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
@@ -1508,7 +1698,7 @@ ${verse.text_luganda}`}
                         <button
                           onClick={() => toggleTab(verseKey, 'notes')}
                           className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                            activeTab === 'notes'
+                            expandedTabs[`${verseKey}-tab`] === 'notes'
                               ? 'bg-orange-600 text-white'
                               : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
@@ -1560,11 +1750,15 @@ ${verse.text_luganda}`}
                         <div className="p-1.5" title="Share verse">
                           <VerseShareButton
                             bookName={book.name_english}
+                            bookNumber={book.book_number}
                             chapter={chapterNum}
                             verse={verse.verse}
-                            verseText={language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}\
-\
+                            verseText={language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}
+
 ${verse.text_luganda}`}
+                            prayerText={prayers[verse.verse] ? (language === 'english' ? prayers[verse.verse].english_prayer : language === 'luganda' ? prayers[verse.verse].luganda_prayer : `${prayers[verse.verse].english_prayer}
+
+${prayers[verse.verse].luganda_prayer}`) : undefined}
                             className="text-sm px-2 py-1"
                           />
                         </div>
@@ -1589,7 +1783,7 @@ ${verse.text_luganda}`}
                         <button
                           onClick={() => toggleTab(verseKey, 'commentary')}
                           className={`p-2 rounded transition-colors text-lg ${
-                            activeTab === 'commentary'
+                            expandedTabs[`${verseKey}-tab`] === 'commentary'
                               ? 'bg-orange-600 text-white'
                               : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
@@ -1602,7 +1796,7 @@ ${verse.text_luganda}`}
                         <button
                           onClick={() => toggleTab(verseKey, 'notes')}
                           className={`p-2 rounded transition-colors text-lg ${
-                            activeTab === 'notes'
+                            expandedTabs[`${verseKey}-tab`] === 'notes'
                               ? 'bg-orange-600 text-white'
                               : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                           }`}
@@ -1721,7 +1915,7 @@ ${verse.text_luganda}`}
                         </div>
                       )}
 
-                      {activeTab === 'commentary' && commentaries[verse.verse] && (
+                      {expandedTabs[`${verseKey}-tab`] === 'commentary' && commentaries[verse.verse] && (
                         <div data-verse={verse.verse} data-section="commentary" className={`rounded p-4 mb-4 ${
                           theme === 'dark' ? 'bg-green-900' : theme === 'sepia' ? 'bg-blue-50' : 'bg-green-50'
                         }`}>
@@ -1758,7 +1952,7 @@ ${verse.text_luganda}`}
                         </div>
                       )}
 
-                      {activeTab === 'notes' && (
+                      {expandedTabs[`${verseKey}-tab`] === 'notes' && (
                         <div className={`rounded p-4 mb-4 ${
                           theme === 'dark' ? 'bg-yellow-900' : theme === 'sepia' ? 'bg-blue-50' : 'bg-yellow-50'
                         }`}>
@@ -1798,6 +1992,16 @@ ${verse.text_luganda}`}
                   }`}
                 >
                   📕 Intro
+                </button>
+                <button
+                  onClick={() => setActiveSidePanelTab('commentary')}
+                  className={`px-3 py-2 text-sm font-semibold transition-colors border-b-2 ${
+                    activeSidePanelTab === 'commentary'
+                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
+                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  📖 Commentary
                 </button>
                 <button
                   onClick={() => setActiveSidePanelTab('prayer')}
@@ -1841,7 +2045,7 @@ ${verse.text_luganda}`}
                               <p className={`${textSizes.label} font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
                               }`}>ENGLISH</p>
-                              <div className={`${textSizes.body} leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
                               }`}>
                                 {renderHtml(chapterIntroduction.en_introduction, `ch-intro-en-${book?.id}-${chapterNum}`)}
@@ -1853,7 +2057,7 @@ ${verse.text_luganda}`}
                               <p className={`${textSizes.label} font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
                               }`}>LUGANDA</p>
-                              <div className={`${textSizes.body} leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
                               }`}>
                                 {renderHtml(chapterIntroduction.lu_introduction, `ch-intro-lu-${book?.id}-${chapterNum}`)}
@@ -1862,7 +2066,7 @@ ${verse.text_luganda}`}
                           )}
                         </>
                       ) : (
-                        <div className={`${textSizes.body} leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                           theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
                         }`}>
                           {renderHtml(chapterLanguage === 'luganda' && chapterIntroduction.lu_introduction
@@ -1875,6 +2079,73 @@ ${verse.text_luganda}`}
                     <p className={`text-sm italic ${
                       theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
                     }`}>No chapter introduction added yet</p>
+                  )}
+                </div>
+              )}
+
+              {/* Chapter Commentary Tab */}
+              {activeSidePanelTab === 'commentary' && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                  <h3 className={`text-lg font-bold ${
+                    theme === 'dark' ? 'text-indigo-300' : theme === 'sepia' ? 'text-blue-900' : 'text-indigo-900'
+                  }`}>📖 Chapter {chapterNum} Commentary</h3>
+                  {Object.keys(commentaries).length > 0 ? (
+                    <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+                      {verses.map((verse) => {
+                        const commentary = commentaries[verse.verse];
+                        if (!commentary) return null;
+                        
+                        return (
+                          <div key={verse.verse} className={`rounded-lg p-4 border ${
+                            theme === 'dark' ? 'bg-gray-700 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 border-blue-300' : 'bg-green-50 border-green-200'
+                          }`}>
+                            <div className={`text-sm font-bold mb-2 ${
+                              theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
+                            }`}>
+                              Verse {verse.verse}
+                            </div>
+                            {chapterLanguage === 'both' ? (
+                              <div className="space-y-3">
+                                {commentary.commentary_text && (
+                                  <div>
+                                    <p className={`${textSizes.label} font-semibold mb-1 ${
+                                      theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
+                                    }`}>ENGLISH</p>
+                                    <div className={`${textSizes.body} ${
+                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
+                                    }`}>{renderHtml(commentary.commentary_text)}</div>
+                                  </div>
+                                )}
+                                {commentary.luganda_commentary_text && (
+                                  <div className={commentary.commentary_text ? `border-t pt-3 ${
+                                    theme === 'dark' ? 'border-gray-600' : theme === 'sepia' ? 'border-blue-300' : 'border-green-200'
+                                  }` : ''}>
+                                    <p className={`${textSizes.label} font-semibold mb-1 ${
+                                      theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
+                                    }`}>LUGANDA</p>
+                                    <div className={`${textSizes.body} ${
+                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
+                                    }`}>{renderHtml(commentary.luganda_commentary_text)}</div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className={`${textSizes.body} ${
+                                theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
+                              }`}>
+                                {renderHtml(chapterLanguage === 'english'
+                                  ? commentary.commentary_text
+                                  : commentary.luganda_commentary_text || commentary.commentary_text)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className={`text-sm italic ${
+                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
+                    }`}>No chapter commentary available yet</p>
                   )}
                 </div>
               )}
@@ -1906,7 +2177,7 @@ ${verse.text_luganda}`}
                               <p className={`${textSizes.label} font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
                               }`}>ENGLISH</p>
-                              <div className={`${textSizes.body} leading-relaxed rounded-lg p-4 border mb-3 max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border mb-3 max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
                               }`}>
                                 {renderHtml(chapterPrayers.en_prayer, `ch-prayer-en-${book?.id}-${chapterNum}`)}
@@ -1918,7 +2189,7 @@ ${verse.text_luganda}`}
                               <p className={`${textSizes.label} font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
                               }`}>LUGANDA</p>
-                              <div className={`${textSizes.body} leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
                               }`}>
                                 {renderHtml(chapterPrayers.lu_prayer, `ch-prayer-lu-${book?.id}-${chapterNum}`)}
@@ -1927,7 +2198,7 @@ ${verse.text_luganda}`}
                           )}
                         </>
                       ) : (
-                        <div className={`${textSizes.body} leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                           theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
                         }`}>
                           {renderHtml(chapterLanguage === 'luganda' && chapterPrayers.lu_prayer
@@ -1982,6 +2253,16 @@ ${verse.text_luganda}`}
                   📕 Intro
                 </button>
                 <button
+                  onClick={() => setActiveSidePanelTab('commentary')}
+                  className={`px-2 py-2 text-sm font-semibold transition-colors border-b-2 ${
+                    activeSidePanelTab === 'commentary'
+                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
+                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
+                  }`}
+                >
+                  📖
+                </button>
+                <button
                   onClick={() => setActiveSidePanelTab('prayer')}
                   className={`px-3 py-2 text-sm font-semibold transition-colors border-b-2 ${
                     activeSidePanelTab === 'prayer'
@@ -2023,7 +2304,7 @@ ${verse.text_luganda}`}
                               <p className={`text-xs font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
                               }`}>ENGLISH</p>
-                              <div className={`text-sm leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
                               }`}>
                                 {renderHtml(chapterIntroduction.en_introduction, `ch-intro-m-en-${book?.id}-${chapterNum}`)}
@@ -2035,7 +2316,7 @@ ${verse.text_luganda}`}
                               <p className={`text-xs font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
                               }`}>LUGANDA</p>
-                              <div className={`text-sm leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
                               }`}>
                                 {renderHtml(chapterIntroduction.lu_introduction, `ch-intro-m-lu-${book?.id}-${chapterNum}`)}
@@ -2044,7 +2325,7 @@ ${verse.text_luganda}`}
                           )}
                         </>
                       ) : (
-                        <div className={`text-sm leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                           theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
                         }`}>
                           {renderHtml(chapterLanguage === 'luganda' && chapterIntroduction.lu_introduction
@@ -2057,6 +2338,73 @@ ${verse.text_luganda}`}
                     <p className={`text-sm italic ${
                       theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
                     }`}>No chapter introduction added yet</p>
+                  )}
+                </div>
+              )}
+
+              {/* Chapter Commentary Tab (Mobile) */}
+              {activeSidePanelTab === 'commentary' && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                  <h3 className={`text-lg font-bold ${
+                    theme === 'dark' ? 'text-indigo-300' : theme === 'sepia' ? 'text-blue-900' : 'text-indigo-900'
+                  }`}>📖 Chapter {chapterNum} Commentary</h3>
+                  {Object.keys(commentaries).length > 0 ? (
+                    <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
+                      {verses.map((verse) => {
+                        const commentary = commentaries[verse.verse];
+                        if (!commentary) return null;
+                        
+                        return (
+                          <div key={verse.verse} className={`rounded-lg p-4 border ${
+                            theme === 'dark' ? 'bg-gray-700 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 border-blue-300' : 'bg-green-50 border-green-200'
+                          }`}>
+                            <div className={`text-sm font-bold mb-2 ${
+                              theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
+                            }`}>
+                              Verse {verse.verse}
+                            </div>
+                            {chapterLanguage === 'both' ? (
+                              <div className="space-y-3">
+                                {commentary.commentary_text && (
+                                  <div>
+                                    <p className={`text-xs font-semibold mb-1 ${
+                                      theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
+                                    }`}>ENGLISH</p>
+                                    <div className={`${textSizes.body} ${
+                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
+                                    }`}>{renderHtml(commentary.commentary_text)}</div>
+                                  </div>
+                                )}
+                                {commentary.luganda_commentary_text && (
+                                  <div className={commentary.commentary_text ? `border-t pt-3 ${
+                                    theme === 'dark' ? 'border-gray-600' : theme === 'sepia' ? 'border-blue-300' : 'border-green-200'
+                                  }` : ''}>
+                                    <p className={`text-xs font-semibold mb-1 ${
+                                      theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
+                                    }`}>LUGANDA</p>
+                                    <div className={`${textSizes.body} ${
+                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
+                                    }`}>{renderHtml(commentary.luganda_commentary_text)}</div>
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <div className={`${textSizes.body} ${
+                                theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
+                              }`}>
+                                {renderHtml(chapterLanguage === 'english'
+                                  ? commentary.commentary_text
+                                  : commentary.luganda_commentary_text || commentary.commentary_text)}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className={`text-sm italic ${
+                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
+                    }`}>No chapter commentary available yet</p>
                   )}
                 </div>
               )}
@@ -2086,7 +2434,7 @@ ${verse.text_luganda}`}
                               <p className={`text-xs font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
                               }`}>ENGLISH</p>
-                              <div className={`text-sm leading-relaxed rounded-lg p-4 border mb-3 max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border mb-3 max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
                               }`}>
                                 {renderHtml(chapterPrayers.en_prayer, `ch-prayer-m-en-${book?.id}-${chapterNum}`)}
@@ -2098,7 +2446,7 @@ ${verse.text_luganda}`}
                               <p className={`text-xs font-semibold mb-2 ${
                                 theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
                               }`}>LUGANDA</p>
-                              <div className={`text-sm leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                                 theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
                               }`}>
                                 {renderHtml(chapterPrayers.lu_prayer, `ch-prayer-m-lu-${book?.id}-${chapterNum}`)}
@@ -2107,7 +2455,7 @@ ${verse.text_luganda}`}
                           )}
                         </>
                       ) : (
-                        <div className={`text-sm leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${
+                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
                           theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
                         }`}>
                           {renderHtml(chapterLanguage === 'luganda' && chapterPrayers.lu_prayer

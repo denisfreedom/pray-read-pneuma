@@ -3,20 +3,17 @@ import sql from '@/app/api/utils/sql';
 import webpush from 'web-push';
 
 // Configure web-push with VAPID keys
-const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
-const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY!;
-
-if (vapidPublicKey && vapidPrivateKey) {
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(
-    'mailto:admin@bibleapp.com',
-    vapidPublicKey,
-    vapidPrivateKey
+    'mailto:support@prayreadbible.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
   );
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Verify this is an internal cron job request
+    // Verify this is a cron job or authenticated request
     const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET || 'your-secret-key';
     
@@ -26,18 +23,37 @@ export async function POST(request: NextRequest) {
 
     // Get verse of the day
     const [verseOfDay] = await sql`
-      SELECT bv.*, bb.name_english as book_name
-      FROM bible_verses bv
-      JOIN bible_books bb ON bv.book_id = bb.id
-      ORDER BY RANDOM()
+      SELECT * FROM verse_of_the_day 
+      WHERE date = CURRENT_DATE
+      ORDER BY date DESC 
       LIMIT 1
     `;
 
-    if (!verseOfDay) {
+    let verse;
+    if (verseOfDay) {
+      // Get the verse details
+      [verse] = await sql`
+        SELECT v.*, b.name_english, b.name_luganda, b.book_number
+        FROM bible_verses v
+        JOIN bible_books b ON v.book_id = b.id
+        WHERE v.id = ${verseOfDay.verse_id}
+      `;
+    } else {
+      // Fallback to random verse if no verse of the day set
+      [verse] = await sql`
+        SELECT v.*, b.name_english, b.name_luganda, b.book_number
+        FROM bible_verses v
+        JOIN bible_books b ON v.book_id = b.id
+        ORDER BY RANDOM() 
+        LIMIT 1
+      `;
+    }
+
+    if (!verse) {
       return NextResponse.json({ error: 'No verse found' }, { status: 404 });
     }
 
-    // Get all active subscriptions with enabled preferences
+    // Get all active subscriptions with enabled daily verse notifications
     const subscriptions = await sql`
       SELECT ps.*, np.notification_time, np.timezone
       FROM push_subscriptions ps
@@ -45,70 +61,73 @@ export async function POST(request: NextRequest) {
       WHERE np.daily_verse_enabled = true
     `;
 
-    const notificationPayload = {
-      title: '📖 Daily Verse',
-      body: `${verseOfDay.book_name} ${verseOfDay.chapter}:${verseOfDay.verse} - ${verseOfDay.text_english.substring(0, 100)}...`,
-      url: `/bible-reader/${verseOfDay.book_name.toLowerCase().replace(/\s+/g, '-')}/${verseOfDay.chapter}`
-    };
-
-    let successCount = 0;
-    let failureCount = 0;
-
-    // Send notifications to all subscribers
-    for (const sub of subscriptions) {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: sub.endpoint,
-            keys: {
-              p256dh: sub.p256dh,
-              auth: sub.auth
-            }
-          },
-          JSON.stringify(notificationPayload)
-        );
-
-        // Log successful notification
-        await sql`
-          INSERT INTO notification_history (user_email, notification_type, title, body, status)
-          VALUES (${sub.user_email}, 'daily_verse', ${notificationPayload.title}, ${notificationPayload.body}, 'sent')
-        `;
-
-        successCount++;
-      } catch (error: any) {
-        console.error(`Failed to send to ${sub.user_email}:`, error);
-        
-        // If subscription is expired or invalid, remove it
-        if (error.statusCode === 410 || error.statusCode === 404) {
-          await sql`
-            DELETE FROM push_subscriptions WHERE id = ${sub.id}
-          `;
-        }
-
-        // Log failed notification
-        await sql`
-          INSERT INTO notification_history (user_email, notification_type, title, body, status)
-          VALUES (${sub.user_email}, 'daily_verse', ${notificationPayload.title}, ${notificationPayload.body}, 'failed')
-        `;
-
-        failureCount++;
-      }
+    if (subscriptions.length === 0) {
+      return NextResponse.json({ 
+        success: true, 
+        message: 'No active subscriptions',
+        sent: 0 
+      });
     }
 
-    return NextResponse.json({
+    // Send notification to all subscriptions
+    const promises = subscriptions.map(async (sub: any) => {
+      const pushSubscription = {
+        endpoint: sub.endpoint,
+        keys: {
+          p256dh: sub.p256dh,
+          auth: sub.auth
+        }
+      };
+
+      const payload = JSON.stringify({
+        title: '🙏 Daily Verse - Pray Read Bible',
+        body: `${verse.text_english.substring(0, 120)}... - ${verse.name_english} ${verse.chapter}:${verse.verse}`,
+        url: `/bible-reader/${verse.book_number}/${verse.chapter}?verse=${verse.verse}`,
+        bookNumber: verse.book_number,
+        chapter: verse.chapter,
+        verse: verse.verse,
+        icon: '/icon-192.png'
+      });
+
+      try {
+        await webpush.sendNotification(pushSubscription, payload);
+        return { success: true, userEmail: sub.user_email };
+      } catch (error: any) {
+        console.error(`Send notification error for ${sub.user_email}:`, error);
+        // If subscription is invalid (expired or unsubscribed), delete it
+        if (error.statusCode === 410 || error.statusCode === 404) {
+          await sql`
+            DELETE FROM push_subscriptions 
+            WHERE endpoint = ${sub.endpoint}
+          `;
+        }
+        return { success: false, userEmail: sub.user_email, error: error.message };
+      }
+    });
+
+    const results = await Promise.all(promises);
+    const successCount = results.filter(r => r.success).length;
+
+    return NextResponse.json({ 
       success: true,
-      verse: `${verseOfDay.book_name} ${verseOfDay.chapter}:${verseOfDay.verse}`,
+      verse: {
+        reference: `${verse.name_english} ${verse.chapter}:${verse.verse}`,
+        text: verse.text_english.substring(0, 100)
+      },
       sent: successCount,
-      failed: failureCount,
-      total: subscriptions.length
+      total: subscriptions.length,
+      failed: subscriptions.length - successCount
     });
   } catch (error) {
-    console.error('Send daily notifications error:', error);
-    return NextResponse.json({ error: 'Failed to send notifications' }, { status: 500 });
+    console.error('Send daily notification error:', error);
+    return NextResponse.json({ 
+      error: 'Failed to send daily notifications',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
   }
 }
 
-// Also allow GET for testing
+// Also support GET for manual trigger during testing
 export async function GET(request: NextRequest) {
   return POST(request);
 }

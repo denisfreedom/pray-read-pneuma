@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import VisitorMap from './VisitorMap';
+import LiveVisitorsWidget from './LiveVisitorsWidget';
 
 const LOGO = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
 
@@ -75,7 +75,7 @@ export default function AppFooter() {
               <img src={LOGO} alt="Pray-Read Bible" className="h-12 w-auto" />
             </Link>
             <p className="text-white/45 text-sm leading-relaxed max-w-xs">
-              A dual-language Bible platform bringing scripture to life for the modern believer — in English & Luganda.
+              The vision of Pray-Read Bible is to recover believers from merely studying Scripture with the mind to encountering Christ as living Word in their spirit.
             </p>
             {/* Social icons */}
             <div className="flex items-center gap-2">
@@ -142,10 +142,9 @@ export default function AppFooter() {
             </ul>
           </div>
 
-          {/* Global Reach / Visitor Widget */}
+          {/* Live Visitors Widget */}
           <div className="space-y-4">
-            <h4 className="text-white/80 text-xs font-semibold uppercase tracking-widest">Global Reach</h4>
-            <VisitorMap />
+            <LiveVisitorsWidget />
           </div>
         </div>
 

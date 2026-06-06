@@ -9,22 +9,23 @@ node_modules
 # Next.js
 /.next/
 /out/
+.vercel
 
 # Production
 /build
+
+# Misc
+.DS_Store
+*.pem
 
 # Debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-.pnpm-debug.log*
 
 # Local env files
 .env*.local
 .env
-.env.production
-.env.development
-.env.staging
 
 # Vercel
 .vercel
@@ -33,15 +34,23 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Misc
-.DS_Store
-*.pem
+# Logs
+logs
+*.log
 
-# IDEs and editors
-.idea
-.vscode
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+# Documentation files that shouldn't be deployed
+public/*.md
+public/*.txt
+public/*.json
+public/BULK_IMPORT_GUIDE.md
+public/BULK_IMPORT_READY.md
+public/BULK_IMPORT_TEST_GUIDE.md
+public/CHATGPT_PROMPTS.md
+public/FULL_JSON_TEMPLATE_WITH_CROSS_REFERENCES.json
+public/IMPORT_SETUP_COMPLETE.md
+public/JSON_BULK_IMPORT_FORMAT.md
+public/QUICK_START_CHAPTER_UPLOAD.txt
+public/SINGLE_CHAPTER_JSON_TEMPLATE.json
+public/UPLOADING_BIBLE_CHAPTERS_GUIDE.md
+public/VISUAL_GUIDE.md
+public/VISUAL_TEST_GUIDE.md

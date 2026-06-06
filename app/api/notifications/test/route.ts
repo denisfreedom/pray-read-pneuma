@@ -2,14 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import sql from '@/app/api/utils/sql';
 import webpush from 'web-push';
 
-const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
-const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY!;
-
-if (vapidPublicKey && vapidPrivateKey) {
+// Configure web-push with VAPID keys
+if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
   webpush.setVapidDetails(
-    'mailto:admin@bibleapp.com',
-    vapidPublicKey,
-    vapidPrivateKey
+    'mailto:support@prayreadbible.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
   );
 }
 
@@ -30,36 +28,64 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No subscriptions found' }, { status: 404 });
     }
 
-    const notificationPayload = {
-      title: '🔔 Test Notification',
-      body: 'This is a test notification from your Bible app!',
-      url: '/'
-    };
+    // Get today's verse
+    const [verse] = await sql`
+      SELECT v.*, b.name_english, b.name_luganda, b.book_number
+      FROM bible_verses v
+      JOIN bible_books b ON v.book_id = b.id
+      WHERE v.id = (
+        SELECT id FROM bible_verses 
+        ORDER BY RANDOM() 
+        LIMIT 1
+      )
+    `;
 
-    let successCount = 0;
-
-    for (const sub of subscriptions) {
-      try {
-        await webpush.sendNotification(
-          {
-            endpoint: sub.endpoint,
-            keys: {
-              p256dh: sub.p256dh,
-              auth: sub.auth
-            }
-          },
-          JSON.stringify(notificationPayload)
-        );
-        successCount++;
-      } catch (error) {
-        console.error('Test notification error:', error);
-      }
+    if (!verse) {
+      return NextResponse.json({ error: 'No verse found' }, { status: 404 });
     }
+
+    // Send notification to all user's subscriptions
+    const promises = subscriptions.map(async (sub: any) => {
+      const pushSubscription = {
+        endpoint: sub.endpoint,
+        keys: {
+          p256dh: sub.p256dh,
+          auth: sub.auth
+        }
+      };
+
+      const payload = JSON.stringify({
+        title: 'Daily Verse - Pray Read Bible',
+        body: `${verse.text_english.substring(0, 100)}... - ${verse.name_english} ${verse.chapter}:${verse.verse}`,
+        url: `/bible-reader/${verse.book_number}/${verse.chapter}?verse=${verse.verse}`,
+        bookNumber: verse.book_number,
+        chapter: verse.chapter,
+        verse: verse.verse
+      });
+
+      try {
+        await webpush.sendNotification(pushSubscription, payload);
+        return { success: true };
+      } catch (error: any) {
+        console.error('Send notification error:', error);
+        // If subscription is invalid, delete it
+        if (error.statusCode === 410 || error.statusCode === 404) {
+          await sql`
+            DELETE FROM push_subscriptions 
+            WHERE endpoint = ${sub.endpoint}
+          `;
+        }
+        return { success: false, error: error.message };
+      }
+    });
+
+    const results = await Promise.all(promises);
+    const successCount = results.filter(r => r.success).length;
 
     return NextResponse.json({ 
       success: true, 
       sent: successCount,
-      total: subscriptions.length
+      total: subscriptions.length 
     });
   } catch (error) {
     console.error('Test notification error:', error);

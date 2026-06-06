@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { BookMarked, Bookmark, Heart, Plus, Trash2, X, ExternalLink, BookOpen, Search } from 'lucide-react';
+import { BookMarked, Bookmark, Heart, Plus, Trash2, X, ExternalLink, BookOpen, Search, Filter, Calendar, ChevronDown } from 'lucide-react';
 import AppNavbar from '@/app/components/AppNavbar';
 
 const BG = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/dashboard-bg_png.jpeg';
@@ -38,6 +38,8 @@ interface CollectionVerse {
 }
 
 type Tab = 'bookmarks' | 'collections';
+type BookFilter = 'all' | 'old-testament' | 'new-testament';
+type SortOption = 'recent' | 'oldest' | 'book-order';
 
 export default function VerseCollectionsPage() {
   const router = useRouter();
@@ -49,6 +51,9 @@ export default function VerseCollectionsPage() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [bookmarksLoading, setBookmarksLoading] = useState(false);
   const [bmSearch, setBmSearch] = useState('');
+  const [bookFilter, setBookFilter] = useState<BookFilter>('all');
+  const [sortOption, setSortOption] = useState<SortOption>('recent');
+  const [showFilters, setShowFilters] = useState(false);
 
   // Collections state
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -144,10 +149,49 @@ export default function VerseCollectionsPage() {
     fetchCollections(user.email);
   };
 
-  const filteredBookmarks = bookmarks.filter(b => {
-    const q = bmSearch.toLowerCase();
-    return !q || b.name_english?.toLowerCase().includes(q) || b.text_english?.toLowerCase().includes(q);
-  });
+  // Old Testament books (1-39)
+  const oldTestamentBooks = Array.from({ length: 39 }, (_, i) => i + 1);
+  // New Testament books (40-66)
+  const newTestamentBooks = Array.from({ length: 27 }, (_, i) => i + 40);
+
+  const filteredAndSortedBookmarks = bookmarks
+    .filter(b => {
+      // Search filter
+      const q = bmSearch.toLowerCase();
+      const matchesSearch = !q || b.name_english?.toLowerCase().includes(q) || b.text_english?.toLowerCase().includes(q);
+      
+      // Book filter (testament)
+      let matchesBook = true;
+      if (bookFilter === 'old-testament') {
+        matchesBook = oldTestamentBooks.includes(b.book_id);
+      } else if (bookFilter === 'new-testament') {
+        matchesBook = newTestamentBooks.includes(b.book_id);
+      }
+      
+      return matchesSearch && matchesBook;
+    })
+    .sort((a, b) => {
+      // Sort
+      if (sortOption === 'recent') {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      } else if (sortOption === 'oldest') {
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else { // book-order
+        if (a.book_id !== b.book_id) return a.book_id - b.book_id;
+        if (a.chapter !== b.chapter) return a.chapter - b.chapter;
+        return a.verse_number - b.verse_number;
+      }
+    });
+
+  // Group bookmarks by book for better organization
+  const bookmarksGroupedByBook = filteredAndSortedBookmarks.reduce((acc, b) => {
+    const key = b.name_english || 'Unknown';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(b);
+    return acc;
+  }, {} as Record<string, Bookmark[]>);
+
+  const bookGroups = Object.entries(bookmarksGroupedByBook);
 
   if (loading) {
     return (
@@ -167,7 +211,7 @@ export default function VerseCollectionsPage() {
 
       <AppNavbar />
 
-      <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 py-8">
+      <main className="relative z-10 max-w-6xl mx-auto px-4 sm:px-6 pt-24 sm:pt-28 pb-8">
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 bg-white/5 rounded-2xl p-1.5 border border-white/10 w-fit">
@@ -196,55 +240,187 @@ export default function VerseCollectionsPage() {
         {/* ─── BOOKMARKS TAB ─── */}
         {tab === 'bookmarks' && (
           <div>
-            {/* Search */}
-            <div className="relative mb-5 max-w-md">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
-              <input
-                type="text"
-                value={bmSearch}
-                onChange={e => setBmSearch(e.target.value)}
-                placeholder="Search bookmarks..."
-                className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/30 text-sm focus:outline-none focus:border-pink-400/50"
-              />
+            {/* Header with stats */}
+            <div className="mb-6 rounded-2xl border border-white/10 backdrop-blur-md p-5" style={{ background: 'rgba(255,255,255,0.04)' }}>
+              <div className="flex items-center justify-between flex-wrap gap-4">
+                <div>
+                  <h2 className="text-white font-bold text-xl mb-1">My Saved Verses</h2>
+                  <p className="text-white/50 text-sm">All your bookmarked verses from the Bible reader</p>
+                </div>
+                <div className="flex items-center gap-6">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-pink-400">{bookmarks.length}</div>
+                    <div className="text-white/40 text-xs mt-0.5">Total Saved</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-purple-400">{Object.keys(bookmarksGroupedByBook).length}</div>
+                    <div className="text-white/40 text-xs mt-0.5">Books</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Search & Filters */}
+            <div className="mb-5 space-y-3">
+              <div className="flex gap-3 flex-wrap">
+                {/* Search */}
+                <div className="relative flex-1 min-w-[200px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-white/40" />
+                  <input
+                    type="text"
+                    value={bmSearch}
+                    onChange={e => setBmSearch(e.target.value)}
+                    placeholder="Search verses, books..."
+                    className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/30 text-sm focus:outline-none focus:border-pink-400/50"
+                  />
+                </div>
+
+                {/* Filters Toggle */}
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${showFilters ? 'bg-pink-500/20 text-pink-400 border border-pink-400/30' : 'bg-white/5 text-white/60 border border-white/10 hover:border-white/20'}`}
+                >
+                  <Filter className="w-4 h-4" />
+                  Filters
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+
+              {/* Filter Options */}
+              {showFilters && (
+                <div className="rounded-xl border border-white/10 backdrop-blur-md p-4 space-y-3" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                  <div>
+                    <label className="text-white/60 text-xs font-medium block mb-2">Testament</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {(['all', 'old-testament', 'new-testament'] as BookFilter[]).map(f => (
+                        <button
+                          key={f}
+                          onClick={() => setBookFilter(f)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${bookFilter === f ? 'bg-pink-500/30 text-pink-300 border border-pink-400/40' : 'bg-white/5 text-white/50 border border-white/10 hover:border-white/20'}`}
+                        >
+                          {f === 'all' ? 'All Books' : f === 'old-testament' ? 'Old Testament' : 'New Testament'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-white/60 text-xs font-medium block mb-2">Sort By</label>
+                    <div className="flex gap-2 flex-wrap">
+                      {(['recent', 'oldest', 'book-order'] as SortOption[]).map(s => (
+                        <button
+                          key={s}
+                          onClick={() => setSortOption(s)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${sortOption === s ? 'bg-purple-500/30 text-purple-300 border border-purple-400/40' : 'bg-white/5 text-white/50 border border-white/10 hover:border-white/20'}`}
+                        >
+                          {s === 'recent' ? 'Recently Added' : s === 'oldest' ? 'Oldest First' : 'Bible Order'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {bookmarksLoading ? (
               <div className="text-center py-20 text-white/40">Loading bookmarks...</div>
-            ) : filteredBookmarks.length === 0 ? (
+            ) : filteredAndSortedBookmarks.length === 0 ? (
               <div className="text-center py-20">
                 <Bookmark className="w-16 h-16 text-white/10 mx-auto mb-4" />
-                <p className="text-white/50 text-lg font-medium">No bookmarks yet</p>
-                <p className="text-white/30 text-sm mt-2">Tap the bookmark icon on any verse while reading to save it here.</p>
-                <Link href="/bible-reader" className="inline-flex items-center gap-2 mt-6 px-6 py-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white text-sm font-semibold hover:opacity-90 transition-all">
-                  <BookOpen className="w-4 h-4" /> Start Reading
-                </Link>
+                <p className="text-white/50 text-lg font-medium">
+                  {bookmarks.length === 0 ? 'No bookmarks yet' : 'No matching bookmarks'}
+                </p>
+                <p className="text-white/30 text-sm mt-2">
+                  {bookmarks.length === 0 
+                    ? 'Tap the bookmark icon on any verse while reading to save it here.'
+                    : 'Try adjusting your search or filters.'}
+                </p>
+                {bookmarks.length === 0 && (
+                  <Link href="/bible-reader" className="inline-flex items-center gap-2 mt-6 px-6 py-3 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white text-sm font-semibold hover:opacity-90 transition-all">
+                    <BookOpen className="w-4 h-4" /> Start Reading
+                  </Link>
+                )}
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {filteredBookmarks.map(b => (
-                  <div key={b.id} className="group rounded-2xl border border-white/10 backdrop-blur-md p-4 hover:border-pink-400/30 transition-all" style={{ background: 'rgba(255,255,255,0.04)' }}>
-                    <div className="flex items-start justify-between gap-2 mb-3">
-                      <Link
-                        href={`/bible-reader/${b.book_id}/${b.chapter}`}
-                        className="flex items-center gap-1.5 text-pink-400 hover:text-pink-300 font-bold text-sm transition-colors"
-                      >
-                        <Bookmark className="w-3.5 h-3.5" />
-                        {b.name_english} {b.chapter}:{b.verse_number}
-                        <ExternalLink className="w-3 h-3 opacity-60" />
-                      </Link>
-                      <button
-                        onClick={() => deleteBookmark(b)}
-                        className="p-1.5 rounded-lg bg-red-500/0 hover:bg-red-500/20 text-red-400/0 group-hover:text-red-400/60 hover:!text-red-400 transition-all"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                    {b.text_english && (
-                      <p className="text-white/80 text-sm leading-relaxed line-clamp-3 italic">"{b.text_english}"</p>
-                    )}
-                    <p className="text-white/25 text-xs mt-2">{new Date(b.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</p>
+              <div className="space-y-5">
+                {/* Grouped by Book View */}
+                {sortOption === 'book-order' ? (
+                  <div className="space-y-5">
+                    {bookGroups.map(([bookName, verses]) => (
+                      <div key={bookName} className="rounded-2xl border border-white/10 backdrop-blur-md overflow-hidden" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                        {/* Book Header */}
+                        <div className="bg-gradient-to-r from-pink-500/20 to-purple-500/20 border-b border-white/10 px-5 py-3">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-white font-bold text-base">{bookName}</h3>
+                            <span className="text-pink-400 text-xs font-medium">{verses.length} {verses.length === 1 ? 'verse' : 'verses'}</span>
+                          </div>
+                        </div>
+                        {/* Verses */}
+                        <div className="divide-y divide-white/5">
+                          {verses.map(b => (
+                            <div key={b.id} className="group p-4 hover:bg-white/5 transition-colors">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex-1 min-w-0">
+                                  <Link
+                                    href={`/bible-reader/${b.book_id}/${b.chapter}`}
+                                    className="inline-flex items-center gap-1.5 text-pink-400 hover:text-pink-300 font-bold text-sm transition-colors mb-2"
+                                  >
+                                    <Bookmark className="w-3.5 h-3.5" />
+                                    Chapter {b.chapter}:{b.verse_number}
+                                    <ExternalLink className="w-3 h-3 opacity-60" />
+                                  </Link>
+                                  {b.text_english && (
+                                    <p className="text-white/80 text-sm leading-relaxed italic">"{b.text_english}"</p>
+                                  )}
+                                  <p className="text-white/25 text-xs mt-2 flex items-center gap-1.5">
+                                    <Calendar className="w-3 h-3" />
+                                    {new Date(b.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => deleteBookmark(b)}
+                                  className="p-1.5 rounded-lg bg-red-500/0 hover:bg-red-500/20 text-red-400/0 group-hover:text-red-400/60 hover:!text-red-400 transition-all flex-shrink-0"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  /* Card Grid View */
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {filteredAndSortedBookmarks.map(b => (
+                      <div key={b.id} className="group rounded-2xl border border-white/10 backdrop-blur-md p-4 hover:border-pink-400/30 transition-all" style={{ background: 'rgba(255,255,255,0.04)' }}>
+                        <div className="flex items-start justify-between gap-2 mb-3">
+                          <Link
+                            href={`/bible-reader/${b.book_id}/${b.chapter}`}
+                            className="flex items-center gap-1.5 text-pink-400 hover:text-pink-300 font-bold text-sm transition-colors"
+                          >
+                            <Bookmark className="w-3.5 h-3.5" />
+                            {b.name_english} {b.chapter}:{b.verse_number}
+                            <ExternalLink className="w-3 h-3 opacity-60" />
+                          </Link>
+                          <button
+                            onClick={() => deleteBookmark(b)}
+                            className="p-1.5 rounded-lg bg-red-500/0 hover:bg-red-500/20 text-red-400/0 group-hover:text-red-400/60 hover:!text-red-400 transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                        {b.text_english && (
+                          <p className="text-white/80 text-sm leading-relaxed line-clamp-3 italic">"{b.text_english}"</p>
+                        )}
+                        <div className="flex items-center gap-1.5 text-white/25 text-xs mt-3">
+                          <Calendar className="w-3 h-3" />
+                          {new Date(b.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>

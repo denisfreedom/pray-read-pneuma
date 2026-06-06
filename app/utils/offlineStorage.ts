@@ -2,7 +2,7 @@
 // Uses IndexedDB for large Bible content storage
 
 const DB_NAME = 'PrayReadBibleDB';
-const DB_VERSION = 1;
+const DB_VERSION = 4;
 
 // Store names
 const STORES = {
@@ -15,6 +15,7 @@ const STORES = {
   THEOLOGICAL_INSIGHTS: 'theological_insights',
   HISTORICAL_CONTEXT: 'historical_context',
   VERSE_OF_THE_DAY: 'verse_of_the_day',
+  QA: 'qa',
 };
 
 // Initialize IndexedDB
@@ -32,13 +33,25 @@ export function initDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
+      const transaction = (event.target as IDBOpenDBRequest).transaction;
 
-      // Create object stores
+      // Create or upgrade verses store
+      let versesStore: IDBObjectStore;
       if (!db.objectStoreNames.contains(STORES.VERSES)) {
-        const versesStore = db.createObjectStore(STORES.VERSES, { keyPath: 'id', autoIncrement: true });
-        versesStore.createIndex('book_chapter_verse', ['book_number', 'chapter', 'verse_number'], { unique: false });
-        versesStore.createIndex('book_chapter', ['book_number', 'chapter'], { unique: false });
+        versesStore = db.createObjectStore(STORES.VERSES, { keyPath: 'id', autoIncrement: true });
+      } else {
+        versesStore = transaction!.objectStore(STORES.VERSES);
+        // Delete old indexes if they exist
+        if (versesStore.indexNames.contains('book_chapter_verse')) {
+          versesStore.deleteIndex('book_chapter_verse');
+        }
+        if (versesStore.indexNames.contains('book_chapter')) {
+          versesStore.deleteIndex('book_chapter');
+        }
       }
+      // Create new indexes with correct column names
+      versesStore.createIndex('book_chapter_verse', ['book_id', 'chapter', 'verse'], { unique: false });
+      versesStore.createIndex('book_chapter', ['book_id', 'chapter'], { unique: false });
 
       if (!db.objectStoreNames.contains(STORES.CHAPTERS)) {
         const chaptersStore = db.createObjectStore(STORES.CHAPTERS, { keyPath: 'id' });
@@ -54,9 +67,17 @@ export function initDB(): Promise<IDBDatabase> {
         commentariesStore.createIndex('book_chapter', ['book_id', 'chapter'], { unique: false });
       }
 
+      let prayersStore: IDBObjectStore;
       if (!db.objectStoreNames.contains(STORES.PRAYERS)) {
-        const prayersStore = db.createObjectStore(STORES.PRAYERS, { keyPath: 'id', autoIncrement: true });
+        prayersStore = db.createObjectStore(STORES.PRAYERS, { keyPath: 'id', autoIncrement: true });
         prayersStore.createIndex('book_chapter', ['book_id', 'chapter'], { unique: false });
+        prayersStore.createIndex('book_chapter_verse', ['book_id', 'chapter', 'verse_number'], { unique: false });
+      } else {
+        prayersStore = transaction!.objectStore(STORES.PRAYERS);
+        // Add the verse-specific index if it doesn't exist (for DB version upgrade)
+        if (!prayersStore.indexNames.contains('book_chapter_verse')) {
+          prayersStore.createIndex('book_chapter_verse', ['book_id', 'chapter', 'verse_number'], { unique: false });
+        }
       }
 
       if (!db.objectStoreNames.contains(STORES.DEVOTIONALS)) {
@@ -76,25 +97,37 @@ export function initDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORES.VERSE_OF_THE_DAY)) {
         const votdStore = db.createObjectStore(STORES.VERSE_OF_THE_DAY, { keyPath: 'date' });
       }
+
+      if (!db.objectStoreNames.contains(STORES.QA)) {
+        db.createObjectStore(STORES.QA, { keyPath: 'id', autoIncrement: true });
+      }
     };
   });
 }
 
 // Generic save function
 export async function saveToStore<T>(storeName: string, data: T): Promise<void> {
+  console.log(`[INDEXEDDB] Writing single item to store "${storeName}"...`);
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([storeName], 'readwrite');
     const store = transaction.objectStore(storeName);
     const request = store.put(data);
 
-    request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      console.log(`[INDEXEDDB] ✓ Successfully wrote item to IndexedDB store "${storeName}" (persisted to device storage)`);
+      resolve();
+    };
+    request.onerror = () => {
+      console.error(`[INDEXEDDB] ✗ Error writing to store "${storeName}":`, request.error);
+      reject(request.error);
+    };
   });
 }
 
 // Generic bulk save function
 export async function saveBulkToStore<T>(storeName: string, dataArray: T[]): Promise<void> {
+  console.log(`[INDEXEDDB] Writing ${dataArray.length} items to store "${storeName}"...`);
   const db = await initDB();
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([storeName], 'readwrite');
@@ -108,16 +141,19 @@ export async function saveBulkToStore<T>(storeName: string, dataArray: T[]): Pro
       request.onsuccess = () => {
         completed++;
         if (completed === dataArray.length && !hasError) {
+          console.log(`[INDEXEDDB] ✓ Successfully wrote all ${dataArray.length} items to IndexedDB store "${storeName}" (persisted to device storage)`);
           resolve();
         }
       };
       request.onerror = () => {
         hasError = true;
+        console.error(`[INDEXEDDB] ✗ Error writing to store "${storeName}":`, request.error);
         reject(request.error);
       };
     });
 
     if (dataArray.length === 0) {
+      console.log(`[INDEXEDDB] No items to write to store "${storeName}"`);
       resolve();
     }
   });
@@ -194,13 +230,29 @@ export async function clearStore(storeName: string): Promise<void> {
 }
 
 // Bible-specific helper functions
+// Note: All functions below save BOTH English and Luganda content from the API
 
-export async function saveChapterVerses(bookNumber: number, chapter: number, verses: any[]): Promise<void> {
-  return saveBulkToStore(STORES.VERSES, verses);
+export async function saveChapterVerses(bookId: number, chapter: number, verses: any[]): Promise<void> {
+  console.log(`[STORAGE] Saving ${verses.length} verses (English & Luganda) for book ${bookId} chapter ${chapter} to IndexedDB`);
+  try {
+    await saveBulkToStore(STORES.VERSES, verses);
+    console.log(`[STORAGE] ✓ Successfully saved ${verses.length} verses to IndexedDB for book ${bookId} chapter ${chapter}`);
+    
+    // Verify the write operation by reading back from IndexedDB
+    const savedVerses = await getByIndex(STORES.VERSES, 'book_chapter', [bookId, chapter]);
+    console.log(`[STORAGE] ✓ Verification: ${savedVerses.length} verses confirmed in IndexedDB (persisted to device storage)`);
+    
+    if (savedVerses.length !== verses.length) {
+      console.warn(`[STORAGE] ⚠ Warning: Saved ${verses.length} verses but only ${savedVerses.length} were verified in IndexedDB for book ${bookId} chapter ${chapter}`);
+    }
+  } catch (error) {
+    console.error(`[STORAGE ERROR] ✗ Failed to save verses for book ${bookId} chapter ${chapter}:`, error);
+    throw error;
+  }
 }
 
-export async function getChapterVerses(bookNumber: number, chapter: number): Promise<any[]> {
-  return getByIndex(STORES.VERSES, 'book_chapter', [bookNumber, chapter]);
+export async function getChapterVerses(bookId: number, chapter: number): Promise<any[]> {
+  return getByIndex(STORES.VERSES, 'book_chapter', [bookId, chapter]);
 }
 
 export async function saveChapterContent(bookId: number, chapter: number, content: any): Promise<void> {
@@ -227,6 +279,7 @@ export async function getBooks(): Promise<any[]> {
 }
 
 export async function saveCommentary(bookId: number, chapter: number, commentary: any): Promise<void> {
+  // Saves commentary with both English and Luganda content
   const commentaryData = {
     book_id: bookId,
     chapter,
@@ -241,6 +294,7 @@ export async function getCommentary(bookId: number, chapter: number): Promise<an
 }
 
 export async function savePrayer(bookId: number, chapter: number, prayer: any): Promise<void> {
+  // Saves prayer with both English and Luganda content
   const prayerData = {
     book_id: bookId,
     chapter,
@@ -251,6 +305,22 @@ export async function savePrayer(bookId: number, chapter: number, prayer: any): 
 }
 
 export async function getPrayer(bookId: number, chapter: number): Promise<any[]> {
+  return getByIndex(STORES.PRAYERS, 'book_chapter', [bookId, chapter]);
+}
+
+export async function saveVersePrayer(bookId: number, chapter: number, verseNumber: number, prayer: any): Promise<void> {
+  // Saves verse prayer with both English and Luganda content
+  const prayerData = {
+    book_id: bookId,
+    chapter,
+    verse_number: verseNumber,
+    ...prayer,
+    cached_at: new Date().toISOString(),
+  };
+  return saveToStore(STORES.PRAYERS, prayerData);
+}
+
+export async function getVersePrayers(bookId: number, chapter: number): Promise<any[]> {
   return getByIndex(STORES.PRAYERS, 'book_chapter', [bookId, chapter]);
 }
 

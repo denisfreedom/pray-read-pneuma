@@ -140,7 +140,7 @@ export async function GET(request: NextRequest) {
         vvl.verse_number,
         vvl.created_at
       FROM verse_view_log vvl
-      LEFT JOIN bible_books bb ON vvl.book_id = bb.id
+      LEFT JOIN bible_books bb ON vvl.book_id = bb.book_number
       WHERE vvl.user_email = ${userEmail}
       ORDER BY vvl.created_at DESC
       LIMIT ${limit}
@@ -156,7 +156,7 @@ export async function GET(request: NextRequest) {
         pal.verse_number,
         pal.created_at
       FROM prayer_activity_log pal
-      LEFT JOIN bible_books bb ON pal.book_id = bb.id
+      LEFT JOIN bible_books bb ON pal.book_id = bb.book_number
       WHERE pal.user_email = ${userEmail} AND pal.action = 'view'
       ORDER BY pal.created_at DESC
       LIMIT ${limit}
@@ -172,7 +172,7 @@ export async function GET(request: NextRequest) {
         pal.verse_number,
         pal.created_at
       FROM prayer_activity_log pal
-      LEFT JOIN bible_books bb ON pal.book_id = bb.id
+      LEFT JOIN bible_books bb ON pal.book_id = bb.book_number
       WHERE pal.user_email = ${userEmail} AND pal.action = 'expand'
       ORDER BY pal.created_at DESC
       LIMIT ${limit}
@@ -188,7 +188,7 @@ export async function GET(request: NextRequest) {
         NULL as verse_number,
         bvl.visited_at as created_at
       FROM book_visit_log bvl
-      LEFT JOIN bible_books bb ON bvl.book_id = bb.id
+      LEFT JOIN bible_books bb ON bvl.book_id = bb.book_number
       WHERE bvl.user_email = ${userEmail}
       ORDER BY bvl.visited_at DESC
       LIMIT ${limit}
@@ -204,7 +204,7 @@ export async function GET(request: NextRequest) {
         vb.verse_number,
         vb.created_at
       FROM verse_bookmarks vb
-      LEFT JOIN bible_books bb ON vb.book_id = bb.id
+      LEFT JOIN bible_books bb ON vb.book_id = bb.book_number
       WHERE vb.user_email = ${userEmail}
       ORDER BY vb.created_at DESC
       LIMIT ${limit}

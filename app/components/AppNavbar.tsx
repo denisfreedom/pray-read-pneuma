@@ -35,7 +35,7 @@ export default function AppNavbar() {
 
   return (
     <header
-      className="fixed top-0 left-0 right-0 z-50 transition-all duration-300"
+      className="fixed top-0 left-0 right-0 z-[9999] transition-all duration-300"
       style={{
         background: scrolled ? 'rgba(8,8,14,0.92)' : 'rgba(8,8,14,0.75)',
         backdropFilter: 'blur(20px)',
@@ -44,24 +44,24 @@ export default function AppNavbar() {
         boxShadow: scrolled ? '0 4px 30px rgba(0,0,0,0.4)' : 'none',
       }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between" style={{ height: '72px' }}>
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 sm:h-18 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2.5 flex-shrink-0">
-          <div className="relative w-10 h-10 sm:w-12 sm:h-12">
+        <Link href="/" className="flex items-center gap-2 flex-shrink-0">
+          <div className="relative w-9 h-9 sm:w-11 sm:h-11">
             <Image src={LOGO} alt="Pray-Read Bible" fill className="object-contain drop-shadow-lg" />
           </div>
-          <span className="hidden sm:inline text-white font-semibold text-base tracking-wide">
+          <span className="hidden sm:inline text-white font-semibold text-sm sm:text-base tracking-wide whitespace-nowrap">
             Pray-Read <span className="text-amber-400">Bible</span>
           </span>
         </Link>
 
         {/* Desktop Nav */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden sm:flex items-center gap-0.5 lg:gap-1 flex-1 justify-center mx-2">
           {navLinks.map(({ href, label }) => (
             <Link
               key={href}
               href={href}
-              className={`relative px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 group ${
+              className={`relative px-1.5 sm:px-2 lg:px-3 py-2 text-xs lg:text-sm font-medium rounded-lg transition-all duration-200 group whitespace-nowrap ${
                 isActive(href)
                   ? 'text-amber-400'
                   : 'text-white/60 hover:text-white hover:bg-white/5'
@@ -76,24 +76,34 @@ export default function AppNavbar() {
         </nav>
 
         {/* Desktop CTA */}
-        <div className="hidden md:flex items-center gap-2.5">
+        <div className="hidden lg:flex items-center gap-1.5 flex-shrink-0">
           <a
             href="https://store.pesapal.com/donatetoprayreadbibleproject"
             target="_blank"
             rel="noopener noreferrer"
-            className="px-4 py-2 rounded-lg text-sm font-medium border border-amber-400/40 text-amber-300 hover:bg-amber-400/10 transition-all"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-amber-400/40 text-amber-300 hover:bg-amber-400/10 transition-all whitespace-nowrap"
           >
             ♥ Donate
           </a>
           <Link
             href="/user-login"
-            className="px-4 py-2 rounded-lg text-sm font-medium text-white/70 hover:text-white hover:bg-white/5 transition-all"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-white/70 hover:text-white hover:bg-white/5 transition-all whitespace-nowrap"
           >
             Log In
           </Link>
           <Link
             href="/signup"
-            className="px-5 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-400 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/20"
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-400 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/20 whitespace-nowrap"
+          >
+            Sign Up
+          </Link>
+        </div>
+        
+        {/* Medium screen - just signup */}
+        <div className="hidden md:flex lg:hidden items-center gap-2 flex-shrink-0">
+          <Link
+            href="/signup"
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-gradient-to-r from-amber-500 to-amber-600 text-white hover:from-amber-400 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/20 whitespace-nowrap"
           >
             Sign Up
           </Link>
@@ -114,15 +124,15 @@ export default function AppNavbar() {
       {/* Mobile Menu */}
       {mobileOpen && (
         <div
-          className="md:hidden border-t"
+          className="sm:hidden border-t relative z-50"
           style={{ background: 'rgba(8,8,14,0.98)', borderColor: 'rgba(255,255,255,0.07)' }}
         >
-          <nav className="px-4 py-4 space-y-1">
+          <nav className="px-3 py-3 space-y-1">
             {navLinks.map(({ href, label }) => (
               <Link
                 key={href}
                 href={href}
-                className={`block py-3 px-4 rounded-xl text-sm font-medium transition-colors ${
+                className={`block py-2.5 px-3 rounded-lg text-sm font-medium transition-colors ${
                   isActive(href)
                     ? 'bg-amber-500/10 text-amber-400 border border-amber-400/20'
                     : 'text-white/60 hover:text-white hover:bg-white/5'
@@ -132,21 +142,21 @@ export default function AppNavbar() {
               </Link>
             ))}
           </nav>
-          <div className="px-4 pb-5 pt-2 border-t space-y-2" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          <div className="px-3 pb-4 pt-2 border-t space-y-2" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
             <a
               href="https://store.pesapal.com/donatetoprayreadbibleproject"
               target="_blank"
               rel="noopener noreferrer"
-              className="block text-center py-3 rounded-xl text-sm font-medium border border-amber-400/30 text-amber-300"
+              className="block text-center py-2.5 rounded-lg text-sm font-medium border border-amber-400/30 text-amber-300"
             >
               ♥ Donate
             </a>
-            <Link href="/user-login" className="block text-center py-3 rounded-xl text-sm font-medium bg-white/5 text-white/70">
+            <Link href="/user-login" className="block text-center py-2.5 rounded-lg text-sm font-medium bg-white/5 text-white/70">
               Log In
             </Link>
             <Link
               href="/signup"
-              className="block text-center py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-amber-500 to-amber-600 text-white"
+              className="block text-center py-2.5 rounded-lg text-sm font-semibold bg-gradient-to-r from-amber-500 to-amber-600 text-white"
             >
               Sign Up
             </Link>

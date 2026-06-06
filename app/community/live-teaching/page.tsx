@@ -4,11 +4,10 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import {
   ArrowLeft, Radio, Play, Pause, Volume2, VolumeX,
-  Maximize, Minimize, Headphones, Tv, Loader2, RefreshCw, Users
+  Maximize, Minimize, Headphones, Tv, Loader2, RefreshCw, Users, Send, Reply, X
 } from 'lucide-react';
 import AppNavbar from '@/app/components/AppNavbar';
 const HLS_URL = 'https://panel.ionflixtvs.com:3540/hybrid/play.m3u8';
-const CHAT_URL = 'https://panel.ionflixtvs.com/chat/prayreadlivestream';
 const VIEWERS_URL = 'https://panel.ionflixtvs.com/viewer-widget/prayreadlivestream';
 
 const goldGradient: React.CSSProperties = {
@@ -22,6 +21,16 @@ interface StreamConfig {
   is_live: boolean;
   stream_title: string;
   stream_description: string;
+}
+
+interface ChatMessage {
+  id: number;
+  user_name: string;
+  message: string;
+  created_at: string;
+  reply_to_id?: number | null;
+  reply_to_name?: string | null;
+  reply_to_message?: string | null;
 }
 
 export default function LiveTeachingPage() {
@@ -39,6 +48,16 @@ export default function LiveTeachingPage() {
   const [streamError, setStreamError] = useState(false);
   const [started, setStarted] = useState(false);
 
+  // Chat states
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [userName, setUserName] = useState('');
+  const [hasSetName, setHasSetName] = useState(false);
+  const [messageInput, setMessageInput] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<ChatMessage | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+
   // Fetch stream config
   useEffect(() => {
     fetch('/api/live-stream-config')
@@ -46,6 +65,81 @@ export default function LiveTeachingPage() {
       .then(setConfig)
       .catch(() => setConfig({ is_live: false, stream_title: 'Live Teaching', stream_description: '' }));
   }, []);
+
+  // Fetch chat messages
+  const fetchChatMessages = useCallback(() => {
+    fetch('/api/live-chat')
+      .then(r => r.json())
+      .then(data => {
+        setChatMessages(data.reverse());
+      })
+      .catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    fetchChatMessages();
+    const interval = setInterval(fetchChatMessages, 3000); // Poll every 3 seconds
+    return () => clearInterval(interval);
+  }, [fetchChatMessages]);
+
+  // Removed auto-scroll to allow manual scrolling
+  // Users can now scroll freely without being interrupted
+
+  // Handle name submission
+  const handleSetName = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (userName.trim()) {
+      setHasSetName(true);
+      localStorage.setItem('liveChat_userName', userName.trim());
+    }
+  };
+
+  // Load saved name
+  useEffect(() => {
+    const saved = localStorage.getItem('liveChat_userName');
+    if (saved) {
+      setUserName(saved);
+      setHasSetName(true);
+    }
+  }, []);
+
+  // Send message
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!messageInput.trim() || sendingMessage) return;
+
+    setSendingMessage(true);
+    try {
+      await fetch('/api/live-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_name: userName,
+          message: messageInput.trim(),
+          reply_to_id: replyingTo?.id,
+          reply_to_name: replyingTo?.user_name,
+          reply_to_message: replyingTo?.message
+        })
+      });
+      setMessageInput('');
+      setReplyingTo(null);
+      fetchChatMessages();
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  // Handle reply click
+  const handleReplyClick = (msg: ChatMessage) => {
+    setReplyingTo(msg);
+  };
+
+  // Cancel reply
+  const cancelReply = () => {
+    setReplyingTo(null);
+  };
 
   // Load HLS
   const loadHLS = useCallback(() => {
@@ -393,21 +487,173 @@ export default function LiveTeachingPage() {
             {/* Right: Live Chat */}
             <div className="w-full lg:w-80 xl:w-96 flex-shrink-0">
               <div className="rounded-2xl border border-white/8 overflow-hidden flex flex-col" style={{ height: '520px', background: '#0a0a0a' }}>
-                <div className="px-4 py-3 border-b border-white/8 flex items-center gap-2 flex-shrink-0">
-                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                  <span className="text-sm font-semibold text-white/70">Live Chat</span>
+                {/* Chat Header */}
+                <div className="px-4 py-3 border-b border-white/8 flex items-center justify-between flex-shrink-0">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                    <span className="text-sm font-semibold text-white/70">Chat with Pastor Denis</span>
+                  </div>
+                  {hasSetName && (
+                    <button
+                      onClick={() => {
+                        setHasSetName(false);
+                        localStorage.removeItem('liveChat_userName');
+                      }}
+                      className="text-xs text-white/40 hover:text-white/70 transition-colors"
+                    >
+                      Change name
+                    </button>
+                  )}
                 </div>
-                <div className="flex-1 min-h-0">
-                  <iframe
-                    src={CHAT_URL}
-                    height="100%"
-                    width="100%"
-                    frameBorder="0"
-                    loading="lazy"
-                    title="Live Chat"
-                    className="w-full h-full"
-                  />
-                </div>
+
+                {/* Name Entry Screen */}
+                {!hasSetName ? (
+                  <div className="flex-1 flex flex-col items-center justify-center px-6">
+                    <div className="w-16 h-16 rounded-full bg-amber-500/20 border border-amber-400/40 flex items-center justify-center mb-4">
+                      <Users className="w-7 h-7 text-amber-400" />
+                    </div>
+                    <h3 className="text-white font-semibold text-lg mb-2">Join the Conversation</h3>
+                    <p className="text-white/50 text-sm text-center mb-6">Enter your name to chat with Pastor Denis and other viewers</p>
+                    <form onSubmit={handleSetName} className="w-full space-y-3">
+                      <input
+                        type="text"
+                        value={userName}
+                        onChange={(e) => setUserName(e.target.value)}
+                        placeholder="Your name"
+                        maxLength={100}
+                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-white/30 focus:outline-none focus:border-amber-400/50 transition-colors"
+                        autoFocus
+                      />
+                      <button
+                        type="submit"
+                        disabled={!userName.trim()}
+                        className="w-full px-4 py-3 rounded-xl bg-amber-500 text-black font-semibold text-sm hover:bg-amber-400 transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        Continue to Chat
+                      </button>
+                    </form>
+                  </div>
+                ) : (
+                  <>
+                    {/* Messages Container */}
+                    <div 
+                      ref={messagesContainerRef}
+                      className="flex-1 overflow-y-auto px-4 py-4 space-y-3"
+                      style={{ 
+                        scrollBehavior: 'smooth',
+                        maxHeight: 'calc(520px - 120px)'
+                      }}
+                    >
+                      {chatMessages.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-white/30 text-sm">
+                          <Users className="w-8 h-8 mb-2 opacity-50" />
+                          <p>No messages yet</p>
+                          <p className="text-xs">Be the first to say hello!</p>
+                        </div>
+                      ) : (
+                        <>
+                          {chatMessages.map((msg) => (
+                            <div key={msg.id} className="group">
+                              {/* Reply Reference (if this message is a reply) */}
+                              {msg.reply_to_id && msg.reply_to_name && (
+                                <div className="mb-1 ml-4 pl-3 border-l-2 border-amber-400/30 py-1">
+                                  <div className="flex items-center gap-1.5 text-xs text-white/40">
+                                    <Reply className="w-3 h-3" />
+                                    <span>Replying to</span>
+                                    <span className="text-amber-400/70 font-semibold">{msg.reply_to_name}</span>
+                                  </div>
+                                  {msg.reply_to_message && (
+                                    <p className="text-white/30 text-xs mt-0.5 line-clamp-1 italic">
+                                      {msg.reply_to_message}
+                                    </p>
+                                  )}
+                                </div>
+                              )}
+                              
+                              {/* Main Message */}
+                              <div className="space-y-1 relative">
+                                <div className="flex items-baseline gap-2">
+                                  <button
+                                    onClick={() => handleReplyClick(msg)}
+                                    className="text-amber-400 font-semibold text-sm hover:underline cursor-pointer"
+                                  >
+                                    {msg.user_name}
+                                  </button>
+                                  <span className="text-white/20 text-xs">
+                                    {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                  
+                                  {/* Reply button (appears on hover) */}
+                                  <button
+                                    onClick={() => handleReplyClick(msg)}
+                                    className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity text-white/40 hover:text-amber-400 flex items-center gap-1 text-xs"
+                                    title="Reply to this message"
+                                  >
+                                    <Reply className="w-3 h-3" />
+                                    Reply
+                                  </button>
+                                </div>
+                                <p 
+                                  className="text-white/80 text-sm leading-relaxed break-words cursor-pointer hover:text-white/90 transition-colors"
+                                  onClick={() => handleReplyClick(msg)}
+                                >
+                                  {msg.message}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                          <div ref={chatEndRef} />
+                        </>
+                      )}
+                    </div>
+
+                    {/* Message Input */}
+                    <div className="border-t border-white/8 p-3 flex-shrink-0">
+                      {/* Replying To Banner */}
+                      {replyingTo && (
+                        <div className="mb-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-400/20 flex items-start gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 text-xs text-amber-400 mb-0.5">
+                              <Reply className="w-3 h-3" />
+                              <span>Replying to {replyingTo.user_name}</span>
+                            </div>
+                            <p className="text-white/60 text-xs line-clamp-1">
+                              {replyingTo.message}
+                            </p>
+                          </div>
+                          <button
+                            onClick={cancelReply}
+                            className="text-white/40 hover:text-white transition-colors flex-shrink-0"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
+                      
+                      <form onSubmit={handleSendMessage} className="flex gap-2">
+                        <input
+                          type="text"
+                          value={messageInput}
+                          onChange={(e) => setMessageInput(e.target.value)}
+                          placeholder={replyingTo ? `Reply to ${replyingTo.user_name}...` : "Send a message to Pastor Denis..."}
+                          maxLength={500}
+                          disabled={sendingMessage}
+                          className="flex-1 px-3 py-2 rounded-lg bg-white/5 border border-white/10 text-white text-sm placeholder:text-white/30 focus:outline-none focus:border-amber-400/50 transition-colors disabled:opacity-50"
+                        />
+                        <button
+                          type="submit"
+                          disabled={!messageInput.trim() || sendingMessage}
+                          className="px-4 py-2 rounded-lg bg-amber-500 text-black hover:bg-amber-400 transition-all disabled:opacity-30 disabled:cursor-not-allowed flex items-center justify-center"
+                        >
+                          <Send className="w-4 h-4" />
+                        </button>
+                      </form>
+                      <p className="text-white/20 text-xs mt-2">
+                        Chatting as <span className="text-amber-400">{userName}</span>
+                      </p>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

@@ -43,7 +43,7 @@ export default function DevotionalManagement({ books }: { books: Book[] }) {
   const [scriptureQuotation, setScriptureQuotation] = useState('');
   const [relatedScriptures, setRelatedScriptures] = useState('');
   const [furtherReadings, setFurtherReadings] = useState('');
-  const [author, setAuthor] = useState('');
+  const [author, setAuthor] = useState('Pr. Denis');
   const [coverPhotoUrl, setCoverPhotoUrl] = useState('');
   const [isPublished, setIsPublished] = useState(true);
 
@@ -83,7 +83,7 @@ export default function DevotionalManagement({ books }: { books: Book[] }) {
     setScriptureQuotation('');
     setRelatedScriptures('');
     setFurtherReadings('');
-    setAuthor('');
+    setAuthor('Pr. Denis');
     setCoverPhotoUrl('');
     setIsPublished(true);
   };

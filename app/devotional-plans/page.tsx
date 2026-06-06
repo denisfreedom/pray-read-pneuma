@@ -60,6 +60,14 @@ export default function DevotionalPlansPage() {
     fetchPlans();
     fetchBibleBooks();
     checkUserSession();
+    
+    // Check for deep link with entryId query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const entryId = urlParams.get('entryId');
+    if (entryId) {
+      // Fetch the specific devotional entry
+      fetchDevotionalByEntryId(parseInt(entryId));
+    }
   }, []);
 
   useEffect(() => {
@@ -125,8 +133,50 @@ export default function DevotionalPlansPage() {
     setEntries(data);
   };
 
+  const fetchDevotionalByEntryId = async (entryId: number) => {
+    try {
+      const emailParam = userEmail ? `&userEmail=${encodeURIComponent(userEmail)}` : '';
+      const res = await fetch(`/api/devotional-entries?entryId=${entryId}${emailParam}`);
+      const data = await res.json();
+      
+      if (data && data.length > 0) {
+        const entry = data[0];
+        setSelectedEntry(entry);
+        setShowDevotionalsGrid(true);
+        
+        // Parse further readings if available
+        if (entry.further_readings) {
+          parseFurtherReadings(entry.further_readings);
+        } else {
+          setParsedFurtherReadings([]);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching devotional by entryId:', error);
+    }
+  };
+
   const fetchRecentDevotionals = async () => {
     try {
+      // Try offline storage first
+      if (!navigator.onLine) {
+        try {
+          const { getAllDevotionals } = await import('@/app/utils/offlineStorage');
+          const offlineDevotionals = await getAllDevotionals();
+          if (offlineDevotionals && offlineDevotionals.length > 0) {
+            // Sort by date descending (most recent first)
+            const sorted = offlineDevotionals.sort((a: any, b: any) => 
+              new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime()
+            );
+            setRecentDevotionals(sorted as DevotionalEntry[]);
+            return;
+          }
+        } catch (offlineError) {
+          console.log('Offline storage not available, trying network...');
+        }
+      }
+
+      // Fetch from network
       const emailParam = userEmail ? `&userEmail=${encodeURIComponent(userEmail)}` : '';
       const res = await fetch(`/api/devotional-entries?showAll=true${emailParam}`);
       const data = await res.json();
@@ -137,6 +187,20 @@ export default function DevotionalPlansPage() {
       setRecentDevotionals(sorted);
     } catch (error) {
       console.error("Error fetching devotionals:", error);
+      
+      // Fallback to offline storage if network fails
+      try {
+        const { getAllDevotionals } = await import('@/app/utils/offlineStorage');
+        const offlineDevotionals = await getAllDevotionals();
+        if (offlineDevotionals && offlineDevotionals.length > 0) {
+          const sorted = offlineDevotionals.sort((a: any, b: any) => 
+            new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime()
+          );
+          setRecentDevotionals(sorted as DevotionalEntry[]);
+        }
+      } catch (offlineError) {
+        console.error('Failed to load devotionals from offline storage:', offlineError);
+      }
     }
   };
 
@@ -228,14 +292,18 @@ export default function DevotionalPlansPage() {
     setSelectedDate(date);
   };
 
-  // Parse further readings
+  // Parse further readings - strip HTML and extract scripture references
   const parseFurtherReadings = (text: string) => {
     if (!text.trim()) {
       setParsedFurtherReadings([]);
       return;
     }
 
-    const references = text.split(/[;\n]/).map(ref => ref.trim()).filter(ref => ref);
+    // Strip HTML tags first to get plain text references
+    const cleanText = text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+
+    // Split by semicolons, commas, or dots that end a sentence
+    const references = cleanText.split(/[;,]|\.(?=\s[A-Z]|$)/).map((ref: string) => ref.trim()).filter((ref: string) => ref);
     const parsed: any[] = [];
 
     for (const ref of references) {
@@ -436,39 +504,83 @@ export default function DevotionalPlansPage() {
   const shareDevotional = (platform: string) => {
     if (!selectedEntry) return;
 
-    // Strip HTML from devotional text and scripture quotation
-    const cleanDevotionalText = stripHtml(selectedEntry.devotional_text);
+    // Strip HTML from devotional texts and scripture quotation
+    const cleanDevotionalTextEn = stripHtml(selectedEntry.devotional_text || '');
+    const cleanDevotionalTextLu = stripHtml((selectedEntry as any).devotional_text_lu || '');
     const cleanScriptureQuotation = stripHtml(selectedEntry.scripture_quotation || '');
     
     const shareTitle = selectedEntry.title;
-    const shareText = `${selectedEntry.title}
+    
+    // Build the complete share text with BOTH languages in full
+    let shareText = `✨ ${selectedEntry.title} ✨
 
-${cleanDevotionalText.substring(0, 500)}${cleanDevotionalText.length > 500 ? '...' : ''}
+`;
+    shareText += `📖 ${selectedEntry.scripture_book} ${selectedEntry.scripture_chapter}:${selectedEntry.scripture_verse}
+`;
+    shareText += `"${cleanScriptureQuotation}"
 
-📖 ${selectedEntry.scripture_book} ${selectedEntry.scripture_chapter}:${selectedEntry.scripture_verse}
-"${cleanScriptureQuotation}"
+`;
+    
+    // Add English devotional in full
+    if (cleanDevotionalTextEn) {
+      shareText += `━━━━━━━━━━━━━━━━
+`;
+      shareText += `📝 ENGLISH:
 
-Author: ${selectedEntry.author || 'Unknown'}`;
-    const shareUrl = typeof window !== 'undefined' ? window.location.href : '';
-    const fullText = `${shareText}
+`;
+      shareText += `${cleanDevotionalTextEn}
 
-${shareUrl}`;
+`;
+    }
+    
+    // Add Luganda devotional in full
+    if (cleanDevotionalTextLu) {
+      shareText += `━━━━━━━━━━━━━━━━
+`;
+      shareText += `📝 LUGANDA:
+
+`;
+      shareText += `${cleanDevotionalTextLu}
+
+`;
+    }
+    
+    if (selectedEntry.author) {
+      shareText += `✍️ Author: ${selectedEntry.author}
+
+`;
+    }
+    
+    // Create a deep link directly to this devotional
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+    const devotionalDeepLink = `${baseUrl}/devotional-plans?entryId=${selectedEntry.id}`;
+    shareText += `🔗 Read full devotional:
+${devotionalDeepLink}
+
+`;
+    shareText += `━━━━━━━━━━━━━━━━
+`;
+    shareText += `A Digital Sanctuary — A living Altar where the Word of God ceases to be mere text and becomes Spirit and Life in the daily experience of every believer.`;
+    
+    const fullText = shareText;
 
     switch (platform) {
       case "whatsapp":
         window.open(`https://wa.me/?text=${encodeURIComponent(fullText)}`, "_blank");
         break;
       case "facebook":
-        window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`, "_blank");
+        window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(devotionalDeepLink)}`, "_blank");
         break;
       case "twitter":
-        window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`, "_blank");
+        // Twitter has character limit, so truncate if needed but still include both languages
+        const twitterText = fullText.length > 280 ? fullText.substring(0, 277) + '...' : fullText;
+        window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(twitterText)}`, "_blank");
         break;
       case "telegram":
-        window.open(`https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(shareText)}`, "_blank");
+        window.open(`https://t.me/share/url?url=${encodeURIComponent(devotionalDeepLink)}&text=${encodeURIComponent(fullText)}`, "_blank");
         break;
       case "linkedin":
-        window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl)}`, "_blank");
+        window.open(`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(devotionalDeepLink)}`, "_blank");
         break;
       case "email":
         window.open(`mailto:?subject=${encodeURIComponent(shareTitle)}&body=${encodeURIComponent(fullText)}`, "_blank");
@@ -806,32 +918,44 @@ ${shareUrl}`;
                   )}
                 </div>
 
-                {/* Further Readings */}
-                {selectedEntry.further_readings && (
-                  <div className="bg-gradient-to-r from-teal-500/20 to-cyan-500/20 backdrop-blur-sm rounded-2xl p-6 mb-6 border-l-4 border-teal-400">
-                    <h3 className={`${textSizes.heading} font-bold text-teal-300 mb-4 flex items-center gap-2`}>
+                {/* Further Readings - Parse and make clickable */}
+                {parsedFurtherReadings && parsedFurtherReadings.length > 0 && (
+                  <div className="bg-gradient-to-r from-teal-50 to-cyan-50 rounded-2xl p-6 border-l-4 border-teal-400 shadow-sm">
+                    <h3 className={`${textSizes.heading} font-bold text-teal-600 mb-4 flex items-center gap-2`}>
                       🔗 Further Readings
                     </h3>
-                    <ScriptureHtml html={selectedEntry.further_readings} onVerseClick={openVerse} className={`text-white/90 ${textSizes.body}`} />
+                    <div className="flex flex-wrap gap-3">
+                      {parsedFurtherReadings.map((ref: any, idx: number) => (
+                        <button
+                          key={idx}
+                          onClick={() => openVerse({ book: ref.book, chapter: ref.chapter, verse: ref.verse, display: ref.display })}
+                          className={`px-4 py-2 bg-teal-100 hover:bg-teal-200 border-2 border-teal-400 text-teal-700 font-semibold rounded-xl transition-all hover:shadow-md ${textSizes.body}`}
+                        >
+                          {ref.display}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
                 {/* Related Scriptures */}
                 {selectedEntry.related_scriptures && Array.isArray(selectedEntry.related_scriptures) && selectedEntry.related_scriptures.length > 0 && (
-                  <div className="bg-gradient-to-r from-green-500/20 to-emerald-500/20 backdrop-blur-sm rounded-2xl p-6 mb-6 border-l-4 border-green-400">
-                    <h3 className={`${textSizes.heading} font-bold text-green-300 mb-4 flex items-center gap-2`}>
-                      # Related Scriptures
+                  <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl p-6 border-l-4 border-green-400 shadow-sm">
+                    <h3 className={`${textSizes.heading} font-bold text-green-600 mb-4 flex items-center gap-2`}>
+                      📚 Related Scriptures
                     </h3>
                     <div className="space-y-3">
                       {(selectedEntry.related_scriptures || []).map((scripture: any, idx: number) => (
-                        <div key={idx} className="bg-white/10 backdrop-blur-sm p-4 rounded-xl">
+                        <div key={idx} className="bg-white p-4 rounded-xl border border-green-200 shadow-sm hover:shadow-md transition-all">
                           <button
                             onClick={() => openVerse({ book: scripture.book, chapter: scripture.chapter, verse: scripture.verse, display: `${scripture.book} ${scripture.chapter}:${scripture.verse}` })}
-                            className={`font-semibold text-green-300 hover:text-green-200 mb-2 block underline ${textSizes.body}`}
+                            className={`font-semibold text-green-600 hover:text-green-800 mb-2 block underline ${textSizes.body}`}
                           >
-                            {scripture.book} {scripture.chapter}:{scripture.verse}
+                            📖 {scripture.book} {scripture.chapter}:{scripture.verse}
                           </button>
-                          <ScriptureHtml html={`"${scripture.text}"`} onVerseClick={openVerse} className={`text-white/80 italic ${textSizes.body}`} />
+                          {scripture.text && (
+                            <ScriptureHtml html={`"${scripture.text}"`} onVerseClick={openVerse} className={`text-gray-700 italic ${textSizes.body}`} />
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1178,13 +1302,23 @@ ${shareUrl}`;
                   )}
                 </div>
 
-                {/* Further Readings */}
-                {selectedEntry.further_readings && (
+                {/* Further Readings - Parse and make clickable */}
+                {parsedFurtherReadings && parsedFurtherReadings.length > 0 && (
                   <div className="bg-gradient-to-r from-teal-50 to-cyan-50 rounded-2xl p-6 border-l-4 border-teal-400 shadow-sm">
                     <h3 className={`${textSizes.heading} font-bold text-teal-600 mb-4 flex items-center gap-2`}>
                       🔗 Further Readings
                     </h3>
-                    <ScriptureHtml html={selectedEntry.further_readings} onVerseClick={openVerse} className={`text-gray-800 ${textSizes.body}`} />
+                    <div className="flex flex-wrap gap-3">
+                      {parsedFurtherReadings.map((ref: any, idx: number) => (
+                        <button
+                          key={idx}
+                          onClick={() => openVerse({ book: ref.book, chapter: ref.chapter, verse: ref.verse, display: ref.display })}
+                          className={`px-4 py-2 bg-teal-100 hover:bg-teal-200 border-2 border-teal-400 text-teal-700 font-semibold rounded-xl transition-all hover:shadow-md ${textSizes.body}`}
+                        >
+                          {ref.display}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -1192,18 +1326,20 @@ ${shareUrl}`;
                 {selectedEntry.related_scriptures && Array.isArray(selectedEntry.related_scriptures) && selectedEntry.related_scriptures.length > 0 && (
                   <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-2xl p-6 border-l-4 border-green-400 shadow-sm">
                     <h3 className={`${textSizes.heading} font-bold text-green-600 mb-4 flex items-center gap-2`}>
-                      # Related Scriptures
+                      📚 Related Scriptures
                     </h3>
                     <div className="space-y-3">
                       {(selectedEntry.related_scriptures || []).map((scripture: any, idx: number) => (
-                        <div key={idx} className="bg-white p-4 rounded-xl border border-green-200 shadow-sm">
+                        <div key={idx} className="bg-white p-4 rounded-xl border border-green-200 shadow-sm hover:shadow-md transition-all">
                           <button
                             onClick={() => openVerse({ book: scripture.book, chapter: scripture.chapter, verse: scripture.verse, display: `${scripture.book} ${scripture.chapter}:${scripture.verse}` })}
                             className={`font-semibold text-green-600 hover:text-green-800 mb-2 block underline ${textSizes.body}`}
                           >
-                            {scripture.book} {scripture.chapter}:{scripture.verse}
+                            📖 {scripture.book} {scripture.chapter}:{scripture.verse}
                           </button>
-                          <ScriptureHtml html={`"${scripture.text}"`} onVerseClick={openVerse} className={`text-gray-700 italic ${textSizes.body}`} />
+                          {scripture.text && (
+                            <ScriptureHtml html={`"${scripture.text}"`} onVerseClick={openVerse} className={`text-gray-700 italic ${textSizes.body}`} />
+                          )}
                         </div>
                       ))}
                     </div>

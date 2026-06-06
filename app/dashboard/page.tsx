@@ -13,6 +13,8 @@ import {
 import AppNavbar from '@/app/components/AppNavbar';
 import NotificationManager from '@/app/components/NotificationManager';
 import DownloadManager from '@/app/components/DownloadManager';
+import ErrorBoundary from '@/app/components/ErrorBoundary';
+import SessionTracker from '@/app/components/SessionTracker';
 
 const LOGO = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
 const BG_IMAGE = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/dashboard-bg_png.jpeg';
@@ -199,6 +201,9 @@ export default function DashboardPage() {
   }
 
   return (
+    <ErrorBoundary>
+    <>
+    <SessionTracker />
     <div className="min-h-screen relative overflow-x-hidden">
       {/* Background */}
       <div className="fixed inset-0 z-0">
@@ -400,5 +405,7 @@ export default function DashboardPage() {
       {/* Download Manager Modal */}
       <DownloadManager isOpen={showDownloadManager} onClose={() => setShowDownloadManager(false)} />
     </div>
+    </>
+    </ErrorBoundary>
   );
 }

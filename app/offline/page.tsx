@@ -162,6 +162,25 @@ export default function OfflinePage() {
             )}
           </div>
         </div>
+          {/* Downloaded Books */}
+        {cachedData.books > 0 && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-green-600" />
+              Downloaded Books
+            </h2>
+            <p className="text-sm text-gray-600 mb-4">
+              You have {cachedData.books} book{cachedData.books > 1 ? 's' : ''} available offline. Tap below to browse.
+            </p>
+            <Link
+              href="/bible-reader"
+              className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold hover:from-blue-700 hover:to-purple-700 transition-all shadow-md"
+            >
+              <Book className="w-5 h-5" />
+              Open Downloaded Books
+            </Link>
+          </div>
+        )}
 
         {/* Quick Actions */}
         <div className="bg-white rounded-2xl shadow-xl p-6">

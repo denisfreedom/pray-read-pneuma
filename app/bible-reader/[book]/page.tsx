@@ -81,10 +81,45 @@ function BookChaptersContent() {
     setTheme(themes[(themes.indexOf(theme) + 1) % themes.length]);
   };
 
+  // Track book visit on mount
+  useEffect(() => {
+    const logBookVisit = async () => {
+      try {
+        // Get session
+        const sessionRes = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
+        if (!sessionRes.ok) return;
+        const sessionData = await sessionRes.json();
+        if (!sessionData.success || !sessionData.user?.email) return;
+
+        // Log book visit (no chapter means viewing book overview)
+        await fetch('/api/activity-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_email: sessionData.user.email,
+            activity_type: 'book_visit',
+            book_id: bookNumber,
+            chapter: null
+          })
+        });
+      } catch (error) {
+        console.error('Error logging book visit:', error);
+      }
+    };
+
+    logBookVisit();
+  }, [bookNumber]);
+
   useEffect(() => {
     const fetchBook = async () => {
       try {
+        // Always try online fetch (no connectivity checks)
         const response = await fetch(`/api/bible-books?id=${bookNumber}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
         const data = await response.json();
         if (data.success && data.book) {
           const bookData: Book = {
@@ -97,25 +132,42 @@ function BookChaptersContent() {
           };
           setBook(bookData);
 
-          // Fetch all secondary data in parallel
-          const [introData, outlinesData, prayersData, commentaryData, theologicalData, historicalData] = await Promise.allSettled([
-            fetch(`/api/book-introductions?bookId=${bookData.id}`).then(r => r.json()),
-            fetch(`/api/outlines?book_id=${bookData.id}&language=english`).then(r => r.json()),
-            fetch(`/api/book-prayers?bookId=${bookData.id}`).then(r => r.json()),
-            fetch(`/api/book-commentaries?bookId=${bookData.id}`).then(r => r.json()),
-            fetch(`/api/book-theological-insights?book_id=${bookData.id}`).then(r => r.json()),
-            fetch(`/api/historical-content?bookId=${bookData.id}`).then(r => r.json()),
-          ]);
-
-          if (introData.status === 'fulfilled' && introData.value) setBookIntroduction(introData.value);
-          if (outlinesData.status === 'fulfilled' && Array.isArray(outlinesData.value)) setBookOutlines(outlinesData.value);
-          if (prayersData.status === 'fulfilled' && prayersData.value) setBookPrayers(prayersData.value);
-          if (commentaryData.status === 'fulfilled' && commentaryData.value) setBookCommentary(commentaryData.value);
-          if (theologicalData.status === 'fulfilled' && theologicalData.value) setBookTheological(theologicalData.value);
-          if (historicalData.status === 'fulfilled' && historicalData.value) setBookHistorical(historicalData.value);
+          // Fetch all secondary data in parallel (optional, non-blocking)
+          Promise.allSettled([
+            fetch(`/api/book-introductions?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookIntroduction(d)),
+            fetch(`/api/outlines?book_id=${bookData.id}&language=english`).then(r => r.json()).then(d => Array.isArray(d) && setBookOutlines(d)),
+            fetch(`/api/book-prayers?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookPrayers(d)),
+            fetch(`/api/book-commentaries?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookCommentary(d)),
+            fetch(`/api/book-theological-insights?book_id=${bookData.id}`).then(r => r.json()).then(d => setBookTheological(d)),
+            fetch(`/api/historical-content?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookHistorical(d)),
+          ]).catch(err => console.warn('Secondary data fetch failed:', err));
         }
       } catch (error) {
-        console.error('Error fetching book:', error);
+        console.error('Error fetching book online, trying offline cache:', error);
+        
+        // Only fall back to IndexedDB if online fetch fails
+        try {
+          const { getBooks } = await import('@/app/utils/offlineStorage');
+          const cachedBooks = await getBooks();
+          const cachedBook = cachedBooks.find((b: any) => b.book_number === bookNumber);
+          
+          if (cachedBook) {
+            const bookData: Book = {
+              id: cachedBook.id,
+              book_number: cachedBook.book_number,
+              name_english: cachedBook.name_english,
+              name_luganda: cachedBook.name_luganda,
+              testament: cachedBook.testament,
+              total_chapters: cachedBook.total_chapters
+            };
+            setBook(bookData);
+            console.log('✅ [OFFLINE] Loaded book from cache:', bookData.name_english);
+          } else {
+            console.error('❌ Book not found in cache');
+          }
+        } catch (offlineError) {
+          console.error('❌ Offline storage unavailable:', offlineError);
+        }
       } finally {
         setLoading(false);
       }
@@ -156,7 +208,7 @@ ${lu}`;
     cleaned = cleaned.replace(/<\/div>\s*$/gi, '');
     
     // Remove HTML comments
-    cleaned = cleaned.replace(/<!--.*?-->/gs, '');
+    cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '');
     
     // Clean up excessive whitespace
     cleaned = cleaned.replace(/\n\n\n+/g, '\n\n');
@@ -357,11 +409,11 @@ ${lu}`;
               <p className={`text-xs font-semibold uppercase tracking-widest mb-4 ${
                 theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : isOT ? 'text-orange-500' : 'text-blue-500'
               }`}>Select a Chapter</p>
-              <div className="grid grid-cols-8 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-15 gap-1.5 sm:gap-2">
+              <div className="flex flex-wrap gap-1.5 sm:gap-2 justify-center sm:justify-start">
                 {Array.from({ length: book.total_chapters }, (_, i) => i + 1).map((chapter) => (
                   <Link key={chapter} href={`/bible-reader/${book.book_number}/${chapter}`}
-                    className={`group relative flex items-center justify-center rounded-lg transition-all duration-200 transform hover:scale-105 hover:shadow-md text-white font-semibold text-xs overflow-hidden ${btnColor()}`}
-                    style={{ aspectRatio: '1', minWidth: 0 }}
+                    className={`group relative flex items-center justify-center rounded-lg transition-all duration-200 transform hover:scale-105 hover:shadow-md text-white font-semibold text-xs sm:text-sm overflow-hidden ${btnColor()}`}
+                    style={{ width: '2.75rem', height: '2.75rem', flexShrink: 0 }}
                     title={`Chapter ${chapter}`}>
                     <div className="absolute inset-0 bg-white/0 group-hover:bg-white/15 transition-all duration-200 rounded-lg"></div>
                     <span className="relative z-10 leading-none">{chapter}</span>
