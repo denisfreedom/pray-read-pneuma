@@ -6,7 +6,7 @@ import DevotionalManagement from '../components/DevotionalManagement';
 import RichTextEditor from '../components/RichTextEditor';
 import { Pencil, Trash2, Plus, BookOpen, Users, Globe, MessageSquare, Music, Save, Edit2 } from 'lucide-react';
 import { detectAudioDuration } from '../utils/audioUtils';
-
+import BookChapterBulkImport from '@/components/BookChapterBulkImport';
 interface Book { id: number; book_number: number; name: string; abbreviation: string; testament: string; total_chapters: number; }
 interface Verse { id: number; book_number: number; book_name: string; chapter: number; verse_number: number; english_text: string; luganda_text: string; }
 type SidePanelTab = 'intro' | 'outline' | 'prayer';
