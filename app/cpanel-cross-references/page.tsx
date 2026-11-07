@@ -1,6 +1,6 @@
-'use client';
+"use client";
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 
 const LS_LAST_VERSE_KEY = 'crossref_last_verse';
@@ -34,6 +34,9 @@ interface Book {
   name_english: string;
   name_luganda: string;
   total_chapters: number;
+  book_number?: number;
+  abbreviation_english?: string;
+  abbreviation_luganda?: string;
 }
 
 interface CrossReference {
@@ -51,6 +54,155 @@ interface CrossReference {
   text_english?: string;
 }
 
+/* [STRIPPED 66 bytes] */
+/*  SHARED PARSER — identical to CrossReferenceModal                  */
+/*  Romans 1:6; 1 Corinthians 1:2; John 17:11-12;                    */
+/*  John 8:1-5,6,7-8; Ex. 3:5; Jn 6:4  -> 15 rows                   */
+/* [STRIPPED 66 bytes] */
+type CanonBook = { id: number; name: string; aliases: string[] };
+const CANON: CanonBook[] = [
+  { id: 1, name: 'Genesis', aliases: ['gen', 'ge', 'gn'] },
+  { id: 2, name: 'Exodus', aliases: ['ex', 'exod', 'exo'] },
+  { id: 3, name: 'Leviticus', aliases: ['lev', 'lv'] },
+  { id: 4, name: 'Numbers', aliases: ['num', 'nu', 'nm'] },
+  { id: 5, name: 'Deuteronomy', aliases: ['deut', 'deu', 'dt'] },
+  { id: 6, name: 'Joshua', aliases: ['josh', 'jos'] },
+  { id: 7, name: 'Judges', aliases: ['judg', 'jdg', 'jg'] },
+  { id: 8, name: 'Ruth', aliases: ['ru'] },
+  { id: 9, name: '1 Samuel', aliases: ['1 sam', '1sam', '1 sa', '1sa'] },
+  { id: 10, name: '2 Samuel', aliases: ['2 sam', '2sam', '2 sa', '2sa'] },
+  { id: 11, name: '1 Kings', aliases: ['1 kings', '1kings', '1 kgs', '1kgs', '1 ki', '1ki'] },
+  { id: 12, name: '2 Kings', aliases: ['2 kings', '2kings', '2 kgs', '2kgs', '2 ki', '2ki'] },
+  { id: 13, name: '1 Chronicles', aliases: ['1 chron', '1chron', '1 chr', '1chr', '1 ch', '1ch'] },
+  { id: 14, name: '2 Chronicles', aliases: ['2 chron', '2chron', '2 chr', '2chr', '2 ch', '2ch'] },
+  { id: 15, name: 'Ezra', aliases: ['ezr'] },
+  { id: 16, name: 'Nehemiah', aliases: ['neh', 'ne'] },
+  { id: 17, name: 'Esther', aliases: ['est', 'es'] },
+  { id: 18, name: 'Job', aliases: ['jb'] },
+  { id: 19, name: 'Psalms', aliases: ['ps', 'psalm', 'psa', 'psal'] },
+  { id: 20, name: 'Proverbs', aliases: ['prov', 'pro', 'prv', 'pr'] },
+  { id: 21, name: 'Ecclesiastes', aliases: ['eccl', 'eccles', 'ecc', 'ec'] },
+  { id: 22, name: 'Song of Solomon', aliases: ['song', 'song of songs', 'sos', 'cant', 'canticles'] },
+  { id: 23, name: 'Isaiah', aliases: ['isa', 'is'] },
+  { id: 24, name: 'Jeremiah', aliases: ['jer', 'je'] },
+  { id: 25, name: 'Lamentations', aliases: ['lam', 'la'] },
+  { id: 26, name: 'Ezekiel', aliases: ['ezek', 'eze', 'ez'] },
+  { id: 27, name: 'Daniel', aliases: ['dan', 'da', 'dn'] },
+  { id: 28, name: 'Hosea', aliases: ['hos', 'ho'] },
+  { id: 29, name: 'Joel', aliases: ['jl'] },
+  { id: 30, name: 'Amos', aliases: ['am'] },
+  { id: 31, name: 'Obadiah', aliases: ['obad', 'ob'] },
+  { id: 32, name: 'Jonah', aliases: ['jon', 'jnh'] },
+  { id: 33, name: 'Micah', aliases: ['mic', 'mi'] },
+  { id: 34, name: 'Nahum', aliases: ['nah', 'na'] },
+  { id: 35, name: 'Habakkuk', aliases: ['hab', 'hb'] },
+  { id: 36, name: 'Zephaniah', aliases: ['zeph', 'zep', 'zp'] },
+  { id: 37, name: 'Haggai', aliases: ['hag', 'hg'] },
+  { id: 38, name: 'Zechariah', aliases: ['zech', 'zec', 'zc'] },
+  { id: 39, name: 'Malachi', aliases: ['mal', 'ml'] },
+  { id: 40, name: 'Matthew', aliases: ['matt', 'mt', 'mat'] },
+  { id: 41, name: 'Mark', aliases: ['mk', 'mrk'] },
+  { id: 42, name: 'Luke', aliases: ['lk', 'lu'] },
+  { id: 43, name: 'John', aliases: ['jn', 'joh', 'jh'] },
+  { id: 44, name: 'Acts', aliases: ['ac'] },
+  { id: 45, name: 'Romans', aliases: ['rom', 'ro', 'rm'] },
+  { id: 46, name: '1 Corinthians', aliases: ['1 cor', '1cor', '1 co', '1co'] },
+  { id: 47, name: '2 Corinthians', aliases: ['2 cor', '2cor', '2 co', '2co'] },
+  { id: 48, name: 'Galatians', aliases: ['gal', 'ga'] },
+  { id: 49, name: 'Ephesians', aliases: ['eph', 'ep'] },
+  { id: 50, name: 'Philippians', aliases: ['phil', 'php', 'pp'] },
+  { id: 51, name: 'Colossians', aliases: ['col', 'cl'] },
+  { id: 52, name: '1 Thessalonians', aliases: ['1 thess', '1thess', '1 thes', '1thes', '1 th', '1th'] },
+  { id: 53, name: '2 Thessalonians', aliases: ['2 thess', '2thess', '2 thes', '2thes', '2 th', '2th'] },
+  { id: 54, name: '1 Timothy', aliases: ['1 tim', '1tim', '1 ti', '1ti'] },
+  { id: 55, name: '2 Timothy', aliases: ['2 tim', '2tim', '2 ti', '2ti'] },
+  { id: 56, name: 'Titus', aliases: ['tit', 'ti'] },
+  { id: 57, name: 'Philemon', aliases: ['phlm', 'phm', 'pm'] },
+  { id: 58, name: 'Hebrews', aliases: ['heb', 'he'] },
+  { id: 59, name: 'James', aliases: ['jas', 'ja', 'jm'] },
+  { id: 60, name: '1 Peter', aliases: ['1 pet', '1pet', '1 pe', '1pe', '1 pt', '1pt'] },
+  { id: 61, name: '2 Peter', aliases: ['2 pet', '2pet', '2 pe', '2pe', '2 pt', '2pt'] },
+  { id: 62, name: '1 John', aliases: ['1 jn', '1jn', '1 jo', '1jo', '1 jh', '1jh'] },
+  { id: 63, name: '2 John', aliases: ['2 jn', '2jn', '2 jo', '2jo', '2 jh', '2jh'] },
+  { id: 64, name: '3 John', aliases: ['3 jn', '3jn', '3 jo', '3jo', '3 jh', '3jh'] },
+  { id: 65, name: 'Jude', aliases: ['jud', 'jd'] },
+  { id: 66, name: 'Revelation', aliases: ['rev', 're', 'rv', 'apoc'] },
+];
+function normalizeBookKey(raw: string): string {
+  return raw.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim();
+}
+function resolveBookId(rawBook: string, booksProp: Book[]): { id: number; name: string } | null {
+  const key = normalizeBookKey(rawBook);
+  if (!key) return null;
+  // 1) DB books first — exact match only (no startsWith / includes)
+  for (const b of booksProp) {
+    const candidates = [b.name_english, b.name_luganda, b.abbreviation_english, b.abbreviation_luganda].filter(Boolean) as string[];
+    for (const c of candidates) {
+      if (normalizeBookKey(c) === key) return { id: b.book_number ?? b.id, name: b.name_english };
+    }
+  }
+  // 2) canon fallback — full name, then aliases, longest first
+  const sorted = [...CANON].sort((a, b) => b.name.length - a.name.length);
+  for (const c of sorted) if (normalizeBookKey(c.name) === key) return { id: c.id, name: c.name };
+  for (const c of sorted) if (c.aliases.some((a) => normalizeBookKey(a) === key)) return { id: c.id, name: c.name };
+  return null;
+}
+export type ParsedRef = { target_book_id: number; target_book_name: string; target_chapter: number; target_verse: number; label: string };
+export type ParseResult = { refs: ParsedRef[]; errors: string[] };
+function expandVerseList(list: string): number[] {
+  const out: number[] = [];
+  for (const part of list.split(',')) {
+    const p = part.trim();
+    if (!p) continue;
+    const m = p.match(/^(\d+)\s*-\s*(\d+)$/);
+    if (m) {
+      const s = parseInt(m[1], 10); const e = parseInt(m[2], 10);
+      if (e < s) { out.push(s); continue; }
+      for (let v = s; v <= e; v++) out.push(v);
+    } else if (/^\d+$/.test(p)) out.push(parseInt(p, 10));
+  }
+  return out;
+}
+export function parseCrossReferences(input: string, booksProp: Book[] = []): ParseResult {
+  const refs: ParsedRef[] = []; const errors: string[] = [];
+  const seen = new Set<string>();
+  let lastBook: { id: number; name: string } | null = null;
+  // Split ONLY on ; or newline. Commas belong to verse lists.
+  const chunks = input.split(/[;\n]+/);
+  for (const rawChunk of chunks) {
+    const chunk = rawChunk.trim().replace(/\s+/g, ' ');
+    if (!chunk) continue;
+    const m = chunk.match(/^(.+?)\s+(\d+)\s*:\s*([\d\s,\-]+)$/);
+    if (!m) {
+      const bare = chunk.match(/^(\d+)\s*:\s*([\d\s,\-]+)$/);
+      if (bare && lastBook) {
+        const chapter = parseInt(bare[1], 10);
+        for (const v of expandVerseList(bare[2])) {
+          const k = `${lastBook.id}:${chapter}:${v}`;
+          if (seen.has(k)) continue; seen.add(k);
+          refs.push({ target_book_id: lastBook.id, target_book_name: lastBook.name, target_chapter: chapter, target_verse: v, label: `${lastBook.name} ${chapter}:${v}` });
+        }
+        continue;
+      }
+      errors.push(`Could not understand: "${chunk}"`);
+      continue;
+    }
+    const bookPart = m[1].trim();
+    const chapter = parseInt(m[2], 10);
+    const resolved = resolveBookId(bookPart, booksProp);
+    if (!resolved) { errors.push(`Unknown book: "${bookPart}" in "${chunk}"`); continue; }
+    lastBook = resolved;
+    const verses = expandVerseList(m[3]);
+    if (verses.length === 0) { errors.push(`No verses found in: "${chunk}"`); continue; }
+    for (const v of verses) {
+      const k = `${resolved.id}:${chapter}:${v}`;
+      if (seen.has(k)) continue; seen.add(k);
+      refs.push({ target_book_id: resolved.id, target_book_name: resolved.name, target_chapter: chapter, target_verse: v, label: `${resolved.name} ${chapter}:${v}` });
+    }
+  }
+  return { refs, errors };
+}
+
 function CrossReferencesContent() {
   const router = useRouter();
   const [books, setBooks] = useState<Book[]>([]);
@@ -60,42 +212,28 @@ function CrossReferencesContent() {
   const [mounted, setMounted] = useState(false);
   const [localCacheInfo, setLocalCacheInfo] = useState<string>('');
 
-  // Source verse fields
   const [sourceBookId, setSourceBookId] = useState('');
   const [sourceChapter, setSourceChapter] = useState('');
   const [sourceVerse, setSourceVerse] = useState('');
   const [sourceText, setSourceText] = useState('');
 
-  // Target verse fields
   const [targetBookId, setTargetBookId] = useState('');
   const [targetChapter, setTargetChapter] = useState('');
   const [targetVerse, setTargetVerse] = useState('');
   const [targetText, setTargetText] = useState('');
 
-  // Additional fields
   const [relationshipType, setRelationshipType] = useState('related');
   const [notes, setNotes] = useState('');
 
-  // Bulk paste cross-references
   const [bulkCrossRefs, setBulkCrossRefs] = useState('');
-  const [parsedReferences, setParsedReferences] = useState<Array<{
-    bookName: string;
-    chapter: number;
-    verse: number;
-    targetBookId?: number;
-    status: 'pending' | 'valid' | 'invalid';
-    errorMessage?: string;
-  }>>([]);
   const [bulkSaving, setBulkSaving] = useState(false);
 
-  // Cross-references list
   const [crossReferences, setCrossReferences] = useState<CrossReference[]>([]);
   const [viewingBookId, setViewingBookId] = useState('');
   const [viewingChapter, setViewingChapter] = useState('');
   const [viewingVerse, setViewingVerse] = useState('');
   const [loadingRefs, setLoadingRefs] = useState(false);
 
-  // Edit state
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editTargetBookId, setEditTargetBookId] = useState('');
   const [editTargetChapter, setEditTargetChapter] = useState('');
@@ -104,13 +242,34 @@ function CrossReferencesContent() {
   const [editNotes, setEditNotes] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
+  // ---- Live parse: same parser as the reader modal ----
+  // Validated against DB books: chapter must exist, verse must be a number.
+  // Unknown books / bad syntax become visible errors, not silent drops.
+  const parsed = useMemo(() => parseCrossReferences(bulkCrossRefs, books), [bulkCrossRefs, books]);
+  const parsedReferences = useMemo(() => {
+    const rows: Array<{ bookName: string; chapter: number; verse: number; targetBookId?: number; status: 'valid' | 'invalid'; errorMessage?: string }> = [];
+    for (const r of parsed.refs) {
+      const dbBook = books.find((b) => (b.book_number ?? b.id) === r.target_book_id);
+      if (dbBook && dbBook.total_chapters && r.target_chapter > dbBook.total_chapters) {
+        rows.push({ bookName: r.target_book_name, chapter: r.target_chapter, verse: r.target_verse, targetBookId: r.target_book_id, status: 'invalid', errorMessage: `${dbBook.name_english} only has ${dbBook.total_chapters} chapters` });
+      } else {
+        rows.push({ bookName: r.target_book_name, chapter: r.target_chapter, verse: r.target_verse, targetBookId: r.target_book_id, status: 'valid' });
+      }
+    }
+    for (const e of parsed.errors) {
+      rows.push({ bookName: '', chapter: 0, verse: 0, status: 'invalid', errorMessage: e });
+    }
+    return rows;
+  }, [parsed, books]);
+
+  const validParsed = useMemo(() => parsedReferences.filter((r) => r.status === 'valid'), [parsedReferences]);
+
   useEffect(() => {
     setMounted(true);
     checkAuth();
     fetchBooks();
   }, []);
 
-  // After books load, restore last-worked verse from localStorage
   useEffect(() => {
     if (books.length === 0) return;
     const last = getLastVerse();
@@ -118,12 +277,10 @@ function CrossReferencesContent() {
       setViewingBookId(last.bookId);
       setViewingChapter(last.chapter);
       setViewingVerse(last.verse);
-      // Show cached refs instantly before DB loads
       const cached = loadCrossRefsFromLocalStorage(last.bookId, last.chapter, last.verse);
       if (cached.length > 0) {
         setCrossReferences(cached);
         setLocalCacheInfo(`Showing ${cached.length} cached reference(s) — syncing from database…`);
-        // Then fetch fresh from DB
         fetchCrossReferencesForVerse(last.bookId, last.chapter, last.verse, true);
       }
     }
@@ -133,12 +290,8 @@ function CrossReferencesContent() {
   const checkAuth = async () => {
     try {
       const response = await fetch('/api/auth/session');
-      if (!response.ok) {
-        router.push('/login');
-      }
-    } catch (error) {
-      router.push('/login');
-    }
+      if (!response.ok) router.push('/login');
+    } catch (error) { router.push('/login'); }
   };
 
   const fetchBooks = async () => {
@@ -155,42 +308,29 @@ function CrossReferencesContent() {
 
   const fetchVerseText = async (bookId: string, chapter: string, verse: string, isSource: boolean) => {
     if (!bookId || !chapter || !verse) return;
-    
     try {
       const response = await fetch(`/api/bible-verses?bookId=${bookId}&chapter=${chapter}`);
       const data = await response.json();
-      
       const verseData = data.verses?.find((v: any) => v.verse === parseInt(verse));
       if (verseData) {
-        if (isSource) {
-          setSourceText(verseData.text_english);
-        } else {
-          setTargetText(verseData.text_english);
-        }
+        if (isSource) setSourceText(verseData.text_english);
+        else setTargetText(verseData.text_english);
       }
-    } catch (error) {
-      console.error('Error fetching verse:', error);
-    }
+    } catch (error) { console.error('Error fetching verse:', error); }
   };
 
   const fetchCrossReferencesForVerse = async (bookId: string, chapter: string, verse: string, silent = false) => {
     if (!bookId || !chapter || !verse) return;
     if (!silent) setLoadingRefs(true);
     try {
-      const response = await fetch(
-        `/api/cross-references?bookId=${bookId}&chapter=${chapter}&verse=${verse}`
-      );
+      const response = await fetch(`/api/cross-references?bookId=${bookId}&chapter=${chapter}&verse=${verse}`);
       const data = await response.json();
       const refs = Array.isArray(data) ? data : (data.crossReferences || []);
       setCrossReferences(refs);
       setLocalCacheInfo('');
-      // Persist to localStorage for instant future loads
       saveCrossRefsToLocalStorage(bookId, chapter, verse, refs);
-    } catch (error) {
-      console.error('Error fetching cross-references:', error);
-    } finally {
-      if (!silent) setLoadingRefs(false);
-    }
+    } catch (error) { console.error('Error fetching cross-references:', error); }
+    finally { if (!silent) setLoadingRefs(false); }
   };
 
   const fetchCrossReferences = async (bId?: string, ch?: string, vs?: string) => {
@@ -235,27 +375,19 @@ function CrossReferencesContent() {
         setMessage('Cross-reference updated successfully!');
         setEditingId(null);
         fetchCrossReferences();
-      } else {
-        setMessage('Failed to update cross-reference');
-      }
-    } catch (error) {
-      setMessage('Error updating cross-reference');
-    } finally {
-      setEditSaving(false);
-    }
+      } else setMessage('Failed to update cross-reference');
+    } catch (error) { setMessage('Error updating cross-reference'); }
+    finally { setEditSaving(false); }
   };
 
   const handleSaveCrossReference = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!sourceBookId || !sourceChapter || !sourceVerse || !targetBookId || !targetChapter || !targetVerse) {
       setMessage('Please fill in all required fields');
       return;
     }
-
     setSaving(true);
     setMessage('');
-
     try {
       const response = await fetch('/api/cross-references', {
         method: 'POST',
@@ -271,199 +403,39 @@ function CrossReferencesContent() {
           notes
         })
       });
-
       if (response.ok) {
         setMessage('Cross-reference saved successfully!');
-        setTargetBookId('');
-        setTargetChapter('');
-        setTargetVerse('');
-        setTargetText('');
-        setRelationshipType('related');
-        setNotes('');
-        // Sync viewing fields and auto-refresh list (also writes to localStorage)
-        setViewingBookId(sourceBookId);
-        setViewingChapter(sourceChapter);
-        setViewingVerse(sourceVerse);
+        setTargetBookId(''); setTargetChapter(''); setTargetVerse(''); setTargetText('');
+        setRelationshipType('related'); setNotes('');
+        setViewingBookId(sourceBookId); setViewingChapter(sourceChapter); setViewingVerse(sourceVerse);
         localStorage.setItem(LS_LAST_VERSE_KEY, JSON.stringify({ bookId: sourceBookId, chapter: sourceChapter, verse: sourceVerse }));
         fetchCrossReferences(sourceBookId, sourceChapter, sourceVerse);
-      } else {
-        setMessage('Failed to save cross-reference');
-      }
-    } catch (error) {
-      console.error('Error saving cross-reference:', error);
-      setMessage('Error saving cross-reference');
-    } finally {
-      setSaving(false);
-    }
+      } else setMessage('Failed to save cross-reference');
+    } catch (error) { console.error('Error saving cross-reference:', error); setMessage('Error saving cross-reference'); }
+    finally { setSaving(false); }
   };
 
   const handleDeleteCrossReference = async (id: number) => {
     if (!confirm('Are you sure you want to delete this cross-reference?')) return;
-
     try {
-      const response = await fetch(`/api/cross-references?id=${id}`, {
-        method: 'DELETE'
-      });
-
-      if (response.ok) {
-        setMessage('Cross-reference deleted successfully');
-        fetchCrossReferences();
-      } else {
-        setMessage('Failed to delete cross-reference');
-      }
-    } catch (error) {
-      console.error('Error deleting cross-reference:', error);
-      setMessage('Error deleting cross-reference');
-    }
+      const response = await fetch(`/api/cross-references?id=${id}`, { method: 'DELETE' });
+      if (response.ok) { setMessage('Cross-reference deleted successfully'); fetchCrossReferences(); }
+      else setMessage('Failed to delete cross-reference');
+    } catch (error) { console.error('Error deleting cross-reference:', error); setMessage('Error deleting cross-reference'); }
   };
-
-  const parseBulkCrossReferences = (text: string) => {
-    // Parse formats like:
-    // Romans 1:6; 1 Corinthians 1:2; John 17:11–12; 1 Peter 1:2; 1 Thessalonians 5:23
-    const references: Array<{ book: string; chapter: number; verse: number }> = [];
-    
-    // Split by semicolons and commas
-    const parts = text.split(/[;,]/);
-    
-    parts.forEach(part => {
-      part = part.trim();
-      if (!part) return;
-      
-      // Match patterns like "Romans 1:6" or "John 17:11-12" or "1 Corinthians 1:2"
-      const match = part.match(/^([\d\s]*[A-Za-z]+(?:\s+[A-Za-z]+)*)\s+(\d+):(\d+)(?:[-–]\d+)?/);
-      
-      if (match) {
-        const bookName = match[1].trim();
-        const chapter = parseInt(match[2]);
-        const verse = parseInt(match[3]);
-        
-        references.push({ book: bookName, chapter, verse });
-      }
-    });
-    
-    return references;
-  };
-
-  const findBookByName = (name: string): Book | undefined => {
-    const normalizedName = name.toLowerCase().trim();
-    return books.find(book => 
-      book.name_english.toLowerCase() === normalizedName ||
-      book.name_english.toLowerCase().startsWith(normalizedName) ||
-      normalizedName.includes(book.name_english.toLowerCase())
-    );
-  };
-
-  const handleParseBulkReferences = () => {
-    if (!bulkCrossRefs.trim()) {
-      setParsedReferences([]);
-      return;
-    }
-
-    const parsedRefs = parseBulkCrossReferences(bulkCrossRefs);
-    
-    const validatedRefs = parsedRefs.map(ref => {
-      const targetBook = findBookByName(ref.book);
-      
-      if (!targetBook) {
-        return {
-          bookName: ref.book,
-          chapter: ref.chapter,
-          verse: ref.verse,
-          status: 'invalid' as const,
-          errorMessage: `Book "${ref.book}" not found`
-        };
-      }
-      
-      if (ref.chapter > targetBook.total_chapters) {
-        return {
-          bookName: ref.book,
-          chapter: ref.chapter,
-          verse: ref.verse,
-          targetBookId: targetBook.id,
-          status: 'invalid' as const,
-          errorMessage: `${targetBook.name_english} only has ${targetBook.total_chapters} chapters`
-        };
-      }
-      
-      return {
-        bookName: targetBook.name_english,
-        chapter: ref.chapter,
-        verse: ref.verse,
-        targetBookId: targetBook.id,
-        status: 'valid' as const
-      };
-    });
-    
-    setParsedReferences(validatedRefs);
-  };
-
-  // Auto-parse when bulk cross-refs change
-  useEffect(() => {
-    if (bulkCrossRefs.trim()) {
-      const parsedRefs = parseBulkCrossReferences(bulkCrossRefs);
-      
-      const validatedRefs = parsedRefs.map(ref => {
-        const targetBook = findBookByName(ref.book);
-        
-        if (!targetBook) {
-          return {
-            bookName: ref.book,
-            chapter: ref.chapter,
-            verse: ref.verse,
-            status: 'invalid' as const,
-            errorMessage: `Book "${ref.book}" not found`
-          };
-        }
-        
-        if (ref.chapter > targetBook.total_chapters) {
-          return {
-            bookName: ref.book,
-            chapter: ref.chapter,
-            verse: ref.verse,
-            targetBookId: targetBook.id,
-            status: 'invalid' as const,
-            errorMessage: `${targetBook.name_english} only has ${targetBook.total_chapters} chapters`
-          };
-        }
-        
-        return {
-          bookName: targetBook.name_english,
-          chapter: ref.chapter,
-          verse: ref.verse,
-          targetBookId: targetBook.id,
-          status: 'valid' as const
-        };
-      });
-      
-      setParsedReferences(validatedRefs);
-    } else {
-      setParsedReferences([]);
-    }
-  }, [bulkCrossRefs, books]);
 
   const handleSaveParsedReferences = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    
-    const validRefs = parsedReferences.filter(ref => ref.status === 'valid');
-    
-    if (validRefs.length === 0) {
-      setMessage('No valid references to save');
-      return;
-    }
-    
+    if (validParsed.length === 0) { setMessage('No valid references to save'); return; }
     if (!sourceBookId || !sourceChapter || !sourceVerse) {
       setMessage('Please select a pray-read prayer verse first (Source Verse: Book, Chapter, Verse)');
       return;
     }
-
     setBulkSaving(true);
     setMessage('');
-
     try {
-      let successCount = 0;
-      let failCount = 0;
-
-      for (const ref of validRefs) {
+      let successCount = 0; let failCount = 0; const failedLabels: string[] = [];
+      for (const ref of validParsed) {
         try {
           const response = await fetch('/api/cross-references', {
             method: 'POST',
@@ -479,38 +451,27 @@ function CrossReferencesContent() {
               notes: notes || 'Added via bulk paste'
             })
           });
-
-          if (response.ok) {
-            successCount++;
-          } else {
-            failCount++;
-          }
-        } catch (error) {
-          failCount++;
-        }
+          if (response.ok) successCount++;
+          else { failCount++; failedLabels.push(`${ref.bookName} ${ref.chapter}:${ref.verse}`); }
+        } catch (error) { failCount++; failedLabels.push(`${ref.bookName} ${ref.chapter}:${ref.verse}`); }
       }
-
-      setMessage(`✅ Saved ${successCount} cross-references successfully${failCount > 0 ? `, ${failCount} failed` : ''} for ${books.find(b => b.id === parseInt(sourceBookId))?.name_english} ${sourceChapter}:${sourceVerse}`);
+      setMessage(`✅ Saved ${successCount} cross-references successfully${failCount > 0 ? `, ${failCount} failed: ${failedLabels.join(', ')}` : ''} for ${books.find(b => b.id === parseInt(sourceBookId))?.name_english} ${sourceChapter}:${sourceVerse}`);
       setBulkCrossRefs('');
-      setParsedReferences([]);
       setNotes('');
-      // Sync viewing fields and auto-refresh list from DB (also writes to localStorage)
-      setViewingBookId(sourceBookId);
-      setViewingChapter(sourceChapter);
-      setViewingVerse(sourceVerse);
-      // Save the verse key immediately so it restores on next load
+      setViewingBookId(sourceBookId); setViewingChapter(sourceChapter); setViewingVerse(sourceVerse);
       localStorage.setItem(LS_LAST_VERSE_KEY, JSON.stringify({ bookId: sourceBookId, chapter: sourceChapter, verse: sourceVerse }));
       fetchCrossReferences(sourceBookId, sourceChapter, sourceVerse);
-    } catch (error) {
-      console.error('Error saving cross-references:', error);
-      setMessage('Error saving cross-references');
-    } finally {
-      setBulkSaving(false);
-    }
+    } catch (error) { console.error('Error saving cross-references:', error); setMessage('Error saving cross-references'); }
+    finally { setBulkSaving(false); }
   };
 
   const handleRemoveParsedRef = (index: number) => {
-    setParsedReferences(prev => prev.filter((_, i) => i !== index));
+    // Removing from the preview: rebuild the paste text without that one verse.
+    // Simplest reliable way — keep a hidden exclusion by filtering the parsed list
+    // via re-typing is confusing, so instead we remove it from the textarea:
+    // parsed rows are in order, so drop that row and re-serialise the rest.
+    const remaining = parsedReferences.filter((_, i) => i !== index).filter((r) => r.status === 'valid');
+    setBulkCrossRefs(remaining.map((r) => `${r.bookName} ${r.chapter}:${r.verse}`).join('; '));
   };
 
   if (!mounted || loading) {
@@ -552,7 +513,6 @@ function CrossReferencesContent() {
             </div>
           </div>
 
-          {/* localStorage cache status */}
           {localCacheInfo && (
             <div className="mb-3 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-2 text-sm text-amber-700">
               <svg className="animate-spin h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24">
@@ -566,86 +526,39 @@ function CrossReferencesContent() {
           <div className="grid grid-cols-3 gap-3 mb-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Book</label>
-              <select
-                value={viewingBookId}
-                onChange={(e) => setViewingBookId(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm"
-              >
+              <select value={viewingBookId} onChange={(e) => setViewingBookId(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm">
                 <option value="">Select Book</option>
-                {books.map((book) => (
-                  <option key={book.id} value={book.id}>{book.name_english || book.name_luganda}</option>
-                ))}
+                {books.map((book) => (<option key={book.id} value={book.id}>{book.name_english || book.name_luganda}</option>))}
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Chapter</label>
-              <input type="number" min="1" value={viewingChapter}
-                onChange={(e) => setViewingChapter(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm"
-                placeholder="e.g. 1"
-              />
+              <input type="number" min="1" value={viewingChapter} onChange={(e) => setViewingChapter(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm" placeholder="e.g. 1" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Verse</label>
-              <input type="number" min="1" value={viewingVerse}
-                onChange={(e) => setViewingVerse(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm"
-                placeholder="e.g. 1"
-              />
+              <input type="number" min="1" value={viewingVerse} onChange={(e) => setViewingVerse(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 text-sm" placeholder="e.g. 1" />
             </div>
           </div>
 
           <div className="flex gap-3 mb-1">
-            <button
-              onClick={() => fetchCrossReferences()}
-              disabled={!viewingBookId || !viewingChapter || !viewingVerse || loadingRefs}
-              className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center gap-2"
-            >
-              {loadingRefs ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>
-                  Loading from database…
-                </>
-              ) : (
-                <>📂 Load from Database</>
-              )}
+            <button onClick={() => fetchCrossReferences()} disabled={!viewingBookId || !viewingChapter || !viewingVerse || loadingRefs} className="flex-1 bg-green-600 text-white py-2.5 px-4 rounded-lg hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center gap-2">
+              {loadingRefs ? (<><svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Loading from database…</>) : (<>📂 Load from Database</>)}
             </button>
             {viewingBookId && viewingChapter && viewingVerse && (
-              <button
-                type="button"
-                onClick={() => {
+              <button type="button" onClick={() => {
                   const cached = loadCrossRefsFromLocalStorage(viewingBookId, viewingChapter, viewingVerse);
-                  if (cached.length > 0) {
-                    setCrossReferences(cached);
-                    setLocalCacheInfo(`Loaded ${cached.length} reference(s) from local cache ✓`);
-                    setTimeout(() => setLocalCacheInfo(''), 3000);
-                  } else {
-                    setLocalCacheInfo('No local cache found for this verse — use "Load from Database" instead.');
-                    setTimeout(() => setLocalCacheInfo(''), 4000);
-                  }
-                }}
-                className="px-4 py-2.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-200 transition-colors font-medium text-sm whitespace-nowrap"
-                title="Load instantly from browser cache (no network)"
-              >
-                ⚡ From Cache
-              </button>
+                  if (cached.length > 0) { setCrossReferences(cached); setLocalCacheInfo(`Loaded ${cached.length} reference(s) from local cache ✓`); setTimeout(() => setLocalCacheInfo(''), 3000); }
+                  else { setLocalCacheInfo('No local cache found for this verse — use "Load from Database" instead.'); setTimeout(() => setLocalCacheInfo(''), 4000); }
+                }} className="px-4 py-2.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-lg hover:bg-amber-200 transition-colors font-medium text-sm whitespace-nowrap" title="Load instantly from browser cache (no network)">⚡ From Cache</button>
             )}
           </div>
-          <p className="text-xs text-gray-400 mb-4">
-            💡 "From Cache" loads instantly from your browser — "Load from Database" always fetches the latest from the server.
-          </p>
+          <p className="text-xs text-gray-400 mb-4">💡 "From Cache" loads instantly from your browser — "Load from Database" always fetches the latest from the server.</p>
 
-          {/* Results */}
           {crossReferences.length > 0 && (
             <div className="mt-2">
               <div className="flex items-center justify-between text-sm mb-3">
-                <span className="font-semibold text-gray-700">
-                  📌 {crossReferences.length} cross-reference{crossReferences.length !== 1 ? 's' : ''} for{' '}
-                  <span className="text-blue-700">{books.find(b => b.id === parseInt(viewingBookId))?.name_english} {viewingChapter}:{viewingVerse}</span>
-                </span>
+                <span className="font-semibold text-gray-700">📌 {crossReferences.length} cross-reference{crossReferences.length !== 1 ? 's' : ''} for <span className="text-blue-700">{books.find(b => b.id === parseInt(viewingBookId))?.name_english} {viewingChapter}:{viewingVerse}</span></span>
                 <span className="text-xs text-gray-400">Scroll to see all</span>
               </div>
               <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
@@ -653,33 +566,27 @@ function CrossReferencesContent() {
                   <div key={ref.id} className="border border-gray-200 rounded-lg overflow-hidden">
                     {editingId === ref.id ? (
                       <div className="p-4 bg-blue-50 space-y-3">
-                        <p className="text-sm font-semibold text-blue-800">✏️ Edit Cross-Reference</p>
+                        <p className="text-sm font-semibold text-blue-800">✏ Edit Cross-Reference</p>
                         <div className="grid grid-cols-3 gap-2">
                           <div>
                             <label className="block text-xs text-gray-600 mb-1">Target Book</label>
-                            <select value={editTargetBookId} onChange={(e) => setEditTargetBookId(e.target.value)}
-                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400">
+                            <select value={editTargetBookId} onChange={(e) => setEditTargetBookId(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400">
                               <option value="">Book</option>
                               {books.map(b => <option key={b.id} value={b.id}>{b.name_english}</option>)}
                             </select>
                           </div>
                           <div>
                             <label className="block text-xs text-gray-600 mb-1">Chapter</label>
-                            <input type="number" min="1" value={editTargetChapter}
-                              onChange={(e) => setEditTargetChapter(e.target.value)}
-                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400"/>
+                            <input type="number" min="1" value={editTargetChapter} onChange={(e) => setEditTargetChapter(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400"/>
                           </div>
                           <div>
                             <label className="block text-xs text-gray-600 mb-1">Verse</label>
-                            <input type="number" min="1" value={editTargetVerse}
-                              onChange={(e) => setEditTargetVerse(e.target.value)}
-                              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400"/>
+                            <input type="number" min="1" value={editTargetVerse} onChange={(e) => setEditTargetVerse(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400"/>
                           </div>
                         </div>
                         <div>
                           <label className="block text-xs text-gray-600 mb-1">Relationship Type</label>
-                          <select value={editRelationshipType} onChange={(e) => setEditRelationshipType(e.target.value)}
-                            className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400">
+                          <select value={editRelationshipType} onChange={(e) => setEditRelationshipType(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400">
                             <option value="related">Related</option>
                             <option value="parallel">Parallel</option>
                             <option value="fulfillment">Fulfillment</option>
@@ -690,19 +597,11 @@ function CrossReferencesContent() {
                         </div>
                         <div>
                           <label className="block text-xs text-gray-600 mb-1">Notes</label>
-                          <textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
-                            rows={2} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400"
-                            placeholder="Optional notes..."/>
+                          <textarea value={editNotes} onChange={(e) => setEditNotes(e.target.value)} rows={2} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-blue-400" placeholder="Optional notes..."/>
                         </div>
                         <div className="flex gap-2">
-                          <button onClick={() => handleUpdateCrossReference(ref.id)} disabled={editSaving}
-                            className="flex-1 bg-blue-600 text-white py-1.5 px-3 rounded text-sm hover:bg-blue-700 disabled:bg-gray-400 font-semibold">
-                            {editSaving ? 'Saving...' : '💾 Update'}
-                          </button>
-                          <button onClick={() => setEditingId(null)}
-                            className="flex-1 bg-gray-200 text-gray-700 py-1.5 px-3 rounded text-sm hover:bg-gray-300">
-                            Cancel
-                          </button>
+                          <button onClick={() => handleUpdateCrossReference(ref.id)} disabled={editSaving} className="flex-1 bg-blue-600 text-white py-1.5 px-3 rounded text-sm hover:bg-blue-700 disabled:bg-gray-400 font-semibold">{editSaving ? 'Saving...' : '💾 Update'}</button>
+                          <button onClick={() => setEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 py-1.5 px-3 rounded text-sm hover:bg-gray-300">Cancel</button>
                         </div>
                       </div>
                     ) : (
@@ -710,25 +609,15 @@ function CrossReferencesContent() {
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 flex-wrap">
-                              <a href={`/bible-reader/${ref.target_book_id}/${ref.target_chapter}#verse-${ref.target_verse}`}
-                                target="_blank" rel="noopener noreferrer"
-                                className="font-semibold text-blue-600 hover:text-blue-800 hover:underline text-sm">
-                                {ref.target_book_name} {ref.target_chapter}:{ref.target_verse} ↗
-                              </a>
+                              <a href={`/bible-reader/${ref.target_book_id}/${ref.target_chapter}#verse-${ref.target_verse}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-blue-600 hover:text-blue-800 hover:underline text-sm">{ref.target_book_name} {ref.target_chapter}:{ref.target_verse} ↗</a>
                               <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs">{ref.relationship_type}</span>
                             </div>
                             {ref.text_english && <p className="text-xs text-gray-600 mt-1 line-clamp-2">{ref.text_english}</p>}
                             {ref.notes && <p className="text-xs text-gray-400 mt-1 italic">📝 {ref.notes}</p>}
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            <button onClick={() => handleEditCrossReference(ref)}
-                              className="px-2 py-1 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded font-medium border border-blue-200">
-                              Edit
-                            </button>
-                            <button onClick={() => handleDeleteCrossReference(ref.id)}
-                              className="px-2 py-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded font-medium border border-red-200">
-                              Delete
-                            </button>
+                            <button onClick={() => handleEditCrossReference(ref)} className="px-2 py-1 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded font-medium border border-blue-200">Edit</button>
+                            <button onClick={() => handleDeleteCrossReference(ref.id)} className="px-2 py-1 text-xs bg-red-50 text-red-600 hover:bg-red-100 rounded font-medium border border-red-200">Delete</button>
                           </div>
                         </div>
                       </div>
@@ -749,216 +638,102 @@ function CrossReferencesContent() {
         {/* Add Cross-Reference Form */}
         <div className="bg-white rounded-lg shadow-md p-6">
             <h2 className="text-xl font-semibold mb-4">➕ Add New Cross-Reference</h2>
-            
             <form onSubmit={(e) => {
               e.preventDefault();
-              // If there are parsed references, save them; otherwise save single reference
-              if (parsedReferences.length > 0 && parsedReferences.some(r => r.status === 'valid')) {
-                handleSaveParsedReferences(e);
-              } else {
-                handleSaveCrossReference(e);
-              }
+              if (validParsed.length > 0) handleSaveParsedReferences(e);
+              else handleSaveCrossReference(e);
             }} className="space-y-4">
               {/* Bulk Paste Section - Top */}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <h3 className="font-medium text-blue-900 mb-2 flex items-center">
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  Bulk Paste Cross-References
-                </h3>
+                <h3 className="font-medium text-blue-900 mb-2">📋 Bulk Paste Cross-References</h3>
                 <p className="text-sm text-blue-700 mb-3">
-                  Paste multiple references (e.g., Romans 1:6; 1 Corinthians 1:2; John 17:11-12), select source verse below, then click Save
+                  Paste one or many. Separate with <strong>;</strong> or a new line. Ranges and comma-lists expand to one row per verse. Full names or short names both work.
                 </p>
+                <div className="text-xs bg-white rounded p-2 mb-3 text-blue-800 border border-blue-200">
+                  Example: <span className="font-mono">Romans 1:6; 1 Corinthians 1:2; John 17:11-12; John 8:1-5,6,7-8; Ex. 3:5; Jn 6:4</span> → <strong>15 verses</strong>
+                </div>
                 <textarea
                   value={bulkCrossRefs}
-                  onChange={(e) => {
-                    setBulkCrossRefs(e.target.value);
-                  }}
+                  onChange={(e) => setBulkCrossRefs(e.target.value)}
                   rows={3}
-                  placeholder="Romans 1:6; 1 Corinthians 1:2; John 17:11–12; 1 Peter 1:2; 1 Thessalonians 5:23"
-                  className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                  placeholder="Romans 1:6; 1 Corinthians 1:2; John 17:11-12; John 8:1-5,6,7-8; Ex. 3:5; Jn 6:4"
+                  className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm font-mono"
                 />
-
-                {/* Parsed References List */}
                 {parsedReferences.length > 0 && (
                   <div className="mt-3 space-y-2 max-h-48 overflow-y-auto bg-white rounded-lg p-3">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">
-                      📋 Parsed: {parsedReferences.filter(r => r.status === 'valid').length} valid, {parsedReferences.filter(r => r.status === 'invalid').length} invalid
-                    </h4>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">📋 Parsed: {validParsed.length} valid, {parsedReferences.filter(r => r.status === 'invalid').length} invalid</h4>
                     {parsedReferences.map((ref, index) => (
-                      <div 
-                        key={index}
-                        className={`flex items-center justify-between p-2 rounded text-sm ${
-                          ref.status === 'valid' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
-                        }`}
-                      >
+                      <div key={index} className={`flex items-center justify-between p-2 rounded text-sm ${ref.status === 'valid' ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
                         <div className="flex-1">
-                          <span className={`font-medium ${ref.status === 'valid' ? 'text-green-900' : 'text-red-900'}`}>
-                            {ref.status === 'valid' ? '✅' : '❌'} {ref.bookName} {ref.chapter}:{ref.verse}
-                          </span>
-                          {ref.status === 'invalid' && ref.errorMessage && (
-                            <p className="text-xs text-red-600 mt-1">{ref.errorMessage}</p>
+                          {ref.status === 'valid' ? (
+                            <span className="font-medium text-green-900">✅ {ref.bookName} {ref.chapter}:{ref.verse}</span>
+                          ) : (
+                            <span className="font-medium text-red-900">❌ {ref.errorMessage || `${ref.bookName} ${ref.chapter}:${ref.verse}`}</span>
                           )}
+                          {ref.status === 'invalid' && ref.errorMessage && ref.bookName && (<p className="text-xs text-red-600 mt-1">{ref.errorMessage}</p>)}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveParsedRef(index)}
-                          className="text-gray-500 hover:text-red-600 ml-2"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
+                        <button type="button" onClick={() => handleRemoveParsedRef(index)} className="text-gray-500 hover:text-red-600 ml-2">✕</button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
 
-              <div className="text-center text-gray-400 text-sm">
-                {parsedReferences.length > 0 ? '↓ Select Pray-Read Prayer Verse (Source) Below ↓' : 'OR'}
-              </div>
+              <div className="text-center text-gray-400 text-sm">{parsedReferences.length > 0 ? '↓ Select Pray-Read Prayer Verse (Source) Below ↓' : 'OR'}</div>
 
-              {/* Source Verse (Pray-Read Prayer Verse) */}
+              {/* Source Verse */}
               <div className="border-b pb-4">
                 <h3 className="font-medium text-gray-700 mb-3 flex items-center">
-                  <span className={parsedReferences.length > 0 ? 'text-green-600' : ''}>
-                    {parsedReferences.length > 0 ? '🎯 ' : ''}Source Verse (Pray-Read Prayer Verse)
-                  </span>
-                  {parsedReferences.length > 0 && parsedReferences.some(r => r.status === 'valid') && (
-                    <span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                      {parsedReferences.filter(r => r.status === 'valid').length} cross-refs will be linked here
-                    </span>
-                  )}
+                  <span className={validParsed.length > 0 ? 'text-green-600' : ''}>{validParsed.length > 0 ? '🎯 ' : ''}Source Verse (Pray-Read Prayer Verse)</span>
+                  {validParsed.length > 0 && (<span className="ml-2 text-xs bg-green-100 text-green-700 px-2 py-1 rounded">{validParsed.length} cross-refs will be linked here</span>)}
                 </h3>
                 <div className="grid grid-cols-3 gap-2">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Book</label>
-                    <select
-                      value={sourceBookId}
-                      onChange={(e) => {
-                        setSourceBookId(e.target.value);
-                        setSourceText('');
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      required
-                    >
+                    <select value={sourceBookId} onChange={(e) => { setSourceBookId(e.target.value); setSourceText(''); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required>
                       <option value="">Select Book</option>
-                      {books && books.length > 0 && books.map((book) => (
-                        <option key={book.id} value={book.id}>
-                          {book.name_english || book.name_luganda}
-                        </option>
-                      ))}
+                      {books && books.length > 0 && books.map((book) => (<option key={book.id} value={book.id}>{book.name_english || book.name_luganda}</option>))}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Chapter</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={sourceChapter}
-                      onChange={(e) => {
-                        setSourceChapter(e.target.value);
-                        setSourceText('');
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
+                    <input type="number" min="1" value={sourceChapter} onChange={(e) => { setSourceChapter(e.target.value); setSourceText(''); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Verse</label>
-                    <input
-                      type="number"
-                      min="1"
-                      value={sourceVerse}
-                      onChange={(e) => {
-                        setSourceVerse(e.target.value);
-                        setSourceText('');
-                      }}
-                      onBlur={() => fetchVerseText(sourceBookId, sourceChapter, sourceVerse, true)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                      required
-                    />
+                    <input type="number" min="1" value={sourceVerse} onChange={(e) => { setSourceVerse(e.target.value); setSourceText(''); }} onBlur={() => fetchVerseText(sourceBookId, sourceChapter, sourceVerse, true)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required />
                   </div>
                 </div>
-                {sourceText && (
-                  <div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-700">
-                    {sourceText.substring(0, 150)}...
-                  </div>
-                )}
+                {sourceText && (<div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-700">{sourceText.substring(0, 150)}...</div>)}
               </div>
 
-              {/* Target Verse - Only show if no bulk references */}
-              {parsedReferences.length === 0 && (
+              {validParsed.length === 0 && (
                 <div className="border-b pb-4">
                   <h3 className="font-medium text-gray-700 mb-3">Target Verse (Related)</h3>
                   <div className="grid grid-cols-3 gap-2">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Book</label>
-                      <select
-                        value={targetBookId}
-                        onChange={(e) => {
-                          setTargetBookId(e.target.value);
-                          setTargetText('');
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        required={parsedReferences.length === 0}
-                      >
+                      <select value={targetBookId} onChange={(e) => { setTargetBookId(e.target.value); setTargetText(''); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required>
                         <option value="">Select Book</option>
-                        {books && books.length > 0 && books.map((book) => (
-                          <option key={book.id} value={book.id}>
-                            {book.name_english || book.name_luganda}
-                          </option>
-                        ))}
+                        {books && books.length > 0 && books.map((book) => (<option key={book.id} value={book.id}>{book.name_english || book.name_luganda}</option>))}
                       </select>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Chapter</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={targetChapter}
-                        onChange={(e) => {
-                          setTargetChapter(e.target.value);
-                          setTargetText('');
-                        }}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        required={parsedReferences.length === 0}
-                      />
+                      <input type="number" min="1" value={targetChapter} onChange={(e) => { setTargetChapter(e.target.value); setTargetText(''); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required />
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Verse</label>
-                      <input
-                        type="number"
-                        min="1"
-                        value={targetVerse}
-                        onChange={(e) => {
-                          setTargetVerse(e.target.value);
-                          setTargetText('');
-                        }}
-                        onBlur={() => fetchVerseText(targetBookId, targetChapter, targetVerse, false)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                        required={parsedReferences.length === 0}
-                      />
+                      <input type="number" min="1" value={targetVerse} onChange={(e) => { setTargetVerse(e.target.value); setTargetText(''); }} onBlur={() => fetchVerseText(targetBookId, targetChapter, targetVerse, false)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" required />
                     </div>
                   </div>
-                  {targetText && (
-                    <div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-700">
-                      {targetText.substring(0, 150)}...
-                    </div>
-                  )}
+                  {targetText && (<div className="mt-2 p-2 bg-gray-50 rounded text-sm text-gray-700">{targetText.substring(0, 150)}...</div>)}
                 </div>
               )}
 
-              {/* Relationship Type */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Relationship Type</label>
-                <select
-                  value={relationshipType}
-                  onChange={(e) => setRelationshipType(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                >
+                <select value={relationshipType} onChange={(e) => setRelationshipType(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500">
                   <option value="related">Related</option>
                   <option value="parallel">Parallel</option>
                   <option value="fulfillment">Fulfillment</option>
@@ -968,72 +743,28 @@ function CrossReferencesContent() {
                 </select>
               </div>
 
-              {/* Notes */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Notes (Optional)</label>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                  placeholder="Add any notes about this cross-reference..."
-                />
+                <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500" placeholder="Add any notes about this cross-reference..." />
               </div>
 
-              {/* Save button — bulk mode or single mode */}
-              {parsedReferences.length > 0 && parsedReferences.some(r => r.status === 'valid') ? (
+              {validParsed.length > 0 ? (
                 <>
-                  <button
-                    type="submit"
-                    disabled={bulkSaving || !sourceBookId || !sourceChapter || !sourceVerse}
-                    className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center gap-2"
-                  >
-                    {bulkSaving ? (
-                      <>
-                        <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                        </svg>
-                        Saving...
-                      </>
-                    ) : (
-                      <>💾 Save {parsedReferences.filter(r => r.status === 'valid').length} Cross-References</>
-                    )}
+                  <button type="submit" disabled={bulkSaving || !sourceBookId || !sourceChapter || !sourceVerse} className="w-full bg-indigo-600 text-white py-3 px-4 rounded-lg hover:bg-indigo-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center gap-2">
+                    {bulkSaving ? 'Saving...' : `💾 Save ${validParsed.length} Cross-References`}
                   </button>
-                  <p className="text-xs text-center text-gray-500">
-                    Saves all {parsedReferences.filter(r => r.status === 'valid').length} references linked to the selected source verse
-                  </p>
+                  <p className="text-xs text-center text-gray-500">Saves all {validParsed.length} references linked to the selected source verse</p>
                 </>
               ) : (
-                <button
-                  type="submit"
-                  disabled={saving || !sourceBookId || !sourceChapter || !sourceVerse || !targetBookId || !targetChapter || !targetVerse}
-                  className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                      </svg>
-                      Saving...
-                    </>
-                  ) : (
-                    <>➕ Add Cross-Reference</>
-                  )}
+                <button type="submit" disabled={saving || !sourceBookId || !sourceChapter || !sourceVerse || !targetBookId || !targetChapter || !targetVerse} className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center gap-2">
+                  {saving ? 'Saving...' : '➕ Add Cross-Reference'}
                 </button>
               )}
             </form>
         </div>
 
-        {/* Back to Admin Panel */}
         <div className="mt-6">
-          <button
-            onClick={() => router.push('/admin-panel')}
-            className="text-blue-600 hover:text-blue-800 font-medium"
-          >
-            ← Back to Admin Panel
-          </button>
+          <button onClick={() => router.push('/admin-panel')} className="text-blue-600 hover:text-blue-800 font-medium">← Back to Admin Panel</button>
         </div>
       </div>
     </div>
