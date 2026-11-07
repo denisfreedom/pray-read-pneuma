@@ -4,9 +4,10 @@ import { useState, useEffect } from 'react';
 import AdminNavbar from '../components/AdminNavbar';
 import DevotionalManagement from '../components/DevotionalManagement';
 import RichTextEditor from '../components/RichTextEditor';
+import BookChapterBulkImport from '../components/BookChapterBulkImport';
 import { Pencil, Trash2, Plus, BookOpen, Users, Globe, MessageSquare, Music, Save, Edit2 } from 'lucide-react';
 import { detectAudioDuration } from '../utils/audioUtils';
-import BookChapterBulkImport from '@/components/BookChapterBulkImport';
+
 interface Book { id: number; book_number: number; name: string; abbreviation: string; testament: string; total_chapters: number; }
 interface Verse { id: number; book_number: number; book_name: string; chapter: number; verse_number: number; english_text: string; luganda_text: string; }
 type SidePanelTab = 'intro' | 'outline' | 'prayer';
@@ -356,6 +357,8 @@ export default function AdminPanel() {
         </div>
         {activeSection === 'bible-content' && (
           <div>
+            <BookChapterBulkImport />
+
             <div className="mb-8 p-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-600 rounded-lg"><h3 className="text-lg font-bold text-blue-900 mb-3">📊 Bible Books Status</h3><p className="text-sm text-blue-800 mb-2">✅ <strong>66 total books</strong> in database (39 OT + 27 NT)</p><p className="text-sm text-blue-800 mb-3">📖 <strong>5 books with verses uploaded</strong>: Genesis, Exodus, Leviticus, Numbers, Deuteronomy</p><p className="text-xs text-blue-700">💡 Users can read these 5 books in the Bible Reader. Other books will show &quot;Chapter not found&quot; until verses are uploaded.</p></div>
             <div className="bg-white rounded-lg shadow p-6 mb-8">
               <h3 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2"><BookOpen className="w-6 h-6" /> Verses Editor — Manual Add &amp; Edit (English + Luganda)</h3>
