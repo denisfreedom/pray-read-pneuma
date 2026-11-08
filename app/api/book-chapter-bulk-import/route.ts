@@ -1,232 +1,192 @@
 import { NextRequest, NextResponse } from 'next/server';
 import sql from '@/app/api/utils/sql';
 
-/* [STRIPPED 66 bytes] */
-/*  BOOK CHAPTER BULK IMPORT API                                 */
-/*  POST one chapter at a time (Admin Panel sends chapter batches) */
-/*  Body: { book, introduction?, introduction_luganda?,           */
-/*          closing_prayer?, closing_prayer_luganda?,             */
-/*          chapter: { chapter, introduction?, introduction_luganda?, */
-/*                     verses: [{ verse, pray_read?, pray_read_luganda?, */
-/*                                cross_references?: string[] }],  */
-/*                     closing_prayer?, closing_prayer_luganda? }, */
-/*          overwrite?: boolean }                                 */
-/*  Re-upload = UPSERT (ON CONFLICT DO UPDATE), never duplicates.  */
-/* [STRIPPED 66 bytes] */
+// POST /api/book-chapter-bulk-import — accepts whole-book {chapters:[...]} OR single-chapter {chapter:{...}}
+// Body: { book, introduction, closing_prayer, chapters: [{ chapter, introduction, closing_prayer, verses: [{ verse, pray_read, cross_references: ["John 14:6", ...] }] }] }
+// Also accepts _english / _luganda suffixed keys and book_name / bookName.
 
-type CanonBook = { id: number; name: string; aliases: string[] };
-const CANON: CanonBook[] = [
-  { id: 1, name: 'Genesis', aliases: ['gen', 'ge', 'gn'] },
-  { id: 2, name: 'Exodus', aliases: ['ex', 'exod', 'exo'] },
-  { id: 3, name: 'Leviticus', aliases: ['lev', 'lv'] },
-  { id: 4, name: 'Numbers', aliases: ['num', 'nu', 'nm'] },
-  { id: 5, name: 'Deuteronomy', aliases: ['deut', 'deu', 'dt'] },
-  { id: 6, name: 'Joshua', aliases: ['josh', 'jos'] },
-  { id: 7, name: 'Judges', aliases: ['judg', 'jdg', 'jg'] },
-  { id: 8, name: 'Ruth', aliases: ['ru'] },
-  { id: 9, name: '1 Samuel', aliases: ['1 sam', '1sam', '1 sa', '1sa'] },
-  { id: 10, name: '2 Samuel', aliases: ['2 sam', '2sam', '2 sa', '2sa'] },
-  { id: 11, name: '1 Kings', aliases: ['1 kings', '1kings', '1 kgs', '1kgs', '1 ki', '1ki'] },
-  { id: 12, name: '2 Kings', aliases: ['2 kings', '2kings', '2 kgs', '2kgs', '2 ki', '2ki'] },
-  { id: 13, name: '1 Chronicles', aliases: ['1 chron', '1chron', '1 chr', '1chr', '1 ch', '1ch'] },
-  { id: 14, name: '2 Chronicles', aliases: ['2 chron', '2chron', '2 chr', '2chr', '2 ch', '2ch'] },
-  { id: 15, name: 'Ezra', aliases: ['ezr'] },
-  { id: 16, name: 'Nehemiah', aliases: ['neh', 'ne'] },
-  { id: 17, name: 'Esther', aliases: ['est', 'es'] },
-  { id: 18, name: 'Job', aliases: ['jb'] },
-  { id: 19, name: 'Psalms', aliases: ['ps', 'psalm', 'psa', 'psal'] },
-  { id: 20, name: 'Proverbs', aliases: ['prov', 'pro', 'prv', 'pr'] },
-  { id: 21, name: 'Ecclesiastes', aliases: ['eccl', 'eccles', 'ecc', 'ec'] },
-  { id: 22, name: 'Song of Solomon', aliases: ['song', 'song of songs', 'sos', 'cant', 'canticles'] },
-  { id: 23, name: 'Isaiah', aliases: ['isa', 'is'] },
-  { id: 24, name: 'Jeremiah', aliases: ['jer', 'je'] },
-  { id: 25, name: 'Lamentations', aliases: ['lam', 'la'] },
-  { id: 26, name: 'Ezekiel', aliases: ['ezek', 'eze', 'ez'] },
-  { id: 27, name: 'Daniel', aliases: ['dan', 'da', 'dn'] },
-  { id: 28, name: 'Hosea', aliases: ['hos', 'ho'] },
-  { id: 29, name: 'Joel', aliases: ['jl'] },
-  { id: 30, name: 'Amos', aliases: ['am'] },
-  { id: 31, name: 'Obadiah', aliases: ['obad', 'ob'] },
-  { id: 32, name: 'Jonah', aliases: ['jon', 'jnh'] },
-  { id: 33, name: 'Micah', aliases: ['mic', 'mi'] },
-  { id: 34, name: 'Nahum', aliases: ['nah', 'na'] },
-  { id: 35, name: 'Habakkuk', aliases: ['hab', 'hb'] },
-  { id: 36, name: 'Zephaniah', aliases: ['zeph', 'zep', 'zp'] },
-  { id: 37, name: 'Haggai', aliases: ['hag', 'hg'] },
-  { id: 38, name: 'Zechariah', aliases: ['zech', 'zec', 'zc'] },
-  { id: 39, name: 'Malachi', aliases: ['mal', 'ml'] },
-  { id: 40, name: 'Matthew', aliases: ['matt', 'mt', 'mat'] },
-  { id: 41, name: 'Mark', aliases: ['mk', 'mrk'] },
-  { id: 42, name: 'Luke', aliases: ['lk', 'lu'] },
-  { id: 43, name: 'John', aliases: ['jn', 'joh', 'jh'] },
-  { id: 44, name: 'Acts', aliases: ['ac'] },
-  { id: 45, name: 'Romans', aliases: ['rom', 'ro', 'rm'] },
-  { id: 46, name: '1 Corinthians', aliases: ['1 cor', '1cor', '1 co', '1co'] },
-  { id: 47, name: '2 Corinthians', aliases: ['2 cor', '2cor', '2 co', '2co'] },
-  { id: 48, name: 'Galatians', aliases: ['gal', 'ga'] },
-  { id: 49, name: 'Ephesians', aliases: ['eph', 'ep'] },
-  { id: 50, name: 'Philippians', aliases: ['phil', 'php', 'pp'] },
-  { id: 51, name: 'Colossians', aliases: ['col', 'cl'] },
-  { id: 52, name: '1 Thessalonians', aliases: ['1 thess', '1thess', '1 thes', '1thes', '1 th', '1th'] },
-  { id: 53, name: '2 Thessalonians', aliases: ['2 thess', '2thess', '2 thes', '2thes', '2 th', '2th'] },
-  { id: 54, name: '1 Timothy', aliases: ['1 tim', '1tim', '1 ti', '1ti'] },
-  { id: 55, name: '2 Timothy', aliases: ['2 tim', '2tim', '2 ti', '2ti'] },
-  { id: 56, name: 'Titus', aliases: ['tit', 'ti'] },
-  { id: 57, name: 'Philemon', aliases: ['phlm', 'phm', 'pm'] },
-  { id: 58, name: 'Hebrews', aliases: ['heb', 'he'] },
-  { id: 59, name: 'James', aliases: ['jas', 'ja', 'jm'] },
-  { id: 60, name: '1 Peter', aliases: ['1 pet', '1pet', '1 pe', '1pe', '1 pt', '1pt'] },
-  { id: 61, name: '2 Peter', aliases: ['2 pet', '2pet', '2 pe', '2pe', '2 pt', '2pt'] },
-  { id: 62, name: '1 John', aliases: ['1 jn', '1jn', '1 jo', '1jo', '1 jh', '1jh'] },
-  { id: 63, name: '2 John', aliases: ['2 jn', '2jn', '2 jo', '2jo', '2 jh', '2jh'] },
-  { id: 64, name: '3 John', aliases: ['3 jn', '3jn', '3 jo', '3jo', '3 jh', '3jh'] },
-  { id: 65, name: 'Jude', aliases: ['jud', 'jd'] },
-  { id: 66, name: 'Revelation', aliases: ['rev', 're', 'rv', 'apoc'] },
-];
-function norm(s: string) { return s.toLowerCase().replace(/\./g, '').replace(/\s+/g, ' ').trim(); }
-function resolveBook(raw: string, dbBooks: any[]): { id: number; name: string } | null {
-  const key = norm(raw);
-  for (const b of dbBooks) {
-    const cands = [b.name_english, b.name_luganda, b.abbreviation_english, b.abbreviation_luganda].filter(Boolean);
-    for (const c of cands) if (norm(String(c)) === key) return { id: b.book_number ?? b.id, name: b.name_english };
-  }
-  const sorted = [...CANON].sort((a, b) => b.name.length - a.name.length);
-  for (const c of sorted) if (norm(c.name) === key) return { id: c.id, name: c.name };
-  for (const c of sorted) if (c.aliases.some((a) => norm(a) === key)) return { id: c.id, name: c.name };
-  return null;
+const BOOK_ALIASES: Record<string, string> = {
+  'song of solomon': 'Song of Solomon', 'song of songs': 'Song of Solomon',
+  '1 samuel': '1 Samuel', '2 samuel': '2 Samuel', '1 kings': '1 Kings', '2 kings': '2 Kings',
+  '1 chronicles': '1 Chronicles', '2 chronicles': '2 Chronicles',
+  '1 corinthians': '1 Corinthians', '2 corinthians': '2 Corinthians',
+  '1 thessalonians': '1 Thessalonians', '2 thessalonians': '2 Thessalonians',
+  '1 timothy': '1 Timothy', '2 timothy': '2 Timothy',
+  '1 peter': '1 Peter', '2 peter': '2 Peter',
+  '1 john': '1 John', '2 john': '2 John', '3 john': '3 John',
+  'psalm': 'Psalms', 'psalms': 'Psalms', 'rev': 'Revelation',
+};
+
+function normBook(s: string) {
+  return s.trim().replace(/\.$/, '').replace(/\s+/g, ' ');
 }
-function expandVerseList(list: string): number[] {
-  const out: number[] = [];
-  for (const part of list.split(',')) {
-    const p = part.trim(); if (!p) continue;
-    const m = p.match(/^(\d+)\s*-\s*(\d+)$/);
-    if (m) { const s = parseInt(m[1], 10); const e = parseInt(m[2], 10); if (e < s) { out.push(s); continue; } for (let v = s; v <= e; v++) out.push(v); }
-    else if (/^\d+$/.test(p)) out.push(parseInt(p, 10));
+function resolveBookName(raw: string) {
+  const n = normBook(raw);
+  const lower = n.toLowerCase();
+  if (BOOK_ALIASES[lower]) return BOOK_ALIASES[lower];
+  return n;
+}
+
+// Parse one cross-ref string like "John 17:11-12" / "John 8:1-5,6,7-8" / "Ex. 3:5" / "Jn 6:4" / "John 8:1-5; 6:1"
+function parseRefs(input: string, lastBook: string | null): Array<{ book: string; chapter: number; verse: number }> {
+  const out: Array<{ book: string; chapter: number; verse: number }> = [];
+  let currentBook = lastBook;
+  // split on ; first (separate refs), keep commas inside a ref for verse lists
+  const parts = input.split(';').map(p => p.trim()).filter(Boolean);
+  for (const part of parts) {
+    // Try: [Book] chapter:verse-list   OR bare "6:1" (continuation)
+    const m = part.match(/^(?:(.+?)\s+)?(\d+)\s*:\s*(.+)$/);
+    if (!m) continue;
+    let bookPart = m[1]?.trim() || null;
+    const chapter = parseInt(m[2], 10);
+    const verseSpec = m[3].trim();
+    if (bookPart) {
+      // strip trailing dot: "Ex." -> "Ex"
+      bookPart = bookPart.replace(/\.$/, '');
+      currentBook = bookPart;
+    }
+    if (!currentBook) continue;
+    // verseSpec: "1-5,6,7-8" or "11-12" or "6"
+    for (const seg of verseSpec.split(',').map(s => s.trim()).filter(Boolean)) {
+      const rm = seg.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+      if (!rm) continue;
+      const from = parseInt(rm[1], 10);
+      const to = rm[2] ? parseInt(rm[2], 10) : from;
+      for (let v = from; v <= to; v++) out.push({ book: currentBook, chapter, verse: v });
+    }
   }
   return out;
-}
-// Same parser as modal + cPanel — full/short/dotted, ranges, comma-lists
-function parseRefs(input: string, dbBooks: any[]) {
-  const refs: Array<{ book_id: number; chapter: number; verse: number }> = [];
-  const errors: string[] = [];
-  const seen = new Set<string>();
-  let lastBook: { id: number; name: string } | null = null;
-  for (const rawChunk of input.split(/[;\n]+/)) {
-    const chunk = rawChunk.trim().replace(/\s+/g, ' ');
-    if (!chunk) continue;
-    const m = chunk.match(/^(.+?)\s+(\d+)\s*:\s*([\d\s,\-]+)$/);
-    if (!m) {
-      const bare = chunk.match(/^(\d+)\s*:\s*([\d\s,\-]+)$/);
-      if (bare && lastBook) {
-        const ch = parseInt(bare[1], 10);
-        for (const v of expandVerseList(bare[2])) {
-          const k = `${lastBook.id}:${ch}:${v}`; if (seen.has(k)) continue; seen.add(k);
-          refs.push({ book_id: lastBook.id, chapter: ch, verse: v });
-        }
-        continue;
-      }
-      errors.push(`Could not understand: "${chunk}"`);
-      continue;
-    }
-    const resolved = resolveBook(m[1].trim(), dbBooks);
-    if (!resolved) { errors.push(`Unknown book: "${m[1].trim()}" in "${chunk}"`); continue; }
-    lastBook = resolved;
-    const ch = parseInt(m[2], 10);
-    for (const v of expandVerseList(m[3])) {
-      const k = `${resolved.id}:${ch}:${v}`; if (seen.has(k)) continue; seen.add(k);
-      refs.push({ book_id: resolved.id, chapter: ch, verse: v });
-    }
-  }
-  return { refs, errors };
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { book, chapter, overwrite = true } = body;
-    if (!book || !chapter?.chapter) {
-      return NextResponse.json({ error: 'Missing book or chapter.chapter' }, { status: 400 });
+    const bookRaw: string = body.book || body.book_name || body.bookName || '';
+    if (!bookRaw) return NextResponse.json({ error: 'Missing book' }, { status: 400 });
+    const bookName = resolveBookName(bookRaw);
+
+    // Find book_id — bible_books uses name_english in this project, name in others. Try both.
+    let rows: any[] = [];
+    try {
+      rows = await sql`SELECT id, name_english AS name FROM bible_books WHERE LOWER(name_english) = LOWER(${bookName}) OR LOWER(name_luganda) = LOWER(${bookName}) LIMIT 1`;
+    } catch { rows = await sql`SELECT id, name FROM bible_books WHERE LOWER(name) = LOWER(${bookName}) OR LOWER(name_luganda) = LOWER(${bookName}) LIMIT 1`; }
+    if (!rows || rows.length === 0) {
+      return NextResponse.json({ error: `Book not found in bible_books: ${bookName}` }, { status: 404 });
     }
-    const dbBooks = await sql`SELECT id, name_english, name_luganda, abbreviation_english, abbreviation_luganda FROM bible_books`;
-    const source = resolveBook(String(book), dbBooks);
-    if (!source) return NextResponse.json({ error: `Unknown book: "${book}" — use English name, e.g. Genesis` }, { status: 400 });
+    const bookId = rows[0].id;
 
-    const chNum: number = chapter.chapter;
-    let saved = { intros: 0, prayRead: 0, xrefs: 0, prayers: 0 };
+    const bookIntroEn = body.introduction || body.introduction_english || body.book_introduction || body.bookIntro || null;
+    const bookIntroLg = body.introduction_luganda || body.book_introduction_luganda || null;
+    const bookClosingEn = body.closing_prayer || body.closing_prayer_english || body.book_closing_prayer || body.bookClosing || null;
+    const bookClosingLg = body.closing_prayer_luganda || body.book_closing_prayer_luganda || null;
 
-    // 1) Book intro / book closing prayer — sent only on first / last chapter batch
-    if (body.introduction || body.introduction_luganda) {
+    let counts = { chapters: 0, verses: 0, pray_read: 0, cross_refs: 0, chapter_intros: 0 };
+
+    if (bookIntroEn || bookIntroLg) {
       await sql`
         INSERT INTO book_introductions (book_id, introduction_english, introduction_luganda)
-        VALUES (${source.id}, ${body.introduction ?? null}, ${body.introduction_luganda ?? null})
+        VALUES (${bookId}, ${bookIntroEn}, ${bookIntroLg})
         ON CONFLICT (book_id) DO UPDATE SET
           introduction_english = COALESCE(EXCLUDED.introduction_english, book_introductions.introduction_english),
           introduction_luganda = COALESCE(EXCLUDED.introduction_luganda, book_introductions.introduction_luganda),
           updated_at = NOW()`;
-      saved.intros++;
     }
-    if (body.closing_prayer || body.closing_prayer_luganda) {
+    if (bookClosingEn || bookClosingLg) {
       await sql`
         INSERT INTO book_closing_prayers (book_id, prayer_english, prayer_luganda)
-        VALUES (${source.id}, ${body.closing_prayer ?? null}, ${body.closing_prayer_luganda ?? null})
+        VALUES (${bookId}, ${bookClosingEn}, ${bookClosingLg})
         ON CONFLICT (book_id) DO UPDATE SET
           prayer_english = COALESCE(EXCLUDED.prayer_english, book_closing_prayers.prayer_english),
           prayer_luganda = COALESCE(EXCLUDED.prayer_luganda, book_closing_prayers.prayer_luganda),
           updated_at = NOW()`;
-      saved.prayers++;
     }
 
-    // 2) Chapter intro + chapter closing prayer
-    if (chapter.introduction || chapter.introduction_luganda || chapter.closing_prayer || chapter.closing_prayer_luganda) {
-      await sql`
-        INSERT INTO chapter_introductions (book_id, chapter, introduction_english, introduction_luganda, closing_prayer_english, closing_prayer_luganda)
-        VALUES (${source.id}, ${chNum}, ${chapter.introduction ?? null}, ${chapter.introduction_luganda ?? null}, ${chapter.closing_prayer ?? null}, ${chapter.closing_prayer_luganda ?? null})
-        ON CONFLICT (book_id, chapter) DO UPDATE SET
-          introduction_english = COALESCE(EXCLUDED.introduction_english, chapter_introductions.introduction_english),
-          introduction_luganda = COALESCE(EXCLUDED.introduction_luganda, chapter_introductions.introduction_luganda),
-          closing_prayer_english = COALESCE(EXCLUDED.closing_prayer_english, chapter_introductions.closing_prayer_english),
-          closing_prayer_luganda = COALESCE(EXCLUDED.closing_prayer_luganda, chapter_introductions.closing_prayer_luganda),
-          updated_at = NOW()`;
-      saved.intros++;
+    // Accept BOTH formats: whole-book {chapters:[...]} (new component) AND single-chapter {chapter:{...}} (old draft)
+    const chapters = Array.isArray(body.chapters) ? body.chapters : body.chapter ? [body.chapter] : [];
+    // If single-chapter format, its book-level fields live on the chapter payload
+    if (body.chapter && !body.introduction && body.chapter.introduction && chapters.length === 1) {
+      // chapter intro already handled per-chapter below; nothing extra needed
     }
+    // Build a book-name -> id map once for cross-ref targets
+    let allBooks: any[] = [];
+    try { allBooks = await sql`SELECT id, name_english AS name, name_luganda, abbreviation_english AS abbreviation FROM bible_books`; }
+    catch { try { allBooks = await sql`SELECT id, name, name_luganda, abbreviation FROM bible_books`; } catch { allBooks = await sql`SELECT id, name_english AS name FROM bible_books`; } }
+    const byName = new Map<string, number>();
+    for (const b of allBooks) {
+      byName.set(String(b.name).toLowerCase(), b.id);
+      if (b.name_luganda) byName.set(String(b.name_luganda).toLowerCase(), b.id);
+      if (b.abbreviation) byName.set(String(b.abbreviation).toLowerCase().replace(/\.$/, ''), b.id);
+    }
+    // Short aliases
+    const SHORT: Record<string, string> = { 'ex': 'Exodus', 'exod': 'Exodus', 'jn': 'John', 'jhn': 'John', 'matt': 'Matthew', 'mk': 'Mark', 'lk': 'Luke', 'rom': 'Romans', '1 cor': '1 Corinthians', '2 cor': '2 Corinthians', 'gal': 'Galatians', 'eph': 'Ephesians', 'phil': 'Philippians', 'col': 'Colossians', '1 thess': '1 Thessalonians', '2 thess': '2 Thessalonians', '1 tim': '1 Timothy', '2 tim': '2 Timothy', 'heb': 'Hebrews', 'jas': 'James', '1 pet': '1 Peter', '2 pet': '2 Peter', '1 jn': '1 John', '2 jn': '2 John', '3 jn': '3 John', 'rev': 'Revelation', 'ps': 'Psalms', 'prov': 'Proverbs', 'isa': 'Isaiah', 'jer': 'Jeremiah', 'gen': 'Genesis', 'deut': 'Deuteronomy', 'josh': 'Joshua', 'judg': 'Judges' };
+    const resolveTargetId = (rawBook: string): number | null => {
+      const key = rawBook.toLowerCase().trim().replace(/\.$/, '');
+      if (SHORT[key]) return byName.get(SHORT[key].toLowerCase()) ?? null;
+      // Longest-name-first: try full key, then try matching "1 john" style
+      if (byName.has(key)) return byName.get(key)!;
+      // Try stripping numbers: "John" already handled; fallback: find book whose name ends with key
+      return null;
+    };
 
-    // 3) Verses: pray-read + cross-refs
-    const xrefErrors: string[] = [];
-    for (const v of chapter.verses ?? []) {
-      if (!v.verse) continue;
-      // Pray-read
-      if (v.pray_read || v.pray_read_luganda) {
+    for (const ch of chapters) {
+      const chapterNum = ch.chapter;
+      const chIntroEn = ch.introduction || ch.introduction_english || null;
+      const chIntroLg = ch.introduction_luganda || null;
+      const chCloseEn = ch.closing_prayer || ch.closing_prayer_english || null;
+      const chCloseLg = ch.closing_prayer_luganda || null;
+      if (chIntroEn || chIntroLg || chCloseEn || chCloseLg) {
         await sql`
-          INSERT INTO verse_pray_read (book_id, chapter, verse, pray_read_english, pray_read_luganda)
-          VALUES (${source.id}, ${chNum}, ${v.verse}, ${v.pray_read ?? null}, ${v.pray_read_luganda ?? null})
-          ON CONFLICT (book_id, chapter, verse) DO UPDATE SET
-            pray_read_english = COALESCE(EXCLUDED.pray_read_english, verse_pray_read.pray_read_english),
-            pray_read_luganda = COALESCE(EXCLUDED.pray_read_luganda, verse_pray_read.pray_read_luganda),
+          INSERT INTO chapter_introductions (book_id, chapter, introduction_english, introduction_luganda, closing_prayer_english, closing_prayer_luganda)
+          VALUES (${bookId}, ${chapterNum}, ${chIntroEn}, ${chIntroLg}, ${chCloseEn}, ${chCloseLg})
+          ON CONFLICT (book_id, chapter) DO UPDATE SET
+            introduction_english = COALESCE(EXCLUDED.introduction_english, chapter_introductions.introduction_english),
+            introduction_luganda = COALESCE(EXCLUDED.introduction_luganda, chapter_introductions.introduction_luganda),
+            closing_prayer_english = COALESCE(EXCLUDED.closing_prayer_english, chapter_introductions.closing_prayer_english),
+            closing_prayer_luganda = COALESCE(EXCLUDED.closing_prayer_luganda, chapter_introductions.closing_prayer_luganda),
             updated_at = NOW()`;
-        saved.prayRead++;
+        counts.chapter_intros++;
       }
-      // Cross-refs — array of strings, each string may itself hold many refs
-      const rawList: string[] = Array.isArray(v.cross_references) ? v.cross_references : [];
-      for (const raw of rawList) {
-        const { refs, errors } = parseRefs(String(raw), dbBooks);
-        xrefErrors.push(...errors.map((e) => `Ch ${chNum}:${v.verse} — ${e}`));
-        for (const r of refs) {
-          // Delete-then-insert per (source, target) keeps re-upload from duplicating
-          if (overwrite) {
-            await sql`DELETE FROM cross_references WHERE source_book_id = ${source.id} AND source_chapter = ${chNum} AND source_verse = ${v.verse} AND target_book_id = ${r.book_id} AND target_chapter = ${r.chapter} AND target_verse = ${r.verse}`;
-          }
+      counts.chapters++;
+
+      for (const v of ch.verses || []) {
+        const verseNum = v.verse;
+        const prayEn = v.pray_read || v.pray_read_english || v.prayer || v.prayer_passage || null;
+        const prayLg = v.pray_read_luganda || v.prayer_luganda || null;
+        if (prayEn || prayLg) {
           await sql`
-            INSERT INTO cross_references (source_book_id, source_chapter, source_verse, target_book_id, target_chapter, target_verse, relationship_type, notes)
-            VALUES (${source.id}, ${chNum}, ${v.verse}, ${r.book_id}, ${r.chapter}, ${r.verse}, 'related', 'Added via Book Chapter Bulk Import')
-            ON CONFLICT DO NOTHING`;
-          saved.xrefs++;
+            INSERT INTO verse_pray_read (book_id, chapter, verse, pray_read_english, pray_read_luganda)
+            VALUES (${bookId}, ${chapterNum}, ${verseNum}, ${prayEn}, ${prayLg})
+            ON CONFLICT (book_id, chapter, verse) DO UPDATE SET
+              pray_read_english = COALESCE(EXCLUDED.pray_read_english, verse_pray_read.pray_read_english),
+              pray_read_luganda = COALESCE(EXCLUDED.pray_read_luganda, verse_pray_read.pray_read_luganda),
+              updated_at = NOW()`;
+          counts.pray_read++;
+        }
+        counts.verses++;
+
+        // Cross-refs: array of strings, or a single string with ;
+        const rawRefs: string[] = Array.isArray(v.cross_references) ? v.cross_references : v.cross_references ? [String(v.cross_references)] : [];
+        let lastBook: string | null = null;
+        for (const refStr of rawRefs) {
+          const parsed = parseRefs(String(refStr), lastBook);
+          // update lastBook for bare continuations across entries
+          if (parsed.length) lastBook = parsed[parsed.length - 1].book;
+          for (const p of parsed) {
+            const targetId = resolveTargetId(p.book);
+            if (!targetId) continue;
+            await sql`
+              INSERT INTO cross_references (source_book_id, source_chapter, source_verse, target_book_id, target_chapter, target_verse, relationship_type)
+              VALUES (${bookId}, ${chapterNum}, ${verseNum}, ${targetId}, ${p.chapter}, ${p.verse}, 'related')
+              ON CONFLICT (source_book_id, source_chapter, source_verse, target_book_id, target_chapter, target_verse) DO NOTHING`;
+            counts.cross_refs++;
+          }
         }
       }
     }
 
-    return NextResponse.json({ ok: true, book: source.name, chapter: chNum, saved, xrefErrors });
-  } catch (e) {
-    console.error('book-chapter-bulk-import error:', e);
-    return NextResponse.json({ error: 'Import failed: ' + (e as Error).message }, { status: 500 });
+    return NextResponse.json({ success: true, book: bookName, book_id: bookId, counts });
+  } catch (e: any) {
+    console.error('book-chapter-bulk-import error', e);
+    return NextResponse.json({ error: e?.message || 'Import failed' }, { status: 500 });
   }
 }
