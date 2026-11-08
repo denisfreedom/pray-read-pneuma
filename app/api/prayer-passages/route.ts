@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
-
-const sql = neon(process.env.DATABASE_URL!);
+import sql from '@/app/api/utils/sql';
 
 export async function GET(request: NextRequest) {
   try {
@@ -22,133 +20,70 @@ export async function GET(request: NextRequest) {
         SELECT id FROM bible_books WHERE name_english = ${bookName}
       `;
       if (bookResult.length > 0) {
-        bookId = bookResult[0].id.toString();
+        bookId = String(bookResult[0].id);
       }
     }
 
-    if (bookId && chapter && verseNumber) {
-      // Get specific verse prayer passage
-      const result = await sql`
-        SELECT 
-          id,
-          book_id,
-          chapter,
-          verse_number,
-          english_prayer,
-          luganda_prayer,
-          created_at,
-          updated_at
-        FROM verse_prayers 
-        WHERE book_id = ${parseInt(bookId)} 
-        AND chapter = ${parseInt(chapter)} 
-        AND verse_number = ${parseInt(verseNumber)}
-      `;
-      return NextResponse.json(result[0] || null);
-    } else if (bookId && chapter) {
-      // Get all prayer passages for a chapter
-      const result = await sql`
-        SELECT 
-          id,
-          book_id,
-          chapter,
-          verse_number,
-          english_prayer,
-          luganda_prayer,
-          created_at,
-          updated_at
-        FROM verse_prayers 
-        WHERE book_id = ${parseInt(bookId)} 
-        AND chapter = ${parseInt(chapter)}
-        ORDER BY verse_number
-      `;
-      return NextResponse.json(result);
-    } else {
-      // Get all prayer passages
-      const result = await sql`
-        SELECT 
-          id,
-          book_id,
-          chapter,
-          verse_number,
-          english_prayer,
-          luganda_prayer,
-          created_at,
-          updated_at
-        FROM verse_prayers 
-        ORDER BY book_id, chapter, verse_number
-      `;
-      return NextResponse.json(result);
-    }
-  } catch (error) {
-    console.error('Error fetching prayer passages:', error);
-    return NextResponse.json({ 
-      error: 'Failed to fetch prayer passages',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { bookId, chapter, verseNumber, englishPrayer, lugandaPrayer } = body;
-
-    if (!bookId || !chapter || !verseNumber) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
+    if (!bookId || !chapter) {
+      return NextResponse.json({ error: 'Missing bookId/book and chapter' }, { status: 400 });
     }
 
-    // Always use UPSERT to insert or update prayer passages
-    const result = await sql`
-      INSERT INTO verse_prayers (book_id, chapter, verse_number, english_prayer, luganda_prayer)
-      VALUES (${bookId}, ${chapter}, ${verseNumber}, ${englishPrayer || ''}, ${lugandaPrayer || ''})
-      ON CONFLICT (book_id, chapter, verse_number) 
-      DO UPDATE SET 
-        english_prayer = ${englishPrayer || ''},
-        luganda_prayer = ${lugandaPrayer || ''},
-        updated_at = CURRENT_TIMESTAMP
-      RETURNING *
-    `;
+    const bId = parseInt(bookId);
+    const ch = parseInt(chapter);
+    const v = verseNumber ? parseInt(verseNumber) : null;
 
-    return NextResponse.json({ success: true, prayer: result[0] });
-  } catch (error) {
-    console.error('Error saving prayer passage:', error);
-    return NextResponse.json({ 
-      error: 'Failed to save prayer passage',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const bookId = searchParams.get('bookId');
-    const chapter = searchParams.get('chapter');
-    const verseNumber = searchParams.get('verseNumber');
-
-    if (!bookId || !chapter || !verseNumber) {
-      return NextResponse.json(
-        { error: 'Missing required parameters' },
-        { status: 400 }
-      );
+    // NEW TABLE FIRST: verse_pray_read
+    if (v !== null) {
+      try {
+        const rows: any[] = await sql`
+          SELECT book_id, chapter, verse as verse_number,
+                 pray_read_english as english_prayer,
+                 pray_read_luganda as luganda_prayer,
+                 pray_read_english as prayer_text,
+                 pray_read_english as english_prayer_text,
+                 pray_read_luganda as luganda_prayer_text
+          FROM verse_pray_read
+          WHERE book_id = ${bId} AND chapter = ${ch} AND verse = ${v}
+          LIMIT 1
+        `;
+        if (rows.length) return NextResponse.json(rows[0]);
+      } catch {}
+      // FALLBACK: old prayer_passages / verse_prayers tables
+      try {
+        const rows: any[] = await sql`
+          SELECT * FROM prayer_passages
+          WHERE book_id = ${bId} AND chapter = ${ch} AND verse_number = ${v}
+          LIMIT 1
+        `;
+        if (rows.length) return NextResponse.json(rows[0]);
+      } catch {}
+      try {
+        const rows: any[] = await sql`
+          SELECT verse_number, english_prayer, luganda_prayer
+          FROM verse_prayers
+          WHERE book_id = ${bId} AND chapter = ${ch} AND verse_number = ${v}
+          LIMIT 1
+        `;
+        if (rows.length) return NextResponse.json(rows[0]);
+      } catch {}
+      return NextResponse.json(null);
     }
 
-    await sql`
-      DELETE FROM verse_prayers 
-      WHERE book_id = ${parseInt(bookId)} 
-      AND chapter = ${parseInt(chapter)} 
-      AND verse_number = ${parseInt(verseNumber)}
-    `;
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting prayer passage:', error);
-    return NextResponse.json({ 
-      error: 'Failed to delete prayer passage',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    // No single verse requested — return whole chapter list (same shape as verse-prayers)
+    try {
+      const rows: any[] = await sql`
+        SELECT verse as verse_number,
+               pray_read_english as english_prayer,
+               pray_read_luganda as luganda_prayer
+        FROM verse_pray_read
+        WHERE book_id = ${bId} AND chapter = ${ch}
+        ORDER BY verse
+      `;
+      if (rows.length) return NextResponse.json(rows);
+    } catch {}
+    return NextResponse.json([]);
+  } catch (e: any) {
+    console.error('prayer-passages error', e);
+    return NextResponse.json({ error: e?.message || 'Failed' }, { status: 500 });
   }
 }
