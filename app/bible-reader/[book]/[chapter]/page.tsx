@@ -62,7 +62,9 @@ function ChapterContent() {
   });
   const [commentary, setCommentary] = useState<Record<number, any>>({});
   const [menuOpen, setMenuOpen] = useState(false);
-  // V6: Select / Highlight / Underline — per-verse, per-language, saved in browser
+  // V6/V8: Select / Highlight / Underline — PRIVATE to this device/browser only.
+  // Saved in localStorage on THIS phone/browser only. Never sent to Neon / server, never shared with other users.
+  // Another user on another phone sees a clean page. Clearing browser data clears your marks.
   type Mark = { id: string; text: string; style: 'highlight' | 'underline'; color: string };
   const [marks, setMarks] = useState<Record<string, Mark[]>>(() => {
     try { return JSON.parse(localStorage.getItem(`prayread-marks-${bookNum}-${chapterNum}`) || '{}'); } catch { return {}; }
@@ -236,6 +238,17 @@ function ChapterContent() {
         setPendingMark({ key, verse: 0, langKey: '', text: txt, x: rect.left + rect.width / 2, y: rect.top + window.scrollY });
       } catch { setPendingMark(null); }
     }, 10);
+  };
+
+  // V8 mobile: tap 🖍️ Mark = mark the WHOLE verse without dragging. Toolbar appears at the bottom, not under your finger.
+  const markWholeVerse = (v: any) => {
+    const txt = verseText(v);
+    if (!txt) return;
+    setPendingMark({ key: markKey(v.verse, lang === 'LU' ? 'LU' : 'EN'), verse: v.verse, langKey: lang === 'LU' ? 'LU' : 'EN', text: txt, x: 0, y: 0 });
+  };
+  const markWholeText = (key: string, txt: string) => {
+    if (!txt) return;
+    setPendingMark({ key, verse: 0, langKey: '', text: txt, x: 0, y: 0 });
   };
   const renderMarkedByKey = (text: string, key: string) => {
     const list = marks[key] || [];
@@ -416,12 +429,13 @@ function ChapterContent() {
                   {(marks[markKey(v.verse, 'EN')]?.length || marks[markKey(v.verse, 'LU')]?.length) ? (
                     <button onClick={() => { clearMarks(v.verse, 'EN'); clearMarks(v.verse, 'LU'); }} className="px-3 py-1.5 rounded-lg text-[13px] font-medium bg-yellow-100 text-yellow-900">✏️ Clear marks ✕</button>
                   ) : null}
+                  <button onClick={() => markWholeVerse(v)} title="Mark this whole verse — no dragging needed" className="px-3 py-1.5 rounded-lg text-[13px] font-medium bg-yellow-200 text-yellow-950">🖍️ Mark</button>
                 </div>
 
                 {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
                 {isSel && activePanel === 'prayer' && (
                   <div className={`mt-4 rounded-xl ${themeClasses.prayer} border p-4`}>
-                    <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
+                    <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2 flex items-center justify-between">🙏 Pray-Read · Verse {v.verse} <button onClick={() => markWholeText(`prayer-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`, lang === 'LU' ? pr.lu : pr.en)} className="normal-case tracking-normal px-2 py-0.5 rounded-full bg-yellow-200 text-yellow-950 text-[11px] font-bold">🖍️ Mark prayer</button></p>
                     {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
                         {pr.en && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(pr.en, `prayer-${v.verse}-EN`)}</p>}
@@ -637,9 +651,10 @@ function ChapterContent() {
       )}
 
 
-      {/* V6: Floating Highlight / Underline toolbar — appears when you select any verse text */}
+      {/* V8: Highlight / Underline toolbar — FIXED AT BOTTOM so the Android Copy/Select-all popup never covers it. Private: marks stay on this device only. */}
       {pendingMark && (
-        <div className="fixed z-[60] -translate-x-1/2 bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1" style={{ left: Math.max(110, Math.min(typeof window !== 'undefined' ? window.innerWidth - 110 : 300, pendingMark.x)), top: Math.max(8, pendingMark.y - 52) }}>
+        <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
+          <span className="hidden sm:inline text-[11px] text-slate-300 pl-1 pr-1 whitespace-nowrap">Mark:</span>
           <button onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
           <button onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
           <button onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
