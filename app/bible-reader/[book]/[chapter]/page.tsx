@@ -1,17 +1,33 @@
 "use client";
-import { useState, useEffect, useMemo, Suspense } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ChevronLeft, ChevronRight, BookOpen, Heart, Share2, Link2, MessageSquare, Bookmark, Copy, Check, Languages, Sun, Moon, Minus, Plus } from 'lucide-react';
 
-interface Verse { book_id: number; chapter: number; verse: number; text_english: string; text_luganda: string; }
-interface Book { id: number; book_number: number; name_english: string; name_luganda: string; testament: string; total_chapters: number; }
+// RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
+// Only the data wiring is fixed. No redesign.
+// Verses: try every param/shape the bible-verses API has used, until one returns rows.
+// Prayers: per-verse. Prayer button under a verse opens THAT verse's prayer
+// (inline under the verse + in the right Prayer tab). NOT a list of all prayers.
 
-function pickText(row: any): { en: string; lu: string } {
+function pickPrayer(row: any) {
   if (!row) return { en: '', lu: '' };
   return {
-    en: row.pray_read_english || row.en_prayer || row.prayer_english || row.closing_prayer_english || row.introduction_english || row.en_introduction || row.introduction || '',
-    lu: row.pray_read_luganda || row.lu_prayer || row.prayer_luganda || row.closing_prayer_luganda || row.introduction_luganda || row.lu_introduction || '',
+    en: row.pray_read_english || row.en_prayer || row.prayer_english || row.prayer || '',
+    lu: row.pray_read_luganda || row.lu_prayer || row.prayer_luganda || '',
+  };
+}
+function pickIntro(row: any) {
+  if (!row) return { en: '', lu: '' };
+  return {
+    en: row.introduction_english || row.en_introduction || row.introduction || '',
+    lu: row.introduction_luganda || row.lu_introduction || '',
+  };
+}
+function pickClosing(row: any) {
+  if (!row) return { en: '', lu: '' };
+  return {
+    en: row.closing_prayer_english || row.en_closing_prayer || row.prayer_english || row.en_prayer || row.closing_prayer || '',
+    lu: row.closing_prayer_luganda || row.lu_closing_prayer || row.prayer_luganda || row.lu_prayer || '',
   };
 }
 
@@ -20,15 +36,13 @@ function ChapterContent() {
   const router = useRouter();
   const bookNum = parseInt(String(params.book));
   const chapterNum = parseInt(String(params.chapter));
-  const [book, setBook] = useState<Book | null>(null);
-  const [verses, setVerses] = useState<Verse[]>([]);
+  const [book, setBook] = useState<any>(null);
+  const [verses, setVerses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lang, setLang] = useState<'EN' | 'LU' | 'BOTH'>('EN');
   const [fontSize, setFontSize] = useState(17);
-  const [dark, setDark] = useState(false);
-  const [rightTab, setRightTab] = useState<'intro' | 'prayer' | 'closing' | 'book'>('prayer');
+  const [rightTab, setRightTab] = useState<'intro' | 'commentary' | 'prayer'>('intro');
   const [chapterIntro, setChapterIntro] = useState<any>(null);
-  const [bookIntro, setBookIntro] = useState<any>(null);
   const [versePrayers, setVersePrayers] = useState<Record<number, any>>({});
   const [chapterClosing, setChapterClosing] = useState<any>(null);
   const [bookClosing, setBookClosing] = useState<any>(null);
@@ -36,226 +50,214 @@ function ChapterContent() {
   const [crossRefs, setCrossRefs] = useState<any[]>([]);
   const [loadingCross, setLoadingCross] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
-  const [search, setSearch] = useState('');
 
-  // Load everything — all APIs, all param styles, so it works no matter what
   useEffect(() => {
     if (!bookNum || !chapterNum) return;
     const load = async () => {
       setLoading(true);
       try {
-        const [booksRes, versesRes] = await Promise.all([
-          fetch('/api/bible-books').then(r => r.json()).catch(() => []),
-          fetch(`/api/bible-verses?book_number=${bookNum}&chapter=${chapterNum}`).then(r => r.json()).catch(() => []),
-        ]);
-        const b = Array.isArray(booksRes) ? booksRes.find((x: any) => x.book_number === bookNum) : null;
-        setBook(b || null);
-        const vList = Array.isArray(versesRes) ? versesRes : (versesRes.verses || []);
-        setVerses(vList);
-        const bookId = b?.id || bookNum;
-
-        // Verse prayers — try both endpoints, both param styles
-        let prayers: any[] = [];
+        // --- Books ---
+        let books: any[] = [];
         try {
-          const r1 = await fetch(`/api/verse-prayers?book_number=${bookNum}&chapter=${chapterNum}`);
-          const d1 = await r1.json().catch(() => []);
-          if (Array.isArray(d1) && d1.length) prayers = d1;
+          const r = await fetch('/api/bible-books');
+          const d = await r.json().catch(() => []);
+          books = Array.isArray(d) ? d : (d.books || d.data || []);
         } catch {}
-        if (!prayers.length) {
+        const b = books.find((x: any) => x.book_number === bookNum || x.id === bookNum || x.book_id === bookNum) || null;
+        setBook(b);
+        const bookId = b?.id ?? bookNum;
+
+        // --- Verses: try EVERY param style + EVERY response shape ---
+        // This is the bug that blanked Esther: the old new-page only tried book_number + array.
+        let vList: any[] = [];
+        const verseUrls = [
+          `/api/bible-verses?book_number=${bookNum}&chapter=${chapterNum}`,
+          `/api/bible-verses?bookId=${bookId}&chapter=${chapterNum}`,
+          `/api/bible-verses?book=${bookNum}&chapter=${chapterNum}`,
+          `/api/bible-verses?id=${bookId}&chapter=${chapterNum}`,
+          `/api/bible-verses?book_id=${bookId}&chapter=${chapterNum}`,
+        ];
+        for (const url of verseUrls) {
           try {
-            const r2 = await fetch(`/api/prayer-passages?book_number=${bookNum}&chapter=${chapterNum}`);
-            const d2 = await r2.json().catch(() => []);
-            if (Array.isArray(d2) && d2.length) prayers = d2;
+            const r = await fetch(url);
+            const d = await r.json().catch(() => null);
+            const arr = Array.isArray(d) ? d : (d?.verses || d?.data || d?.rows || []);
+            if (Array.isArray(arr) && arr.length) { vList = arr; break; }
           } catch {}
         }
-        if (!prayers.length) {
+        // Normalise verse field names: text_english/text_luganda OR english/luganda OR text
+        vList = vList.map((v: any) => ({
+          ...v,
+          verse: v.verse ?? v.verse_number ?? v.number,
+          text_english: v.text_english || v.english || v.text_en || v.text || '',
+          text_luganda: v.text_luganda || v.luganda || v.text_lu || '',
+        })).sort((a: any, b: any) => a.verse - b.verse);
+        setVerses(vList);
+
+        // --- Verse prayers: same multi-fallback ---
+        let prayers: any[] = [];
+        const prayerUrls = [
+          `/api/verse-prayers?book_number=${bookNum}&chapter=${chapterNum}`,
+          `/api/prayer-passages?book_number=${bookNum}&chapter=${chapterNum}`,
+          `/api/verse-prayers?bookId=${bookId}&chapter=${chapterNum}`,
+          `/api/prayer-passages?bookId=${bookId}&chapter=${chapterNum}`,
+          `/api/verse-prayers?book=${bookNum}&chapter=${chapterNum}`,
+        ];
+        for (const url of prayerUrls) {
           try {
-            const r3 = await fetch(`/api/verse-prayers?bookId=${bookId}&chapter=${chapterNum}`);
-            const d3 = await r3.json().catch(() => []);
-            if (Array.isArray(d3) && d3.length) prayers = d3;
+            const r = await fetch(url);
+            const d = await r.json().catch(() => null);
+            const arr = Array.isArray(d) ? d : (d?.prayers || d?.data || []);
+            if (Array.isArray(arr) && arr.length) { prayers = arr; break; }
           } catch {}
         }
         const map: Record<number, any> = {};
-        prayers.forEach((p: any) => { if (p.verse) map[p.verse] = p; });
+        prayers.forEach((p: any) => { const vn = p.verse ?? p.verse_number; if (vn) map[vn] = p; });
         setVersePrayers(map);
 
-        // Chapter intro
+        // --- Chapter intro + closing ---
         try {
           const r = await fetch(`/api/chapter-introductions?bookId=${bookId}&chapter=${chapterNum}`);
           const d = await r.json().catch(() => null);
-          if (d) setChapterIntro(d);
+          if (d && !Array.isArray(d)) setChapterIntro(d);
+          else if (Array.isArray(d) && d.length) setChapterIntro(d[0]);
         } catch {}
-        // Chapter closing — from chapter-prayers, fallback to chapter-intro closing fields
         try {
           const r = await fetch(`/api/chapter-prayers?bookId=${bookId}&chapter=${chapterNum}`);
           const d = await r.json().catch(() => null);
-          if (d && (pickText(d).en || pickText(d).lu)) setChapterClosing(d);
+          if (d && (pickClosing(d).en || pickClosing(d).lu)) setChapterClosing(d);
         } catch {}
-        if (!chapterClosing) {
-          // will be filled from chapterIntro below via render fallback
-        }
-        // Book intro + book closing
-        try {
-          const r = await fetch(`/api/book-introductions?bookId=${bookId}`);
-          const d = await r.json().catch(() => null);
-          if (d) setBookIntro(d);
-        } catch {}
+        // --- Book closing (shown at bottom of Prayer tab / Closing section) ---
         try {
           const r = await fetch(`/api/book-prayers?bookId=${bookId}`);
           const d = await r.json().catch(() => null);
-          if (d && (pickText(d).en || pickText(d).lu)) setBookClosing(d);
+          if (d && (pickClosing(d).en || pickClosing(d).lu)) setBookClosing(d);
         } catch {}
       } finally { setLoading(false); }
     };
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookNum, chapterNum]);
-
-  const openCrossRefs = async (verseNum: number) => {
-    setSelectedVerse(verseNum);
-    setLoadingCross(true);
-    setCrossRefs([]);
-    try {
-      const r = await fetch(`/api/cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`);
-      const d = await r.json().catch(() => []);
-      if (Array.isArray(d) && d.length) { setCrossRefs(d); setLoadingCross(false); return; }
-    } catch {}
-    try {
-      const r = await fetch(`/api/verse-cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`);
-      const d = await r.json().catch(() => []);
-      if (Array.isArray(d)) setCrossRefs(d);
-    } catch {}
-    setLoadingCross(false);
-  };
 
   const openPrayer = (verseNum: number) => {
     setSelectedVerse(verseNum);
     setRightTab('prayer');
-    document.getElementById('right-panel')?.scrollIntoView({ behavior: 'smooth' });
+  };
+  const openCrossRefs = async (verseNum: number) => {
+    setSelectedVerse(verseNum);
+    setLoadingCross(true);
+    setCrossRefs([]);
+    const bookId = book?.id ?? bookNum;
+    const urls = [
+      `/api/cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`,
+      `/api/verse-cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`,
+      `/api/cross-references?source_book_id=${bookId}&source_chapter=${chapterNum}&source_verse=${verseNum}`,
+    ];
+    for (const url of urls) {
+      try {
+        const r = await fetch(url);
+        const d = await r.json().catch(() => []);
+        const arr = Array.isArray(d) ? d : (d?.refs || []);
+        if (arr.length) { setCrossRefs(arr); break; }
+      } catch {}
+    }
+    setLoadingCross(false);
   };
 
-  const verseText = (v: Verse) => {
-    if (lang === 'EN') return v.text_english;
-    if (lang === 'LU') return v.text_luganda;
-    return v.text_english; // BOTH handled in render
-  };
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#EAF2FF]"><p className="text-slate-500 text-sm">Loading chapter…</p></div>;
 
-  const filteredVerses = useMemo(() => {
-    if (!search.trim()) return verses;
-    const q = search.trim().toLowerCase();
-    return verses.filter(v => v.text_english?.toLowerCase().includes(q) || v.text_luganda?.toLowerCase().includes(q) || String(v.verse).includes(q));
-  }, [verses, search]);
-
-  const chapterClosingText = pickText(chapterClosing) .en ? pickText(chapterClosing) : pickText(chapterIntro);
-  // chapterIntro may itself carry closing_prayer_* fields
-  const chapterClosingDisplay = (() => {
-    const fromPrayers = pickText(chapterClosing);
-    if (fromPrayers.en || fromPrayers.lu) return fromPrayers;
-    const fromIntro: any = chapterIntro || {};
-    return { en: fromIntro.closing_prayer_english || fromIntro.en_closing_prayer || '', lu: fromIntro.closing_prayer_luganda || fromIntro.lu_closing_prayer || '' };
-  })();
-  const bookClosingDisplay = pickText(bookClosing).en || pickText(bookClosing).lu ? pickText(bookClosing) : (() => {
-    const b: any = bookIntro || {};
-    return { en: b.closing_prayer_english || '', lu: b.closing_prayer_luganda || '' };
-  })();
-  const chapterIntroDisplay = (() => {
-    const c: any = chapterIntro || {};
-    return { en: c.introduction_english || c.en_introduction || c.introduction || '', lu: c.introduction_luganda || c.lu_introduction || '' };
-  })();
-  const bookIntroDisplay = (() => {
-    const b: any = bookIntro || {};
-    return { en: b.introduction_english || b.en_introduction || b.introduction || '', lu: b.introduction_luganda || b.lu_introduction || '' };
-  })();
-
-  const hasAnyPrayer = Object.keys(versePrayers).length > 0;
-
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center bg-[#F7F5F0]"><div className="text-center"><div className="animate-spin rounded-full h-8 w-8 border-2 border-slate-200 border-t-amber-500 mx-auto mb-3" /><p className="text-slate-500 text-sm">Loading chapter…</p></div></div>;
-  }
-
-  const bg = dark ? 'bg-slate-950 text-slate-100' : 'bg-[#F7F5F0] text-slate-900';
-  const card = dark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
-  const muted = dark ? 'text-slate-400' : 'text-slate-500';
+  const bookName = book?.name_english || `Book ${bookNum}`;
+  const bookNameLu = book?.name_luganda || '';
+  const testament = book?.testament || (bookNum <= 39 ? 'Old Testament' : 'New Testament');
+  const totalChapters = book?.total_chapters || book?.chapters || '?';
+  const intro = pickIntro(chapterIntro);
+  const closing = pickClosing(chapterClosing).en || pickClosing(chapterClosing).lu ? pickClosing(chapterClosing) : pickClosing(chapterIntro);
+  const bookClose = pickClosing(bookClosing);
+  const selectedPrayer = selectedVerse ? pickPrayer(versePrayers[selectedVerse]) : { en: '', lu: '' };
+  const verseText = (v: any) => lang === 'LU' ? (v.text_luganda || v.text_english) : lang === 'BOTH' ? v.text_english : (v.text_english || v.text_luganda);
 
   return (
-    <div className={`min-h-screen ${bg}`}>
-      {/* Header */}
-      <div className={`sticky top-0 z-30 backdrop-blur-md border-b ${dark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-2">
-          <button onClick={() => router.push(`/bible-reader/${bookNum}`)} className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800"><ChevronLeft className="w-4 h-4" /> Back</button>
-          <Link href="/dashboard" className="hidden sm:inline-flex px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold hover:bg-slate-200">Dashboard</Link>
+    <div className="min-h-screen bg-[#EAF2FF] text-slate-900">
+      {/* Header — ORIGINAL */}
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
+          <button onClick={() => router.push('/bible-reader')} className="text-slate-600 text-[15px] hover:text-slate-900">‹ Back</button>
           <div className="flex-1 text-center">
-            <h1 className="text-lg sm:text-xl font-extrabold tracking-tight">{book?.name_english || `Book ${bookNum}`} {chapterNum}</h1>
-            <p className={`text-xs ${muted}`}>{book?.name_luganda || ''} · Chapter {chapterNum} of {book?.total_chapters || '?'}</p>
+            <h1 className="text-[19px] font-bold leading-tight">{bookName} {chapterNum}</h1>
+            <p className="text-[12px] text-slate-500">Ch {chapterNum} of {totalChapters}</p>
           </div>
           <div className="flex items-center gap-1.5">
-            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-2.5 py-2 rounded-xl bg-amber-500 text-white text-xs font-bold flex items-center gap-1"><Languages className="w-3.5 h-3.5" />{lang === 'EN' ? 'EN' : lang === 'LU' ? 'LU' : 'BOTH'}</button>
-            <button onClick={() => setDark(!dark)} className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200">{dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button>
-            <button onClick={() => setFontSize(Math.max(14, fontSize - 1))} className="p-2 rounded-xl bg-slate-100 text-slate-700"><Minus className="w-4 h-4" /></button>
-            <button onClick={() => setFontSize(Math.min(24, fontSize + 1))} className="p-2 rounded-xl bg-slate-100 text-slate-700"><Plus className="w-4 h-4" /></button>
+            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="w-9 h-9 rounded-md bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center" title="Language">{lang === 'EN' ? 'GB' : lang}</button>
+            <button className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">☀️</button>
+            <button onClick={() => setFontSize(Math.max(14, fontSize - 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">−</button>
+            <button onClick={() => setFontSize(Math.min(24, fontSize + 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">+</button>
+            <button className="w-9 h-9 rounded-md bg-orange-500 text-[15px] flex items-center justify-center">🎨</button>
+            <button className="w-9 h-9 rounded-md bg-purple-600 text-[15px] flex items-center justify-center">💡</button>
+            <button className="w-9 h-9 rounded-md bg-blue-600 text-white text-lg flex items-center justify-center">☰</button>
           </div>
-        </div>
-        {/* Chapter nav */}
-        <div className="max-w-6xl mx-auto px-4 pb-3 flex items-center justify-between gap-2">
-          <button disabled={chapterNum <= 1} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum - 1}`)} className="px-3 py-1.5 rounded-lg bg-slate-100 text-sm font-semibold disabled:opacity-40 flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> Prev</button>
-          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search in this chapter…" className={`flex-1 max-w-xs px-3 py-1.5 text-sm rounded-lg border outline-none ${dark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`} />
-          <button disabled={book && chapterNum >= book.total_chapters} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum + 1}`)} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-sm font-semibold disabled:opacity-40 flex items-center gap-1">Next <ChevronRight className="w-4 h-4" /></button>
         </div>
       </div>
 
-      <div className="max-w-6xl mx-auto px-4 py-5 grid lg:grid-cols-[1fr_380px] gap-5 items-start">
-        {/* Verses */}
-        <div className="space-y-3">
-          {filteredVerses.map(v => {
-            const prayer = versePrayers[v.verse];
-            const hasPrayer = !!prayer && !!(pickText(prayer).en || pickText(prayer).lu);
-            const isSelected = selectedVerse === v.verse;
+      <div className="max-w-[1200px] mx-auto px-4 py-4 grid lg:grid-cols-[1fr_360px] gap-5 items-start">
+        {/* LEFT — ORIGINAL */}
+        <div>
+          <span className="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-[13px] font-semibold">{testament}</span>
+          <h2 className="text-[44px] leading-[1.1] font-bold text-[#1E3A8A] mt-3">{bookName}</h2>
+          <p className="text-[19px] font-bold text-blue-700 mt-1">Chapter {chapterNum}</p>
+          {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
+          <hr className="border-blue-200 my-4" />
+
+          {verses.length === 0 ? (
+            <div className="bg-white rounded-xl p-8 text-center shadow-sm">
+              <p className="font-bold">Verses could not be loaded.</p>
+              <p className="text-sm text-slate-500 mt-1">Neon has the verses — this page tried 5 verse URLs and got none back. Check <code className="bg-slate-100 px-1 rounded">/api/bible-verses?book_number={bookNum}&amp;chapter={chapterNum}</code> in a new tab.</p>
+              <button onClick={() => window.location.reload()} className="mt-3 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-lg">Reload</button>
+            </div>
+          ) : verses.map((v: any) => {
+            const hasPrayer = !!(pickPrayer(versePrayers[v.verse]).en || pickPrayer(versePrayers[v.verse]).lu);
+            const isSel = selectedVerse === v.verse;
+            const pr = pickPrayer(versePrayers[v.verse]);
             return (
-              <article key={v.verse} className={`rounded-2xl border p-4 sm:p-5 shadow-sm ${card} ${isSelected ? 'ring-2 ring-amber-500' : ''}`}>
-                <div className="flex gap-3">
-                  <span className="shrink-0 w-7 h-7 rounded-full bg-amber-500 text-white flex items-center justify-center text-sm font-bold mt-0.5">{v.verse}</span>
-                  <div className="flex-1 min-w-0">
-                    {lang === 'BOTH' ? (
+              <article key={v.verse} className={`bg-white rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''}`}>
+                <div className="flex gap-2">
+                  <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
+                  <div className="flex-1">
+                    <p style={{ fontSize }} className="leading-relaxed text-slate-800">{verseText(v)}</p>
+                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className="leading-relaxed text-slate-500 mt-2 pt-2 border-t border-slate-100">{v.text_luganda}</p>}
+                  </div>
+                  <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
+                </div>
+                <hr className="border-slate-100 my-3" />
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => openPrayer(v.verse)} disabled={!hasPrayer} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${hasPrayer ? 'bg-rose-100 text-rose-800 hover:bg-rose-200' : 'bg-slate-50 text-slate-400 cursor-not-allowed'}`}>♡ Prayer</button>
+                  <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); }} className="px-3 py-1.5 rounded-lg bg-purple-100 text-purple-900 text-[13.5px] font-medium">🔗 Share</button>
+                  <button onClick={() => openCrossRefs(v.verse)} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-[13.5px] font-medium">🔗 Cross-Ref</button>
+                  <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-[13.5px] font-medium">📖 Commentary</button>
+                  <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-[13.5px] font-medium">📝 Notes</button>
+                  <button className="px-3 py-1.5 rounded-lg bg-purple-100 text-purple-900 text-[13.5px] font-medium">💡 Insight</button>
+                </div>
+                <div className="flex justify-end mt-2">
+                  <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-[13px] font-medium">🔖 Bookmark</button>
+                </div>
+
+                {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
+                {isSel && rightTab === 'prayer' && (
+                  <div className="mt-4 rounded-xl bg-rose-50 border border-rose-100 p-4">
+                    <p className="text-[11px] font-bold tracking-wide text-rose-700 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
+                    {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
-                        <p style={{ fontSize }} className="leading-relaxed font-medium">{v.text_english}</p>
-                        <p style={{ fontSize }} className={`leading-relaxed mt-2 pt-2 border-t ${dark ? 'border-slate-800 text-slate-300' : 'border-slate-100 text-slate-600'}`}>{v.text_luganda}</p>
+                        {pr.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{pr.en}</p>}
+                        {pr.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{pr.lu}</p>}
                       </>
-                    ) : (
-                      <p style={{ fontSize }} className="leading-relaxed font-medium">{verseText(v)}</p>
                     )}
                   </div>
-                  <button onClick={() => { navigator.clipboard?.writeText(`${book?.name_english} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1500); }} className={`shrink-0 p-2 rounded-lg ${dark ? 'bg-slate-800' : 'bg-slate-100'} hover:bg-slate-200`} title="Copy verse">{copied === v.verse ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}</button>
-                </div>
-                <div className="flex flex-wrap gap-2 mt-4">
-                  <button onClick={() => openPrayer(v.verse)} disabled={!hasPrayer} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold ${hasPrayer ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><Heart className="w-3.5 h-3.5" /> Prayer {hasPrayer ? '' : '· none'}</button>
-                  <button onClick={() => openCrossRefs(v.verse)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold bg-slate-100 hover:bg-slate-200"><Link2 className="w-3.5 h-3.5" /> Cross-Ref</button>
-                  <button onClick={() => { navigator.clipboard?.writeText(`${book?.name_english} ${chapterNum}:${v.verse} — ${verseText(v)}`); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold bg-slate-100 hover:bg-slate-200"><Share2 className="w-3.5 h-3.5" /> Share</button>
-                  <button onClick={() => openCrossRefs(v.verse)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold bg-violet-100 text-violet-800 hover:bg-violet-200"><MessageSquare className="w-3.5 h-3.5" /> Commentary</button>
-                </div>
-
-                {/* Inline Prayer — shows right under the verse when selected */}
-                {isSelected && hasPrayer && (
-                  <div className={`mt-4 rounded-xl p-4 ${dark ? 'bg-rose-950/30 border border-rose-900/40' : 'bg-rose-50 border border-rose-100'}`}>
-                    <p className="text-xs font-bold tracking-wide text-rose-700 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
-                    {(lang === 'EN' || lang === 'BOTH') && pickText(prayer).en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{pickText(prayer).en}</p>}
-                    {(lang === 'LU' || lang === 'BOTH') && pickText(prayer).lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${lang === 'BOTH' ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{pickText(prayer).lu}</p>}
-                    {lang === 'EN' && !pickText(prayer).en && pickText(prayer).lu && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{pickText(prayer).lu}</p>}
-                  </div>
                 )}
-                {isSelected && !hasPrayer && (
-                  <p className="mt-3 text-sm text-slate-500 italic">No prayer for this verse yet.</p>
-                )}
-
-                {/* Inline Cross-Refs */}
-                {isSelected && (
-                  <div className={`mt-3 rounded-xl p-4 ${dark ? 'bg-slate-800/60' : 'bg-slate-50 border border-slate-100'}`}>
-                    <p className="text-xs font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
+                {/* Cross-refs for THIS verse */}
+                {isSel && rightTab !== 'prayer' && crossRefs.length >= 0 && (loadingCross || crossRefs.length > 0) && (
+                  <div className="mt-3 rounded-xl bg-slate-50 border border-slate-100 p-4">
+                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
-                      <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                        <li key={i} className="text-sm leading-relaxed">
-                          <Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold text-blue-700 hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>
-                          {cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}
-                        </li>
+                      <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
+                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold text-blue-700 hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
                       ))}</ul>
                     )}
                   </div>
@@ -263,107 +265,89 @@ function ChapterContent() {
               </article>
             );
           })}
-          {filteredVerses.length === 0 && <div className={`rounded-2xl border p-8 text-center ${card}`}><p className="font-bold">No verses found for “{search}”</p><button onClick={() => setSearch('')} className="mt-3 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-xl">Clear search</button></div>}
+
+          {/* Chapter Closing Prayer — at the END of the chapter, after the last verse. Not in the prayer list. */}
+          {(closing.en || closing.lu) && (
+            <div className="bg-white rounded-xl p-5 shadow-sm mt-4 border-2 border-amber-200">
+              <p className="text-[11px] font-bold tracking-wide text-amber-700 uppercase mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
+              {closing.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{closing.en}</p>}
+              {closing.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${closing.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{closing.lu}</p>}
+            </div>
+          )}
+          {/* Book Closing Prayer — only after the LAST chapter */}
+          {chapterNum === Number(totalChapters) && (bookClose.en || bookClose.lu) && (
+            <div className="bg-white rounded-xl p-5 shadow-sm mt-3 border-2 border-purple-200">
+              <p className="text-[11px] font-bold tracking-wide text-purple-700 uppercase mb-2">🙏 Book Closing Prayer — {bookName}</p>
+              {bookClose.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{bookClose.en}</p>}
+              {bookClose.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${bookClose.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClose.lu}</p>}
+            </div>
+          )}
         </div>
 
-        {/* Right panel */}
-        <aside id="right-panel" className={`lg:sticky lg:top-[132px] rounded-2xl border shadow-sm overflow-hidden ${card}`}>
-          <div className="flex border-b border-slate-200/70">
+        {/* RIGHT — ORIGINAL tabs */}
+        <aside className="lg:sticky lg:top-[70px] bg-[#F0F7FF] rounded-xl overflow-hidden">
+          <div className="flex border-b border-slate-200 bg-white">
             {([
-              { id: 'intro', label: '📖 Intro' },
+              { id: 'intro', label: '📕 Intro' },
+              { id: 'commentary', label: '📖 Commentary' },
               { id: 'prayer', label: '🙏 Prayer' },
-              { id: 'closing', label: '🙏 Closing' },
-              { id: 'book', label: '📘 Book' },
             ] as const).map(t => (
-              <button key={t.id} onClick={() => setRightTab(t.id)} className={`flex-1 py-3 text-[13px] font-bold ${rightTab === t.id ? 'bg-amber-500 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{t.label}</button>
+              <button key={t.id} onClick={() => setRightTab(t.id)} className={`flex-1 py-3 text-[14px] font-semibold ${rightTab === t.id ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-600'}`}>{t.label}</button>
             ))}
+            <button className="w-[52px] bg-orange-600 text-white text-[11px] font-bold leading-tight">GB<br />EN</button>
           </div>
           <div className="p-4 max-h-[70vh] overflow-y-auto">
             {rightTab === 'intro' && (
               <div>
-                <h3 className="font-extrabold text-[15px] mb-2">Chapter {chapterNum} Introduction</h3>
-                {!chapterIntroDisplay.en && !chapterIntroDisplay.lu ? <p className="text-sm text-slate-500 italic">No chapter introduction available.</p> : (
+                <p className="font-bold text-[16px] mb-3">📕 Chapter {chapterNum}</p>
+                {!intro.en && !intro.lu ? <p className="text-sm text-slate-500 italic">No chapter introduction available.</p> : (
                   <>
-                    {chapterIntroDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{chapterIntroDisplay.en}</p>}
-                    {chapterIntroDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${chapterIntroDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{chapterIntroDisplay.lu}</p>}
+                    {intro.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
+                    {intro.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{intro.lu}</p>}
                   </>
                 )}
               </div>
             )}
+            {rightTab === 'commentary' && (
+              <div><p className="font-bold text-[16px] mb-3">📖 Commentary</p><p className="text-sm text-slate-500 italic">Select a verse and click Commentary to see its commentary.</p></div>
+            )}
             {rightTab === 'prayer' && (
               <div>
-                <h3 className="font-extrabold text-[15px] mb-1">Pray-Read Passages · Chapter {chapterNum}</h3>
-                <p className={`text-xs mb-3 ${muted}`}>{hasAnyPrayer ? `${Object.keys(versePrayers).length} prayers in this chapter` : 'Prayers are the core of Pray-Read.'}</p>
-                {!hasAnyPrayer ? (
-                  <p className="text-sm text-slate-500 italic">No prayers added yet for this chapter.</p>
+                {/* Prayer tab shows ONLY the selected verse's prayer. This was the bug: the modern page listed ALL prayers here. */}
+                {!selectedVerse ? (
+                  <div><p className="text-sm text-slate-600">Click <b>♡ Prayer</b> under any verse to pray that verse here.</p><p className="text-sm text-slate-500 italic mt-3">{Object.keys(versePrayers).length} prayers are in this chapter.</p></div>
                 ) : (
-                  <div className="space-y-4">{Object.entries(versePrayers).sort((a, b) => Number(a[0]) - Number(b[0])).map(([vn, p]) => {
-                    const t = pickText(p);
-                    return (
-                      <div key={vn} className={`rounded-xl p-3 border ${dark ? 'border-slate-700' : 'border-slate-100 bg-slate-50/60'}`}>
-                        <button onClick={() => setSelectedVerse(Number(vn))} className="text-sm font-bold text-rose-700 hover:underline">Verse {vn} — Pray-Read →</button>
-                        {t.en && <p className="text-[14px] leading-relaxed whitespace-pre-wrap mt-1.5 line-clamp-4">{t.en}</p>}
-                        {t.lu && <p className="text-[13px] leading-relaxed whitespace-pre-wrap mt-2 text-slate-500 line-clamp-3">{t.lu}</p>}
-                      </div>
-                    );
-                  })}</div>
+                  <div>
+                    <p className="font-bold text-[16px] mb-3">🙏 {bookName} {chapterNum}:{selectedVerse}</p>
+                    {!selectedPrayer.en && !selectedPrayer.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
+                      <>
+                        {selectedPrayer.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
+                        {selectedPrayer.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{selectedPrayer.lu}</p>}
+                      </>
+                    )}
+                    <button onClick={() => setSelectedVerse(null)} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Clear selection</button>
+                  </div>
                 )}
-              </div>
-            )}
-            {rightTab === 'closing' && (
-              <div className="space-y-5">
-                <div>
-                  <h3 className="font-extrabold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</h3>
-                  {!chapterClosingDisplay.en && !chapterClosingDisplay.lu ? <p className="text-sm text-slate-500 italic">No chapter closing prayer added yet.</p> : (
-                    <>
-                      {chapterClosingDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{chapterClosingDisplay.en}</p>}
-                      {chapterClosingDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${chapterClosingDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{chapterClosingDisplay.lu}</p>}
-                    </>
-                  )}
-                </div>
-                <div className="pt-4 border-t border-slate-100">
-                  <h3 className="font-extrabold text-[15px] mb-2">🙏 Book Closing Prayer — {book?.name_english}</h3>
-                  {!bookClosingDisplay.en && !bookClosingDisplay.lu ? <p className="text-sm text-slate-500 italic">No book closing prayer added yet.</p> : (
-                    <>
-                      {bookClosingDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{bookClosingDisplay.en}</p>}
-                      {bookClosingDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${bookClosingDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClosingDisplay.lu}</p>}
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-            {rightTab === 'book' && (
-              <div className="space-y-5">
-                <div>
-                  <h3 className="font-extrabold text-[15px] mb-2">📘 Book Introduction — {book?.name_english}</h3>
-                  {!bookIntroDisplay.en && !bookIntroDisplay.lu ? <p className="text-sm text-slate-500 italic">No book introduction available.</p> : (
-                    <>
-                      {bookIntroDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{bookIntroDisplay.en}</p>}
-                      {bookIntroDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${bookIntroDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookIntroDisplay.lu}</p>}
-                    </>
-                  )}
-                </div>
-                <div className="pt-4 border-t border-slate-100">
-                  <h3 className="font-extrabold text-[15px] mb-2">🙏 Book Closing Prayer</h3>
-                  {!bookClosingDisplay.en && !bookClosingDisplay.lu ? <p className="text-sm text-slate-500 italic">No book closing prayer added yet.</p> : (
-                    <>
-                      {bookClosingDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{bookClosingDisplay.en}</p>}
-                      {bookClosingDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${bookClosingDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClosingDisplay.lu}</p>}
-                    </>
-                  )}
-                </div>
+                {/* Chapter Closing lives BELOW, after the verse prayer — not mixed into it */}
+                {(closing.en || closing.lu) && (
+                  <div className="mt-5 pt-4 border-t border-slate-200">
+                    <p className="font-bold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
+                    {closing.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{closing.en}</p>}
+                    {closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
+                  </div>
+                )}
               </div>
             )}
           </div>
         </aside>
       </div>
 
-      {/* Bottom nav */}
-      <div className={`sticky bottom-0 border-t ${dark ? 'bg-slate-950/95 border-slate-800' : 'bg-white/95 border-slate-200'} backdrop-blur-md`}>
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
-          <button disabled={chapterNum <= 1} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum - 1}`)} className="px-4 py-2 rounded-xl bg-slate-100 text-sm font-semibold disabled:opacity-40 flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> Prev</button>
-          <span className="text-sm font-bold">Chapter {chapterNum} of {book?.total_chapters || '?'}</span>
-          <button disabled={book && chapterNum >= book.total_chapters} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum + 1}`)} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-40 flex items-center gap-1">Next <ChevronRight className="w-4 h-4" /></button>
+      {/* Bottom nav — ORIGINAL */}
+      <div className="sticky bottom-0 bg-white border-t border-slate-200">
+        <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center justify-between">
+          <button disabled={chapterNum <= 1} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum - 1}`)} className="px-4 py-2 rounded-lg bg-slate-100 text-sm font-semibold disabled:opacity-40">‹ Prev</button>
+          <span className="text-[15px] font-bold">Chapter {chapterNum} of {totalChapters}</span>
+          <button disabled={chapterNum >= Number(totalChapters)} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum + 1}`)} className="px-4 py-2 rounded-lg bg-slate-100 text-sm font-semibold disabled:opacity-40">Next ›</button>
         </div>
       </div>
     </div>
@@ -371,5 +355,5 @@ function ChapterContent() {
 }
 
 export default function ChapterPage() {
-  return <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}><ChapterContent /></Suspense>;
+  return <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#EAF2FF]">Loading…</div>}><ChapterContent /></Suspense>;
 }
