@@ -61,6 +61,71 @@ function ChapterContent() {
   });
   const [commentary, setCommentary] = useState<Record<number, any>>({});
   const [menuOpen, setMenuOpen] = useState(false);
+  // V6: Select / Highlight / Underline — per-verse, per-language, saved in browser
+  type Mark = { id: string; text: string; style: 'highlight' | 'underline'; color: string };
+  const [marks, setMarks] = useState<Record<string, Mark[]>>(() => {
+    try { return JSON.parse(localStorage.getItem(`prayread-marks-${bookNum}-${chapterNum}`) || '{}'); } catch { return {}; }
+  });
+  const [pendingMark, setPendingMark] = useState<{ verse: number; langKey: string; text: string; x: number; y: number } | null>(null);
+  const markKey = (verse: number, langKey: string) => `${verse}-${langKey}`;
+  const saveMarks = (next: Record<string, Mark[]>) => {
+    setMarks(next);
+    try { localStorage.setItem(`prayread-marks-${bookNum}-${chapterNum}`, JSON.stringify(next)); } catch {}
+  };
+  const applyMark = (style: 'highlight' | 'underline', color: string) => {
+    if (!pendingMark) return;
+    const key = markKey(pendingMark.verse, pendingMark.langKey);
+    const existing = marks[key] || [];
+    // Don't duplicate the exact same mark
+    if (existing.some(m => m.text === pendingMark.text && m.style === style && m.color === color)) { setPendingMark(null); return; }
+    saveMarks({ ...marks, [key]: [...existing, { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: pendingMark.text, style, color }] });
+    setPendingMark(null);
+    try { window.getSelection()?.removeAllRanges(); } catch {}
+  };
+  const clearMarks = (verse: number, langKey: string) => {
+    const next = { ...marks }; delete next[markKey(verse, langKey)]; saveMarks(next);
+  };
+  // Split a verse string by its saved marks and wrap each match
+  const renderMarked = (text: string, verse: number, langKey: string) => {
+    const list = marks[markKey(verse, langKey)] || [];
+    if (!text || !list.length) return <>{text}</>;
+    // Build segments: walk through text, cutting out each mark in order of first occurrence
+    let remaining = text;
+    const out: React.ReactNode[] = [];
+    let k = 0;
+    // Apply marks one by one, longest first so a full-verse mark wins over a word mark
+    const sorted = [...list].sort((a, b) => b.text.length - a.text.length);
+    // Simple non-overlapping approach: for the longest mark still present, split once, recurse on the pieces
+    const renderWith = (str: string, ms: Mark[]): React.ReactNode[] => {
+      if (!ms.length) return [str];
+      const [first, ...rest] = ms;
+      const idx = str.indexOf(first.text);
+      if (idx === -1) return renderWith(str, rest);
+      const before = str.slice(0, idx);
+      const match = str.slice(idx, idx + first.text.length);
+      const after = str.slice(idx + first.text.length);
+      return [
+        ...(before ? renderWith(before, rest) : []),
+        <span key={first.id + '-' + k++} className={first.style === 'highlight' ? `px-0.5 rounded ${first.color}` : `underline decoration-2 underline-offset-4 ${first.color}`}>{match}</span>,
+        ...(after ? renderWith(after, rest) : []),
+      ];
+    };
+    return <>{renderWith(remaining, sorted)}</>;
+  };
+  const onSelectText = (verse: number, langKey: string) => {
+    // Runs on mouseUp / touchEnd inside a verse paragraph
+    setTimeout(() => {
+      try {
+        const sel = window.getSelection();
+        const txt = sel?.toString() || '';
+        if (!txt.trim() || txt.trim().length < 2) { setPendingMark(null); return; }
+        const range = sel!.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+        // Only accept selections that are inside this verse's paragraph (anchor node inside the page)
+        setPendingMark({ verse, langKey, text: txt, x: rect.left + rect.width / 2, y: rect.top + window.scrollY });
+      } catch { setPendingMark(null); }
+    }, 10);
+  };
 
   useEffect(() => {
     if (!bookNum || !chapterNum) return;
@@ -213,7 +278,7 @@ function ChapterContent() {
     });
   };
 
-  const linkColor = theme === 'dark' ? 'text-orange-400' : '{linkColor}'; // V5: blue -> orange in Dark
+  const linkColor = theme === 'dark' ? 'text-orange-400' : 'text-blue-700'; // V5: blue -> orange in Dark
   const crossBody = theme === 'dark' ? 'text-slate-100' : 'text-slate-700'; // V5: cross-ref body near-white in Dark
   const bodySize = fontSize; // V5 universal: base size drives verses + prayer + sidebar + cross-ref
   const smallSize = Math.max(12, fontSize - 2);
@@ -268,7 +333,7 @@ function ChapterContent() {
         <div>
           <span className="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-[13px] font-semibold">{testament}</span>
           <h2 className="text-[44px] leading-[1.1] font-bold text-[#1E3A8A] mt-3">{bookName}</h2>
-          <p className="text-[19px] font-bold {linkColor} mt-1">Chapter {chapterNum}</p>
+          <p className={`text-[19px] font-bold ${linkColor} mt-1`}>Chapter {chapterNum}</p>
           {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
           <hr className="border-blue-200 my-4" />
 
@@ -287,8 +352,8 @@ function ChapterContent() {
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
-                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
-                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`}>{v.text_luganda}</p>}
+                    <p onMouseUp={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} onTouchEnd={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} className={`leading-relaxed ${themeClasses.text} select-text cursor-text`} style={{ fontSize: bodySize }}>{renderMarked(verseText(v), v.verse, lang === 'LU' ? 'LU' : 'EN')}</p>
+                    {lang === 'BOTH' && v.text_luganda && <p onMouseUp={() => onSelectText(v.verse, 'LU')} onTouchEnd={() => onSelectText(v.verse, 'LU')} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider} select-text cursor-text`} style={{ fontSize: bodySize }}>{renderMarked(v.text_luganda, v.verse, 'LU')}</p>}
                   </div>
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
                 </div>
@@ -300,6 +365,9 @@ function ChapterContent() {
                   <button onClick={() => openCrossRefs(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'crossref' ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>🔗 Cross-Ref</button>
                   <button onClick={() => openCommentary(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'commentary' ? 'bg-blue-200 text-blue-900' : 'bg-slate-100 text-slate-800'}`}>📖 Commentary</button>
                   <button onClick={() => toggleBookmark(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13px] font-medium ${bookmarks.includes(v.verse) ? 'bg-amber-400 text-amber-950' : 'bg-slate-100 text-slate-700'}`}>{bookmarks.includes(v.verse) ? '🔖 Saved ✓' : '🔖 Bookmark'}</button>
+                  {(marks[markKey(v.verse, 'EN')]?.length || marks[markKey(v.verse, 'LU')]?.length) ? (
+                    <button onClick={() => { clearMarks(v.verse, 'EN'); clearMarks(v.verse, 'LU'); }} className="px-3 py-1.5 rounded-lg text-[13px] font-medium bg-yellow-100 text-yellow-900">✏️ Clear marks ✕</button>
+                  ) : null}
                 </div>
 
                 {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
@@ -320,7 +388,7 @@ function ChapterContent() {
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
-                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
+                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className={crossBody}> — {cr.text_english}</span>}</li>
                       ))}</ul>
                     )}
                   </div>
@@ -328,7 +396,7 @@ function ChapterContent() {
                 {/* Commentary for THIS verse — same one-panel rule */}
                 {isSel && activePanel === 'commentary' && (
                   <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
-                    <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
+                    <p className={`text-[11px] font-bold tracking-wide ${linkColor} uppercase mb-2`}>📖 Commentary · Verse {v.verse}</p>
                     {commentary[v.verse] ? (
                       <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse])}</p>
                     ) : (
@@ -396,7 +464,7 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
                 {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                   <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
+                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className={crossBody}> — {cr.text_english}</span>}</li>
                   ))}</ul>
                 )}
                 <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -501,6 +569,20 @@ function ChapterContent() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+
+      {/* V6: Floating Highlight / Underline toolbar — appears when you select any verse text */}
+      {pendingMark && (
+        <div className="fixed z-[60] -translate-x-1/2 bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1" style={{ left: Math.max(110, Math.min(typeof window !== 'undefined' ? window.innerWidth - 110 : 300, pendingMark.x)), top: Math.max(8, pendingMark.y - 52) }}>
+          <button onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onClick={() => applyMark('underline', 'decoration-orange-500 text-inherit')} title="Underline orange" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-orange-500">U</button>
+          <button onClick={() => applyMark('underline', 'decoration-blue-500 text-inherit')} title="Underline blue" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-blue-500">U</button>
+          <button onClick={() => { try { navigator.clipboard?.writeText(pendingMark.text); } catch {} setPendingMark(null); }} title="Copy selection" className="w-8 h-8 rounded-full bg-white/15 text-[13px] flex items-center justify-center">⧉</button>
+          <button onClick={() => setPendingMark(null)} title="Close" className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">✕</button>
         </div>
       )}
 
