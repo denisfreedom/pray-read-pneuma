@@ -40,6 +40,7 @@ function ChapterContent() {
   const [verses, setVerses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [lang, setLang] = useState<'EN' | 'LU' | 'BOTH'>('EN');
+  const [sidebarLang, setSidebarLang] = useState<'EN' | 'LU' | 'BOTH'>('EN'); // V5: sidebar ONLY — independent of main reader lang
   const [fontSize, setFontSize] = useState(17);
   const [rightTab, setRightTab] = useState<'intro' | 'commentary' | 'prayer'>('intro');
   const [chapterIntro, setChapterIntro] = useState<any>(null);
@@ -212,20 +213,25 @@ function ChapterContent() {
     });
   };
 
+  const linkColor = theme === 'dark' ? 'text-orange-400' : '{linkColor}'; // V5: blue -> orange in Dark
+  const crossBody = theme === 'dark' ? 'text-slate-100' : 'text-slate-700'; // V5: cross-ref body near-white in Dark
+  const bodySize = fontSize; // V5 universal: base size drives verses + prayer + sidebar + cross-ref
+  const smallSize = Math.max(12, fontSize - 2);
+  const headingBlue = theme === 'dark' ? 'text-orange-400' : 'text-blue-800';
   // V4: Sun cycles ONLY 3 themes: White -> Light Blue (original) -> Dark (white text) -> White
   const cycleTheme = () => setTheme(t => t === 'white' ? 'lightblue' : t === 'lightblue' ? 'dark' : 'white');
   const themeClasses = theme === 'dark'
     ? { page: 'bg-slate-950 text-slate-100', card: 'bg-slate-900 text-slate-100 border-slate-800', header: 'bg-slate-950 text-slate-100 border-slate-800', text: 'text-slate-100', muted: 'text-slate-300', submuted: 'text-slate-400', paper: 'bg-slate-800 text-slate-100 border-slate-700', prayer: 'bg-rose-950/40 text-rose-100 border-rose-900/50', chip: 'bg-slate-800 text-slate-100', divider: 'border-slate-700' }
     : theme === 'white'
     ? { page: 'bg-white text-slate-900', card: 'bg-white text-slate-900 border-slate-200', header: 'bg-white text-slate-900 border-slate-200', text: 'text-slate-900', muted: 'text-slate-600', submuted: 'text-slate-500', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-slate-100 text-slate-800', divider: 'border-slate-100' }
-    : { page: '${themeClasses.page} text-slate-900', card: 'bg-white text-slate-900 border-slate-200', header: 'bg-white text-slate-900 border-slate-200', text: 'text-slate-900', muted: 'text-slate-600', submuted: 'text-slate-500', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-slate-100 text-slate-800', divider: 'border-slate-100' };
+    : { page: 'bg-[#BDD7F5] text-slate-900', card: 'bg-[#DCEBFF] text-slate-900 border-[#A8C6EE]', header: 'bg-[#C7DEFA] text-slate-900 border-[#A8C6EE]', text: 'text-slate-900', muted: 'text-slate-700', submuted: 'text-slate-600', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-[#C7DEFA] text-slate-800', divider: 'border-[#A8C6EE]' };
 
   const shareText = (v: any) => `${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`;
   const shareUrl = (v: any) => typeof window !== 'undefined' ? `${window.location.origin}/bible-reader/${bookNum}/${chapterNum}#verse-${v.verse}` : '';
   const openShare = (v: any) => setShareVerse(v);
 
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#EAF2FF]"><p className="text-slate-500 text-sm">Loading chapter…</p></div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]"><p className="text-slate-500 text-sm">Loading chapter…</p></div>;
 
   const bookName = book?.name_english || `Book ${bookNum}`;
   const bookNameLu = book?.name_luganda || '';
@@ -262,7 +268,7 @@ function ChapterContent() {
         <div>
           <span className="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-[13px] font-semibold">{testament}</span>
           <h2 className="text-[44px] leading-[1.1] font-bold text-[#1E3A8A] mt-3">{bookName}</h2>
-          <p className="text-[19px] font-bold text-blue-700 mt-1">Chapter {chapterNum}</p>
+          <p className="text-[19px] font-bold {linkColor} mt-1">Chapter {chapterNum}</p>
           {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
           <hr className="border-blue-200 my-4" />
 
@@ -281,7 +287,7 @@ function ChapterContent() {
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
-                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`}>{verseText(v)}</p>
+                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
                     {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`}>{v.text_luganda}</p>}
                   </div>
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
@@ -302,7 +308,7 @@ function ChapterContent() {
                     <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
                     {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
-                        {pr.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{pr.en}</p>}
+                        {pr.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{pr.en}</p>}
                         {pr.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{pr.lu}</p>}
                       </>
                     )}
@@ -314,7 +320,7 @@ function ChapterContent() {
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
-                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold text-blue-700 hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
+                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
                       ))}</ul>
                     )}
                   </div>
@@ -322,9 +328,9 @@ function ChapterContent() {
                 {/* Commentary for THIS verse — same one-panel rule */}
                 {isSel && activePanel === 'commentary' && (
                   <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
-                    <p className="text-[11px] font-bold tracking-wide text-blue-700 uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
+                    <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
                     {commentary[v.verse] ? (
-                      <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse])}</p>
+                      <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse])}</p>
                     ) : (
                       <p className="text-sm text-slate-600 leading-relaxed">No written commentary saved for this verse yet. Pray-read the verse above — the Prayer tab for this verse carries the meditation for it. Commentary is added from Admin → Commentaries.</p>
                     )}
@@ -338,7 +344,7 @@ function ChapterContent() {
           {(closing.en || closing.lu) && (
             <div className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-4 border-2 border-amber-200`}>
               <p className="text-[11px] font-bold tracking-wide text-amber-700 uppercase mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
-              {closing.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{closing.en}</p>}
+              {closing.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{closing.en}</p>}
               {closing.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${closing.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{closing.lu}</p>}
             </div>
           )}
@@ -346,7 +352,7 @@ function ChapterContent() {
           {chapterNum === Number(totalChapters) && (bookClose.en || bookClose.lu) && (
             <div className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-3 border-2 border-purple-200`}>
               <p className="text-[11px] font-bold tracking-wide text-purple-700 uppercase mb-2">🙏 Book Closing Prayer — {bookName}</p>
-              {bookClose.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{bookClose.en}</p>}
+              {bookClose.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{bookClose.en}</p>}
               {bookClose.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${bookClose.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClose.lu}</p>}
             </div>
           )}
@@ -366,7 +372,7 @@ function ChapterContent() {
                 setRightTab(t.id);
               }} className={`flex-1 py-3 text-[14px] font-semibold ${rightTab === t.id ? `${themeClasses.text} border-b-2 border-current` : themeClasses.muted}`}>{t.label}</button>
             ))}
-            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} title={`Sidebar language: ${lang} — tap to change`} className="w-[52px] bg-orange-600 text-white text-[11px] font-bold leading-tight">GB<br />{lang}</button>
+            <button onClick={() => setSidebarLang(sidebarLang === 'EN' ? 'LU' : sidebarLang === 'LU' ? 'BOTH' : 'EN')} title={`Sidebar language: ${sidebarLang} — tap to change (sidebar only)`} className="w-[52px] bg-orange-600 text-white text-[11px] font-bold leading-tight">GB<br />{sidebarLang}</button>
           </div>
           <div className="p-4 max-h-[70vh] overflow-y-auto">
             {rightTab === 'intro' && (
@@ -374,10 +380,10 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">📕 Chapter {chapterNum}</p>
                 {!intro.en && !intro.lu ? <p className="text-sm text-slate-500 italic">No chapter introduction available.</p> : (
                   <>
-                    {(lang === 'EN' || lang === 'BOTH') && intro.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
-                    {(lang === 'LU' || lang === 'BOTH') && intro.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(lang === 'EN' || lang === 'BOTH') && intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{intro.lu}</p>}
-                    {lang === 'EN' && !intro.en && intro.lu && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.lu}</p>}
-                    {lang === 'LU' && !intro.lu && intro.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.en}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{intro.lu}</p>}
+                    {sidebarLang === 'EN' && !intro.en && intro.lu && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.lu}</p>}
+                    {sidebarLang === 'LU' && !intro.lu && intro.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.en}</p>}
                   </>
                 )}
               </div>
@@ -390,7 +396,7 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
                 {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                   <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold text-blue-700 hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
+                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
                   ))}</ul>
                 )}
                 <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -400,16 +406,16 @@ function ChapterContent() {
               <div>
                 {/* Prayer tab shows ONLY the selected verse's prayer. This was the bug: the modern page listed ALL prayers here. */}
                 {!selectedVerse ? (
-                  <div><p className="text-sm text-slate-600">Click <b>♡ Prayer</b> under any verse to pray that verse here.</p><p className="text-sm text-slate-500 italic mt-3">{Object.keys(versePrayers).length} prayers are in this chapter.</p></div>
+                  <div><p className={`text-sm ${crossBody}`}>Click <b>♡ Prayer</b> under any verse to pray that verse here.</p><p className="text-sm text-slate-500 italic mt-3">{Object.keys(versePrayers).length} prayers are in this chapter.</p></div>
                 ) : (
                   <div>
                     <p className="font-bold text-[16px] mb-3">🙏 {bookName} {chapterNum}:{selectedVerse}</p>
                     {!selectedPrayer.en && !selectedPrayer.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
-                        {(lang === 'EN' || lang === 'BOTH') && selectedPrayer.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
-                        {(lang === 'LU' || lang === 'BOTH') && selectedPrayer.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(lang === 'EN' || lang === 'BOTH') && selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{selectedPrayer.lu}</p>}
-                        {lang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.lu}</p>}
-                        {lang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
+                        {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.en}</p>}
+                        {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{selectedPrayer.lu}</p>}
+                        {sidebarLang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.lu}</p>}
+                        {sidebarLang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.en}</p>}
                       </>
                     )}
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -419,8 +425,8 @@ function ChapterContent() {
                 {(closing.en || closing.lu) && (
                   <div className="mt-5 pt-4 border-t border-slate-200">
                     <p className="font-bold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
-                    {(lang === 'EN' || lang === 'BOTH') && closing.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{closing.en}</p>}
-                    {(lang === 'LU' || lang === 'BOTH') && closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${(lang === 'EN' || lang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{closing.en}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
                   </div>
                 )}
               </div>
@@ -466,7 +472,7 @@ function ChapterContent() {
               <Link href="/dashboard" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">Dashboard</Link>
               <Link href="/bible-reader" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">All Books</Link>
               <button onClick={cycleTheme} className="px-3 py-2.5 rounded-xl bg-yellow-100 text-slate-800 text-sm font-semibold">☀️ Theme: {theme}</button>
-              <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-3 py-2.5 rounded-xl bg-amber-100 text-slate-800 text-sm font-semibold">Language: {lang}</button>
+              <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-3 py-2.5 rounded-xl bg-amber-100 text-slate-800 text-sm font-semibold">Main Lang: {lang}</button>
             </div>
             <div className="flex border-b border-slate-200 mb-3">
               {(['intro','commentary','prayer'] as const).map(t => (
@@ -476,8 +482,8 @@ function ChapterContent() {
             {rightTab === 'intro' && (
               <div>
                 <p className="font-bold mb-2">Chapter {chapterNum} — Intro</p>
-                {(lang === 'EN' || lang === 'BOTH') && intro.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
-                {(lang === 'LU' || lang === 'BOTH') && intro.lu && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap mt-3">{intro.lu}</p>}
+                {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.en}</p>}
+                {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p className="leading-relaxed whitespace-pre-wrap mt-3" style={{ fontSize: bodySize }}>{intro.lu}</p>}
                 {!intro.en && !intro.lu && <p className="text-sm text-slate-500 italic">No chapter introduction available.</p>}
               </div>
             )}
@@ -487,8 +493,8 @@ function ChapterContent() {
                 {!selectedVerse ? <p className="text-sm">Tap ♡ Prayer under any verse to pray it here.</p> : (
                   <div>
                     <p className="font-bold mb-2">{bookName} {chapterNum}:{selectedVerse}</p>
-                    {(lang === 'EN' || lang === 'BOTH') && selectedPrayer.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
-                    {(lang === 'LU' || lang === 'BOTH') && selectedPrayer.lu && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap mt-3">{selectedPrayer.lu}</p>}
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.en}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p className="leading-relaxed whitespace-pre-wrap mt-3" style={{ fontSize: bodySize }}>{selectedPrayer.lu}</p>}
                     {!selectedPrayer.en && !selectedPrayer.lu && <p className="text-sm italic text-slate-500">No prayer for this verse yet.</p>}
                   </div>
                 )}
@@ -511,5 +517,5 @@ function ChapterContent() {
 }
 
 export default function ChapterPage() {
-  return <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#EAF2FF]">Loading…</div>}><ChapterContent /></Suspense>;
+  return <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]">Loading…</div>}><ChapterContent /></Suspense>;
 }
