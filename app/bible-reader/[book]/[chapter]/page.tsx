@@ -53,7 +53,7 @@ function ChapterContent() {
   const [loadingCross, setLoadingCross] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
   // --- V3: themes, share sheet, bookmarks, commentary ---
-  const [theme, setTheme] = useState<'light' | 'dark' | 'sepia' | 'cream'>('light');
+  const [theme, setTheme] = useState<'white' | 'lightblue' | 'dark'>('lightblue');
   const [shareVerse, setShareVerse] = useState<any | null>(null);
   const [bookmarks, setBookmarks] = useState<number[]>(() => {
     try { return JSON.parse(localStorage.getItem(`prayread-bookmarks-${bookNum}-${chapterNum}`) || '[]'); } catch { return []; }
@@ -212,18 +212,13 @@ function ChapterContent() {
     });
   };
 
-  // Colour / theme toggle: palette button cycles Light -> Sepia -> Cream -> Dark -> Light
-  // Sun button toggles Light <-> Dark directly
-  const cycleTheme = () => setTheme(t => t === 'light' ? 'sepia' : t === 'sepia' ? 'cream' : t === 'cream' ? 'dark' : 'light');
-  const toggleDark = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
-
+  // V4: Sun cycles ONLY 3 themes: White -> Light Blue (original) -> Dark (white text) -> White
+  const cycleTheme = () => setTheme(t => t === 'white' ? 'lightblue' : t === 'lightblue' ? 'dark' : 'white');
   const themeClasses = theme === 'dark'
-    ? { page: 'bg-slate-950 text-slate-100', card: 'bg-slate-900 text-slate-100', muted: 'text-slate-400' }
-    : theme === 'sepia'
-    ? { page: 'bg-[#F5EEDD] text-[#3B2F1E]', card: 'bg-[#FFF8E7] text-[#3B2F1E]', muted: 'text-[#8A7A55]' }
-    : theme === 'cream'
-    ? { page: 'bg-[#FFF9F0] text-slate-900', card: 'bg-white text-slate-900', muted: 'text-slate-500' }
-    : { page: 'bg-[#EAF2FF] text-slate-900', card: 'bg-white text-slate-900', muted: 'text-slate-500' };
+    ? { page: 'bg-slate-950 text-slate-100', card: 'bg-slate-900 text-slate-100 border-slate-800', header: 'bg-slate-950 text-slate-100 border-slate-800', text: 'text-slate-100', muted: 'text-slate-300', submuted: 'text-slate-400', paper: 'bg-slate-800 text-slate-100 border-slate-700', prayer: 'bg-rose-950/40 text-rose-100 border-rose-900/50', chip: 'bg-slate-800 text-slate-100', divider: 'border-slate-700' }
+    : theme === 'white'
+    ? { page: 'bg-white text-slate-900', card: 'bg-white text-slate-900 border-slate-200', header: 'bg-white text-slate-900 border-slate-200', text: 'text-slate-900', muted: 'text-slate-600', submuted: 'text-slate-500', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-slate-100 text-slate-800', divider: 'border-slate-100' }
+    : { page: '${themeClasses.page} text-slate-900', card: 'bg-white text-slate-900 border-slate-200', header: 'bg-white text-slate-900 border-slate-200', text: 'text-slate-900', muted: 'text-slate-600', submuted: 'text-slate-500', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-slate-100 text-slate-800', divider: 'border-slate-100' };
 
   const shareText = (v: any) => `${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`;
   const shareUrl = (v: any) => typeof window !== 'undefined' ? `${window.location.origin}/bible-reader/${bookNum}/${chapterNum}#verse-${v.verse}` : '';
@@ -245,7 +240,7 @@ function ChapterContent() {
   return (
     <div className={`min-h-screen ${themeClasses.page}`}>
       {/* Header — ORIGINAL */}
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
+      <div className={`${themeClasses.header} border-b sticky top-0 z-30`}>
         <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
           <button onClick={() => router.push('/bible-reader')} className="text-slate-600 text-[15px] hover:text-slate-900">‹ Back</button>
           <div className="flex-1 text-center">
@@ -254,27 +249,14 @@ function ChapterContent() {
           </div>
           <div className="flex items-center gap-1.5">
             <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="w-9 h-9 rounded-md bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center" title="Language">{lang === 'EN' ? 'GB' : lang}</button>
-            <button onClick={toggleDark} title={theme === "dark" ? "Switch to light" : "Switch to dark"} className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">{theme === "dark" ? "🌙" : "☀️"}</button>
+            <button onClick={cycleTheme} title={`Theme: ${theme} — tap for White / Light Blue / Dark`} className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">{theme === "dark" ? "🌙" : theme === "white" ? "⚪" : "☀️"}</button>
             <button onClick={() => setFontSize(Math.max(14, fontSize - 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">−</button>
             <button onClick={() => setFontSize(Math.min(24, fontSize + 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">+</button>
-            <button onClick={cycleTheme} title={`Colour theme: ${theme} — click to change`} className="w-9 h-9 rounded-md bg-orange-500 text-[15px] flex items-center justify-center">🎨</button>
-            <button onClick={cycleTheme} title="Reading light / theme" className="w-9 h-9 rounded-md bg-purple-600 text-[15px] flex items-center justify-center">💡</button>
             <button onClick={() => setMenuOpen(o => !o)} title="Menu" className="w-9 h-9 rounded-md bg-blue-600 text-white text-lg flex items-center justify-center">☰</button>
           </div>
         </div>
       </div>
 
-      {menuOpen && (
-        <div className="bg-white border-b border-slate-200 shadow-sm">
-          <div className="max-w-[1200px] mx-auto px-4 py-3 flex flex-wrap gap-2">
-            <Link href="/dashboard" className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-semibold">Dashboard</Link>
-            <Link href="/bible-reader" className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-semibold">All Books</Link>
-            <button onClick={cycleTheme} className="px-3 py-2 rounded-lg bg-orange-100 text-sm font-semibold">🎨 Colour: {theme} — tap to change</button>
-            <button onClick={toggleDark} className="px-3 py-2 rounded-lg bg-yellow-100 text-sm font-semibold">{theme === 'dark' ? '🌙 Dark: On' : '☀️ Dark: Off'}</button>
-            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-3 py-2 rounded-lg bg-amber-100 text-sm font-semibold">Language: {lang}</button>
-          </div>
-        </div>
-      )}
       <div className="max-w-[1200px] mx-auto px-4 py-4 grid lg:grid-cols-[1fr_360px] gap-5 items-start">
         {/* LEFT — ORIGINAL */}
         <div>
@@ -285,7 +267,7 @@ function ChapterContent() {
           <hr className="border-blue-200 my-4" />
 
           {verses.length === 0 ? (
-            <div className="bg-white rounded-xl p-8 text-center shadow-sm">
+            <div className={`${themeClasses.card} rounded-xl p-8 text-center shadow-sm`}>
               <p className="font-bold">Verses could not be loaded.</p>
               <p className="text-sm text-slate-500 mt-1">Neon has the verses — this page tried 5 verse URLs and got none back. Check <code className="bg-slate-100 px-1 rounded">/api/bible-verses?book_number={bookNum}&amp;chapter={chapterNum}</code> in a new tab.</p>
               <button onClick={() => window.location.reload()} className="mt-3 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-lg">Reload</button>
@@ -299,8 +281,8 @@ function ChapterContent() {
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
-                    <p style={{ fontSize }} className="leading-relaxed text-slate-800">{verseText(v)}</p>
-                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className="leading-relaxed text-slate-500 mt-2 pt-2 border-t border-slate-100">{v.text_luganda}</p>}
+                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`}>{verseText(v)}</p>
+                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`}>{v.text_luganda}</p>}
                   </div>
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
                 </div>
@@ -316,8 +298,8 @@ function ChapterContent() {
 
                 {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
                 {isSel && activePanel === 'prayer' && (
-                  <div className="mt-4 rounded-xl bg-rose-50 border border-rose-100 p-4">
-                    <p className="text-[11px] font-bold tracking-wide text-rose-700 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
+                  <div className={`mt-4 rounded-xl ${themeClasses.prayer} border p-4`}>
+                    <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
                     {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
                         {pr.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{pr.en}</p>}
@@ -328,7 +310,7 @@ function ChapterContent() {
                 )}
                 {/* Cross-refs for THIS verse — LIGHT PAPER card. Opens when Prayer is minimized. */}
                 {isSel && activePanel === 'crossref' && (
-                  <div className="mt-3 rounded-xl bg-[#FFFEF7] border border-amber-200 shadow-md p-4">
+                  <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
@@ -339,7 +321,7 @@ function ChapterContent() {
                 )}
                 {/* Commentary for THIS verse — same one-panel rule */}
                 {isSel && activePanel === 'commentary' && (
-                  <div className="mt-3 rounded-xl bg-[#FFFEF7] border border-blue-200 shadow-md p-4">
+                  <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
                     <p className="text-[11px] font-bold tracking-wide text-blue-700 uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
                     {commentary[v.verse] ? (
                       <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse])}</p>
@@ -354,7 +336,7 @@ function ChapterContent() {
 
           {/* Chapter Closing Prayer — at the END of the chapter, after the last verse. Not in the prayer list. */}
           {(closing.en || closing.lu) && (
-            <div className="bg-white rounded-xl p-5 shadow-sm mt-4 border-2 border-amber-200">
+            <div className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-4 border-2 border-amber-200`}>
               <p className="text-[11px] font-bold tracking-wide text-amber-700 uppercase mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
               {closing.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{closing.en}</p>}
               {closing.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${closing.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{closing.lu}</p>}
@@ -362,7 +344,7 @@ function ChapterContent() {
           )}
           {/* Book Closing Prayer — only after the LAST chapter */}
           {chapterNum === Number(totalChapters) && (bookClose.en || bookClose.lu) && (
-            <div className="bg-white rounded-xl p-5 shadow-sm mt-3 border-2 border-purple-200">
+            <div className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-3 border-2 border-purple-200`}>
               <p className="text-[11px] font-bold tracking-wide text-purple-700 uppercase mb-2">🙏 Book Closing Prayer — {bookName}</p>
               {bookClose.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{bookClose.en}</p>}
               {bookClose.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${bookClose.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClose.lu}</p>}
@@ -371,8 +353,8 @@ function ChapterContent() {
         </div>
 
         {/* RIGHT — ORIGINAL tabs */}
-        <aside className="lg:sticky lg:top-[70px] bg-[#F0F7FF] rounded-xl overflow-hidden">
-          <div className="flex border-b border-slate-200 bg-white">
+        <aside className={`lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
+          <div className={`flex border-b ${themeClasses.divider} ${themeClasses.header}`}>
             {([
               { id: 'intro', label: '📕 Intro' },
               { id: 'commentary', label: '📖 Commentary' },
@@ -382,9 +364,9 @@ function ChapterContent() {
                 // Second click on the active Prayer tab = minimize the open prayer
                 if (t.id === 'prayer' && rightTab === 'prayer' && activePanel === 'prayer') { setSelectedVerse(null); setActivePanel(null); return; }
                 setRightTab(t.id);
-              }} className={`flex-1 py-3 text-[14px] font-semibold ${rightTab === t.id ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-600'}`}>{t.label}</button>
+              }} className={`flex-1 py-3 text-[14px] font-semibold ${rightTab === t.id ? `${themeClasses.text} border-b-2 border-current` : themeClasses.muted}`}>{t.label}</button>
             ))}
-            <button className="w-[52px] bg-orange-600 text-white text-[11px] font-bold leading-tight">GB<br />EN</button>
+            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} title={`Sidebar language: ${lang} — tap to change`} className="w-[52px] bg-orange-600 text-white text-[11px] font-bold leading-tight">GB<br />{lang}</button>
           </div>
           <div className="p-4 max-h-[70vh] overflow-y-auto">
             {rightTab === 'intro' && (
@@ -392,8 +374,10 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">📕 Chapter {chapterNum}</p>
                 {!intro.en && !intro.lu ? <p className="text-sm text-slate-500 italic">No chapter introduction available.</p> : (
                   <>
-                    {intro.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
-                    {intro.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{intro.lu}</p>}
+                    {(lang === 'EN' || lang === 'BOTH') && intro.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
+                    {(lang === 'LU' || lang === 'BOTH') && intro.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(lang === 'EN' || lang === 'BOTH') && intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{intro.lu}</p>}
+                    {lang === 'EN' && !intro.en && intro.lu && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.lu}</p>}
+                    {lang === 'LU' && !intro.lu && intro.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
                   </>
                 )}
               </div>
@@ -422,8 +406,10 @@ function ChapterContent() {
                     <p className="font-bold text-[16px] mb-3">🙏 {bookName} {chapterNum}:{selectedVerse}</p>
                     {!selectedPrayer.en && !selectedPrayer.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
-                        {selectedPrayer.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
-                        {selectedPrayer.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{selectedPrayer.lu}</p>}
+                        {(lang === 'EN' || lang === 'BOTH') && selectedPrayer.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
+                        {(lang === 'LU' || lang === 'BOTH') && selectedPrayer.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(lang === 'EN' || lang === 'BOTH') && selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{selectedPrayer.lu}</p>}
+                        {lang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.lu}</p>}
+                        {lang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
                       </>
                     )}
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -433,8 +419,8 @@ function ChapterContent() {
                 {(closing.en || closing.lu) && (
                   <div className="mt-5 pt-4 border-t border-slate-200">
                     <p className="font-bold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
-                    {closing.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{closing.en}</p>}
-                    {closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
+                    {(lang === 'EN' || lang === 'BOTH') && closing.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{closing.en}</p>}
+                    {(lang === 'LU' || lang === 'BOTH') && closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${(lang === 'EN' || lang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
                   </div>
                 )}
               </div>
@@ -446,7 +432,7 @@ function ChapterContent() {
       {/* Share sheet — WhatsApp / Facebook / Telegram / Instagram / X / LinkedIn + Copy */}
       {shareVerse && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4" onClick={() => setShareVerse(null)}>
-          <div className="bg-white rounded-2xl w-full max-w-sm p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className={`${themeClasses.card} rounded-2xl w-full max-w-sm p-5 shadow-2xl`} onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
               <p className="font-bold text-[16px]">Share {bookName} {chapterNum}:{shareVerse.verse}</p>
               <button onClick={() => setShareVerse(null)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">✕</button>
@@ -466,8 +452,54 @@ function ChapterContent() {
         </div>
       )}
 
+
+      {/* Hamburger SIDE DRAWER — slides in from the right, holds Intro / Commentary / Prayer + nav */}
+      {menuOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setMenuOpen(false)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className={`${themeClasses.card} relative w-[320px] max-w-[85vw] h-full shadow-2xl p-4 overflow-y-auto`} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <p className="font-bold text-[16px]">{bookName} {chapterNum}</p>
+              <button onClick={() => setMenuOpen(false)} className="w-8 h-8 rounded-full bg-slate-200 text-slate-800 flex items-center justify-center">✕</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              <Link href="/dashboard" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">Dashboard</Link>
+              <Link href="/bible-reader" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">All Books</Link>
+              <button onClick={cycleTheme} className="px-3 py-2.5 rounded-xl bg-yellow-100 text-slate-800 text-sm font-semibold">☀️ Theme: {theme}</button>
+              <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-3 py-2.5 rounded-xl bg-amber-100 text-slate-800 text-sm font-semibold">Language: {lang}</button>
+            </div>
+            <div className="flex border-b border-slate-200 mb-3">
+              {(['intro','commentary','prayer'] as const).map(t => (
+                <button key={t} onClick={() => { setRightTab(t); setMenuOpen(false); document.getElementById('right-panel')?.scrollIntoView({ behavior: 'smooth' }); }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
+              ))}
+            </div>
+            {rightTab === 'intro' && (
+              <div>
+                <p className="font-bold mb-2">Chapter {chapterNum} — Intro</p>
+                {(lang === 'EN' || lang === 'BOTH') && intro.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{intro.en}</p>}
+                {(lang === 'LU' || lang === 'BOTH') && intro.lu && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap mt-3">{intro.lu}</p>}
+                {!intro.en && !intro.lu && <p className="text-sm text-slate-500 italic">No chapter introduction available.</p>}
+              </div>
+            )}
+            {rightTab === 'commentary' && <p className="text-sm text-slate-500">Select a verse and tap Commentary to read it here.</p>}
+            {rightTab === 'prayer' && (
+              <div>
+                {!selectedVerse ? <p className="text-sm">Tap ♡ Prayer under any verse to pray it here.</p> : (
+                  <div>
+                    <p className="font-bold mb-2">{bookName} {chapterNum}:{selectedVerse}</p>
+                    {(lang === 'EN' || lang === 'BOTH') && selectedPrayer.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{selectedPrayer.en}</p>}
+                    {(lang === 'LU' || lang === 'BOTH') && selectedPrayer.lu && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap mt-3">{selectedPrayer.lu}</p>}
+                    {!selectedPrayer.en && !selectedPrayer.lu && <p className="text-sm italic text-slate-500">No prayer for this verse yet.</p>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Bottom nav — ORIGINAL */}
-      <div className="sticky bottom-0 bg-white border-t border-slate-200">
+      <div className={`sticky bottom-0 ${themeClasses.header} border-t`}>
         <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center justify-between">
           <button disabled={chapterNum <= 1} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum - 1}`)} className="px-4 py-2 rounded-lg bg-slate-100 text-sm font-semibold disabled:opacity-40">‹ Prev</button>
           <span className="text-[15px] font-bold">Chapter {chapterNum} of {totalChapters}</span>
