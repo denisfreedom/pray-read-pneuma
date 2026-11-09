@@ -48,10 +48,18 @@ function ChapterContent() {
   const [bookClosing, setBookClosing] = useState<any>(null);
   const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
   // One expanded panel per verse: 'prayer' | 'crossref' | null. Second click closes. Switching buttons swaps panels.
-  const [activePanel, setActivePanel] = useState<'prayer' | 'crossref' | null>(null);
+  const [activePanel, setActivePanel] = useState<'prayer' | 'crossref' | 'commentary' | null>(null);
   const [crossRefs, setCrossRefs] = useState<any[]>([]);
   const [loadingCross, setLoadingCross] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
+  // --- V3: themes, share sheet, bookmarks, commentary ---
+  const [theme, setTheme] = useState<'light' | 'dark' | 'sepia' | 'cream'>('light');
+  const [shareVerse, setShareVerse] = useState<any | null>(null);
+  const [bookmarks, setBookmarks] = useState<number[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`prayread-bookmarks-${bookNum}-${chapterNum}`) || '[]'); } catch { return []; }
+  });
+  const [commentary, setCommentary] = useState<Record<number, any>>({});
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!bookNum || !chapterNum) return;
@@ -181,6 +189,47 @@ function ChapterContent() {
     setLoadingCross(false);
   };
 
+  const openCommentary = async (verseNum: number) => {
+    if (selectedVerse === verseNum && activePanel === 'commentary') { setSelectedVerse(null); setActivePanel(null); return; }
+    setSelectedVerse(verseNum);
+    setActivePanel('commentary');
+    setRightTab('commentary');
+    if (commentary[verseNum]) return;
+    // Try commentary API if it exists — if not, we show the built-in reading note, never a blank crash
+    try {
+      const r = await fetch(`/api/commentaries?book_number=${bookNum}&chapter=${chapterNum}&verse=${verseNum}`);
+      const d = await r.json().catch(() => null);
+      const arr = Array.isArray(d) ? d : (d ? [d] : []);
+      if (arr.length) setCommentary(prev => ({ ...prev, [verseNum]: arr[0] }));
+    } catch {}
+  };
+
+  const toggleBookmark = (verseNum: number) => {
+    setBookmarks(prev => {
+      const next = prev.includes(verseNum) ? prev.filter(v => v !== verseNum) : [...prev, verseNum];
+      try { localStorage.setItem(`prayread-bookmarks-${bookNum}-${chapterNum}`, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  // Colour / theme toggle: palette button cycles Light -> Sepia -> Cream -> Dark -> Light
+  // Sun button toggles Light <-> Dark directly
+  const cycleTheme = () => setTheme(t => t === 'light' ? 'sepia' : t === 'sepia' ? 'cream' : t === 'cream' ? 'dark' : 'light');
+  const toggleDark = () => setTheme(t => t === 'dark' ? 'light' : 'dark');
+
+  const themeClasses = theme === 'dark'
+    ? { page: 'bg-slate-950 text-slate-100', card: 'bg-slate-900 text-slate-100', muted: 'text-slate-400' }
+    : theme === 'sepia'
+    ? { page: 'bg-[#F5EEDD] text-[#3B2F1E]', card: 'bg-[#FFF8E7] text-[#3B2F1E]', muted: 'text-[#8A7A55]' }
+    : theme === 'cream'
+    ? { page: 'bg-[#FFF9F0] text-slate-900', card: 'bg-white text-slate-900', muted: 'text-slate-500' }
+    : { page: 'bg-[#EAF2FF] text-slate-900', card: 'bg-white text-slate-900', muted: 'text-slate-500' };
+
+  const shareText = (v: any) => `${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`;
+  const shareUrl = (v: any) => typeof window !== 'undefined' ? `${window.location.origin}/bible-reader/${bookNum}/${chapterNum}#verse-${v.verse}` : '';
+  const openShare = (v: any) => setShareVerse(v);
+
+
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#EAF2FF]"><p className="text-slate-500 text-sm">Loading chapter…</p></div>;
 
   const bookName = book?.name_english || `Book ${bookNum}`;
@@ -194,7 +243,7 @@ function ChapterContent() {
   const verseText = (v: any) => lang === 'LU' ? (v.text_luganda || v.text_english) : lang === 'BOTH' ? v.text_english : (v.text_english || v.text_luganda);
 
   return (
-    <div className="min-h-screen bg-[#EAF2FF] text-slate-900">
+    <div className={`min-h-screen ${themeClasses.page}`}>
       {/* Header — ORIGINAL */}
       <div className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
@@ -205,16 +254,27 @@ function ChapterContent() {
           </div>
           <div className="flex items-center gap-1.5">
             <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="w-9 h-9 rounded-md bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center" title="Language">{lang === 'EN' ? 'GB' : lang}</button>
-            <button className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">☀️</button>
+            <button onClick={toggleDark} title={theme === "dark" ? "Switch to light" : "Switch to dark"} className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">{theme === "dark" ? "🌙" : "☀️"}</button>
             <button onClick={() => setFontSize(Math.max(14, fontSize - 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">−</button>
             <button onClick={() => setFontSize(Math.min(24, fontSize + 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">+</button>
-            <button className="w-9 h-9 rounded-md bg-orange-500 text-[15px] flex items-center justify-center">🎨</button>
-            <button className="w-9 h-9 rounded-md bg-purple-600 text-[15px] flex items-center justify-center">💡</button>
-            <button className="w-9 h-9 rounded-md bg-blue-600 text-white text-lg flex items-center justify-center">☰</button>
+            <button onClick={cycleTheme} title={`Colour theme: ${theme} — click to change`} className="w-9 h-9 rounded-md bg-orange-500 text-[15px] flex items-center justify-center">🎨</button>
+            <button onClick={cycleTheme} title="Reading light / theme" className="w-9 h-9 rounded-md bg-purple-600 text-[15px] flex items-center justify-center">💡</button>
+            <button onClick={() => setMenuOpen(o => !o)} title="Menu" className="w-9 h-9 rounded-md bg-blue-600 text-white text-lg flex items-center justify-center">☰</button>
           </div>
         </div>
       </div>
 
+      {menuOpen && (
+        <div className="bg-white border-b border-slate-200 shadow-sm">
+          <div className="max-w-[1200px] mx-auto px-4 py-3 flex flex-wrap gap-2">
+            <Link href="/dashboard" className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-semibold">Dashboard</Link>
+            <Link href="/bible-reader" className="px-3 py-2 rounded-lg bg-slate-100 text-sm font-semibold">All Books</Link>
+            <button onClick={cycleTheme} className="px-3 py-2 rounded-lg bg-orange-100 text-sm font-semibold">🎨 Colour: {theme} — tap to change</button>
+            <button onClick={toggleDark} className="px-3 py-2 rounded-lg bg-yellow-100 text-sm font-semibold">{theme === 'dark' ? '🌙 Dark: On' : '☀️ Dark: Off'}</button>
+            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-3 py-2 rounded-lg bg-amber-100 text-sm font-semibold">Language: {lang}</button>
+          </div>
+        </div>
+      )}
       <div className="max-w-[1200px] mx-auto px-4 py-4 grid lg:grid-cols-[1fr_360px] gap-5 items-start">
         {/* LEFT — ORIGINAL */}
         <div>
@@ -235,7 +295,7 @@ function ChapterContent() {
             const isSel = selectedVerse === v.verse;
             const pr = pickPrayer(versePrayers[v.verse]);
             return (
-              <article key={v.verse} className={`bg-white rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''}`}>
+              <article id={`verse-${v.verse}`} key={v.verse} className={`${themeClasses.card} rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''}`}>
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
@@ -245,16 +305,13 @@ function ChapterContent() {
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
                 </div>
                 <hr className="border-slate-100 my-3" />
-                <div className="flex flex-wrap gap-2">
+                {/* V3: Notes + Insight REMOVED — Bookmark now fits on the same line */}
+                <div className="flex flex-wrap items-center gap-2">
                   <button onClick={() => openPrayer(v.verse)} disabled={!hasPrayer} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${hasPrayer ? 'bg-rose-100 text-rose-800 hover:bg-rose-200' : 'bg-slate-50 text-slate-400 cursor-not-allowed'}`}>♡ Prayer</button>
-                  <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); }} className="px-3 py-1.5 rounded-lg bg-purple-100 text-purple-900 text-[13.5px] font-medium">🔗 Share</button>
-                  <button onClick={() => openCrossRefs(v.verse)} className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-[13.5px] font-medium">🔗 Cross-Ref</button>
-                  <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-[13.5px] font-medium">📖 Commentary</button>
-                  <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-800 text-[13.5px] font-medium">📝 Notes</button>
-                  <button className="px-3 py-1.5 rounded-lg bg-purple-100 text-purple-900 text-[13.5px] font-medium">💡 Insight</button>
-                </div>
-                <div className="flex justify-end mt-2">
-                  <button className="px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-[13px] font-medium">🔖 Bookmark</button>
+                  <button onClick={() => openShare(v)} className="px-3 py-1.5 rounded-lg bg-purple-100 text-purple-900 text-[13.5px] font-medium">🔗 Share</button>
+                  <button onClick={() => openCrossRefs(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'crossref' ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>🔗 Cross-Ref</button>
+                  <button onClick={() => openCommentary(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'commentary' ? 'bg-blue-200 text-blue-900' : 'bg-slate-100 text-slate-800'}`}>📖 Commentary</button>
+                  <button onClick={() => toggleBookmark(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13px] font-medium ${bookmarks.includes(v.verse) ? 'bg-amber-400 text-amber-950' : 'bg-slate-100 text-slate-700'}`}>{bookmarks.includes(v.verse) ? '🔖 Saved ✓' : '🔖 Bookmark'}</button>
                 </div>
 
                 {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
@@ -277,6 +334,17 @@ function ChapterContent() {
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
                         <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold text-blue-700 hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
                       ))}</ul>
+                    )}
+                  </div>
+                )}
+                {/* Commentary for THIS verse — same one-panel rule */}
+                {isSel && activePanel === 'commentary' && (
+                  <div className="mt-3 rounded-xl bg-[#FFFEF7] border border-blue-200 shadow-md p-4">
+                    <p className="text-[11px] font-bold tracking-wide text-blue-700 uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
+                    {commentary[v.verse] ? (
+                      <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse])}</p>
+                    ) : (
+                      <p className="text-sm text-slate-600 leading-relaxed">No written commentary saved for this verse yet. Pray-read the verse above — the Prayer tab for this verse carries the meditation for it. Commentary is added from Admin → Commentaries.</p>
                     )}
                   </div>
                 )}
@@ -374,6 +442,29 @@ function ChapterContent() {
           </div>
         </aside>
       </div>
+
+      {/* Share sheet — WhatsApp / Facebook / Telegram / Instagram / X / LinkedIn + Copy */}
+      {shareVerse && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4" onClick={() => setShareVerse(null)}>
+          <div className="bg-white rounded-2xl w-full max-w-sm p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-bold text-[16px]">Share {bookName} {chapterNum}:{shareVerse.verse}</p>
+              <button onClick={() => setShareVerse(null)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">✕</button>
+            </div>
+            <p className="text-[13px] text-slate-500 mb-4 line-clamp-2">“{shareText(shareVerse).slice(0, 120)}…”</p>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <a href={`https://wa.me/?text=${encodeURIComponent(shareText(shareVerse) + ' ' + shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366]/10 py-3 px-2"><span className="text-2xl block">💬</span><span className="text-[12px] font-semibold">WhatsApp</span></a>
+              <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#1877F2]/10 py-3 px-2"><span className="text-2xl block">📘</span><span className="text-[12px] font-semibold">Facebook</span></a>
+              <a href={`https://t.me/share/url?url=${encodeURIComponent(shareUrl(shareVerse))}&text=${encodeURIComponent(shareText(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#229ED9]/10 py-3 px-2"><span className="text-2xl block">✈️</span><span className="text-[12px] font-semibold">Telegram</span></a>
+              <button onClick={() => { navigator.clipboard?.writeText(shareUrl(shareVerse)); setCopied(shareVerse.verse); }} className="rounded-xl bg-[#E1306C]/10 py-3 px-2"><span className="text-2xl block">📸</span><span className="text-[12px] font-semibold">Instagram<br /><span className="text-[10px] font-normal">Copy link</span></span></button>
+              <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText(shareVerse))}&url=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-900/5 py-3 px-2"><span className="text-2xl block">𝕏</span><span className="text-[12px] font-semibold">X / Twitter</span></a>
+              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0A66C2]/10 py-3 px-2"><span className="text-2xl block">💼</span><span className="text-[12px] font-semibold">LinkedIn</span></a>
+            </div>
+            <button onClick={() => { navigator.clipboard?.writeText(shareText(shareVerse) + ' ' + shareUrl(shareVerse)); setCopied(shareVerse.verse); }} className="w-full mt-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold">{copied === shareVerse.verse ? '✓ Copied!' : '📋 Copy verse + link'}</button>
+            <p className="text-[11px] text-slate-400 text-center mt-2">Instagram has no direct share link — tap it to copy the link, then paste it in Instagram.</p>
+          </div>
+        </div>
+      )}
 
       {/* Bottom nav — ORIGINAL */}
       <div className="sticky bottom-0 bg-white border-t border-slate-200">
