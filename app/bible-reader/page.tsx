@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef, Suspense } from 'react';
-import { Search, BookOpen, ChevronLeft } from 'lucide-react';
+import { useState, useEffect, useRef, Suspense, useMemo } from 'react';
+import { Search, BookOpen, ChevronLeft, X, WifiOff, Download, ChevronRight, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -27,7 +27,6 @@ function BibleReaderContent() {
   const ntRef = useRef<HTMLDivElement>(null);
   const otRef = useRef<HTMLDivElement>(null);
 
-  // Check offline status
   useEffect(() => {
     const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
     updateOnlineStatus();
@@ -39,11 +38,9 @@ function BibleReaderContent() {
     };
   }, []);
 
-  // Load books (online or offline)
   useEffect(() => {
     const loadBooks = async () => {
       try {
-        // Try online first
         const response = await fetch('/api/bible-books');
         if (response.ok) {
           const data = await response.json();
@@ -56,58 +53,49 @@ function BibleReaderContent() {
       } catch (error) {
         console.log('Online fetch failed, trying offline cache');
       }
-
-      // Fallback to IndexedDB for offline
       try {
         const { getBooks } = await import('@/app/utils/offlineStorage');
         const cachedBooks = await getBooks();
-        if (cachedBooks && cachedBooks.length > 0) {
-          setBooks(cachedBooks);
-        }
+        if (cachedBooks && cachedBooks.length > 0) setBooks(cachedBooks);
       } catch (error) {
         console.error('Failed to load books from offline storage:', error);
       } finally {
         setLoading(false);
       }
     };
-
     loadBooks();
   }, []);
 
-  // Check which books are downloaded
   useEffect(() => {
     const checkDownloadedBooks = async () => {
       try {
         const { getAllFromStore } = await import('@/app/utils/offlineStorage');
         const allVerses = await getAllFromStore('verses');
-        
-        // Get unique book IDs from verses
         const bookIds = new Set<number>();
-        allVerses.forEach((verse: any) => {
-          if (verse.book_id) bookIds.add(verse.book_id);
-        });
-        
+        allVerses.forEach((verse: any) => { if (verse.book_id) bookIds.add(verse.book_id); });
         setDownloadedBookIds(bookIds);
       } catch (error) {
         console.error('Error checking downloaded books:', error);
       }
     };
-
-    if (books.length > 0) {
-      checkDownloadedBooks();
-    }
+    if (books.length > 0) checkDownloadedBooks();
   }, [books]);
 
-  const filtered = searchTerm.trim()
-    ? books.filter(b =>
-        b.name_english?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.name_luganda?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        b.abbreviation_english?.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    : books;
+  const filtered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return books;
+    return books.filter(b =>
+      b.name_english?.toLowerCase().includes(q) ||
+      b.name_luganda?.toLowerCase().includes(q) ||
+      b.abbreviation_english?.toLowerCase().includes(q) ||
+      b.abbreviation_luganda?.toLowerCase().includes(q)
+    );
+  }, [books, searchTerm]);
 
-  const oldTestament = filtered.filter(b => b.testament === 'Old Testament');
-  const newTestament = filtered.filter(b => b.testament === 'New Testament');
+  const oldTestament = useMemo(() => filtered.filter(b => b.testament === 'Old Testament'), [filtered]);
+  const newTestament = useMemo(() => filtered.filter(b => b.testament === 'New Testament'), [filtered]);
+  const otTotal = books.filter(b => b.testament === 'Old Testament').length;
+  const ntTotal = books.filter(b => b.testament === 'New Testament').length;
 
   const switchTab = (tab: 'old' | 'new') => {
     setActiveTab(tab);
@@ -119,10 +107,13 @@ function BibleReaderContent() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen" style={{ background: 'linear-gradient(135deg, #0a1228 0%, #1a2a4a 100%)' }}>
+      <div className="min-h-screen flex items-center justify-center bg-[#0F172A]">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-orange-500 mx-auto mb-3"></div>
-          <p className="text-gray-500 text-sm">Loading books…</p>
+          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
+            <BookOpen className="w-7 h-7 text-white" />
+          </div>
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-white/20 border-t-amber-500 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm font-medium">Loading books…</p>
         </div>
       </div>
     );
@@ -131,37 +122,38 @@ function BibleReaderContent() {
   const BookGrid = ({ bookList, testament }: { bookList: Book[]; testament: 'old' | 'new' }) => {
     const isOT = testament === 'old';
     return (
-      <div className={`grid gap-2`} style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))' }}>
+      <div className="grid gap-2.5 sm:gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(108px, 1fr))' }}>
         {bookList.map(book => {
           const isDownloaded = downloadedBookIds.has(book.id);
           return (
             <Link
               key={book.id}
               href={`/bible-reader/${book.book_number}`}
-              className={`group relative flex flex-col items-center justify-center rounded-lg p-2.5 text-center transition-all duration-150 active:scale-95 touch-manipulation
-                ${isOT
-                  ? 'border border-amber-400/30 hover:border-amber-400/70 hover:bg-amber-400/20'
-                  : 'border border-blue-400/30 hover:border-blue-400/70 hover:bg-blue-400/20'
-                }`}
-              style={{ background: 'rgba(255,255,255,0.08)' }}
+              className="group relative flex flex-col items-start justify-between rounded-2xl p-3.5 min-h-[108px] bg-white border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:shadow-[0_12px_28px_-8px_rgba(15,23,42,0.18)] hover:-translate-y-0.5 hover:border-slate-300 transition-all duration-200 active:scale-[0.98] touch-manipulation overflow-hidden"
             >
+              <div className={`absolute top-0 left-0 right-0 h-[3px] ${isOT ? 'bg-amber-500' : 'bg-blue-600'}`} />
               {isDownloaded && (
-                <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center border border-white/20">
-                  <span className="text-white text-xs">✓</span>
-                </div>
+                <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Offline
+                </span>
               )}
-              <span className={`text-sm font-bold leading-tight mb-0.5 ${isOT ? 'text-amber-300' : 'text-blue-300'}`}>
-                {book.abbreviation_english || book.name_english.substring(0, 4)}
-              </span>
-              <span className="text-xs text-white/50 leading-tight truncate w-full text-center">
-                {book.name_luganda?.substring(0, 8)}
-              </span>
-              <span className={`text-xs mt-0.5 ${isOT ? 'text-amber-500' : 'text-blue-500'}`}>
-                {book.total_chapters}ch
-              </span>
-              {isDownloaded && (
-                <span className="text-xs text-green-400 mt-0.5">Offline</span>
-              )}
+              <div className="mt-1">
+                <span className={`block text-[19px] leading-none font-extrabold tracking-tight ${isOT ? 'text-slate-900' : 'text-slate-900'}`}>
+                  {book.abbreviation_english || book.name_english.substring(0, 4)}
+                </span>
+                <span className="block mt-1.5 text-[13px] leading-tight font-semibold text-slate-700 line-clamp-1">
+                  {book.name_english}
+                </span>
+                <span className="block text-[12px] leading-tight text-slate-500 truncate w-full">
+                  {book.name_luganda}
+                </span>
+              </div>
+              <div className="flex items-center justify-between w-full mt-3">
+                <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${isOT ? 'bg-amber-50 text-amber-800 border border-amber-200/70' : 'bg-blue-50 text-blue-800 border border-blue-200/70'}`}>
+                  {book.total_chapters} {book.total_chapters === 1 ? 'chapter' : 'chapters'}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
+              </div>
             </Link>
           );
         })}
@@ -170,125 +162,134 @@ function BibleReaderContent() {
   };
 
   return (
-    <div className="min-h-screen relative" style={{ backgroundImage: 'url(https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1778322511425_qx7i4a.jpeg)', backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
-      {/* Dark overlay for readability */}
-      <div className="absolute inset-0 z-0" style={{ background: 'rgba(0,0,0,0.65)' }} />
-      
-      {/* Offline Banner */}
-      {isOffline && (
-        <div className="relative z-40 bg-gradient-to-r from-blue-600 to-purple-600 text-white px-4 py-2 text-center text-sm font-medium">
-          📵 You're offline · Only downloaded books are available
-          {downloadedBookIds.size > 0 && (
-            <span className="ml-2 px-2 py-0.5 bg-white/20 rounded-full text-xs">
-              {downloadedBookIds.size} book{downloadedBookIds.size > 1 ? 's' : ''} available
-            </span>
-          )}
-        </div>
-      )}
-      
+    <div className="min-h-screen bg-[#F7F5F0] text-slate-900">
       {/* Top bar */}
-      <div className="sticky top-0 z-30 backdrop-blur-md border-b border-white/10 shadow-lg" style={{ background: 'rgba(0,0,0,0.75)' }}>
-        <div className="max-w-3xl mx-auto px-3 py-2">
-          {/* Nav row */}
-          <div className="flex items-center gap-2 mb-2">
-            <Link href="/dashboard" className="flex items-center gap-1 px-3 py-1.5 bg-orange-500 text-white text-xs font-semibold rounded-lg hover:bg-orange-600 transition-colors">
-              <ChevronLeft className="h-3 w-3" />
-              Dashboard
+      <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3">
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard" className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-900 text-white text-[13px] font-semibold rounded-xl hover:bg-slate-800 transition-colors">
+              <ChevronLeft className="h-4 w-4" /> Dashboard
             </Link>
-            <Link href="/" className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-semibold rounded-lg hover:bg-gray-200 transition-colors">
-              <ChevronLeft className="h-3 w-3" />
-              Home
+            <Link href="/" className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-700 text-[13px] font-semibold rounded-xl hover:bg-slate-200 transition-colors">
+              <ChevronLeft className="h-4 w-4" /> Home
             </Link>
-            <div className="flex items-center gap-1 ml-auto">
-              <BookOpen className="h-4 w-4 text-amber-400" />
-              <span className="text-sm font-bold text-amber-300">Bible Reader</span>
+            <div className="ml-auto flex items-center gap-2">
+              {isOffline && (
+                <span className="hidden sm:inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold px-2.5 py-1.5 rounded-full">
+                  <WifiOff className="w-3.5 h-3.5" /> Offline · {downloadedBookIds.size} available
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">
+                <BookOpen className="w-3.5 h-3.5" /> Bible Reader
+              </span>
+            </div>
+          </div>
+
+          {/* Hero */}
+          <div className="mt-4 mb-3 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-[26px] sm:text-[32px] leading-[1.1] font-extrabold tracking-tight text-slate-900">
+                Choose a book
+                <span className="block text-slate-500 font-semibold text-[15px] sm:text-base mt-1">Pray · Read · Listen — English &amp; Luganda</span>
+              </h1>
+            </div>
+            <div className="hidden sm:flex shrink-0 items-center gap-2 bg-slate-900 text-white rounded-2xl px-3.5 py-2.5">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <div className="leading-none">
+                <div className="text-sm font-bold">{books.length} books</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">66 · OT {otTotal} · NT {ntTotal}</div>
+              </div>
             </div>
           </div>
 
           {/* Search */}
-          <div className="relative mb-2">
-            <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-amber-400" />
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <input
               type="text"
-              placeholder="Search books… (e.g. Psalms, Philemon)"
+              placeholder="Search books…  e.g. Psalms, Okubikkulirwa, Philemon"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs border border-white/20 rounded-lg focus:ring-2 focus:ring-amber-400 focus:border-transparent text-white placeholder-white/40"
-              style={{ background: 'rgba(255,255,255,0.08)' }}
+              className="w-full pl-10 pr-10 py-3 text-[14px] bg-white border border-slate-300 rounded-2xl shadow-sm focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500 outline-none placeholder:text-slate-400"
             />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center">
+                <X className="w-3.5 h-3.5 text-slate-600" />
+              </button>
+            )}
           </div>
+          {searchTerm.trim() && (
+            <p className="mt-2 text-[13px] text-slate-500 font-medium">{filtered.length} result{filtered.length === 1 ? '' : 's'} for “{searchTerm.trim()}”</p>
+          )}
 
-          {/* OT / NT tab switcher */}
-          <div className="flex rounded-lg overflow-hidden border border-white/15">
+          {/* OT / NT */}
+          <div className="mt-3 flex p-1 bg-slate-100 rounded-2xl">
             <button
               onClick={() => switchTab('old')}
-              className={`flex-1 py-2 text-xs font-bold transition-all ${
-                activeTab === 'old'
-                  ? 'bg-amber-500 text-white'
-                  : 'text-amber-300 hover:bg-white/10'
-              }`}
-              style={activeTab !== 'old' ? { background: 'rgba(255,255,255,0.05)' } : {}}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-[13px] font-bold transition-all ${activeTab === 'old' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
             >
-              📖 Old Testament <span className="opacity-70 ml-1">({books.filter(b => b.testament === 'Old Testament').length})</span>
+              📖 Old Testament <span className="ml-1 text-xs font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">{otTotal}</span>
             </button>
             <button
               onClick={() => switchTab('new')}
-              className={`flex-1 py-2 text-xs font-bold transition-all ${
-                activeTab === 'new'
-                  ? 'bg-blue-500 text-white'
-                  : 'text-blue-300 hover:bg-white/10'
-              }`}
-              style={activeTab !== 'new' ? { background: 'rgba(255,255,255,0.05)' } : {}}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-[13px] font-bold transition-all ${activeTab === 'new' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
             >
-              📕 New Testament <span className="opacity-70 ml-1">({books.filter(b => b.testament === 'New Testament').length})</span>
+              📕 New Testament <span className="ml-1 text-xs font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800">{ntTotal}</span>
             </button>
           </div>
         </div>
       </div>
 
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="bg-slate-900 text-white px-4 py-2.5 text-center text-[13px] font-medium">
+          📵 You&apos;re offline · Only downloaded books are available
+          {downloadedBookIds.size > 0 && <span className="ml-2 px-2 py-0.5 bg-white/15 rounded-full text-xs">{downloadedBookIds.size} book{downloadedBookIds.size > 1 ? 's' : ''} available</span>}
+        </div>
+      )}
+
       {/* Content */}
-      <div className="relative z-10 max-w-3xl mx-auto px-3 py-4 space-y-6">
-        {/* Old Testament */}
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-8 pb-12">
         {oldTestament.length > 0 && (
-          <div ref={otRef}>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-base">📖</span>
-              <h2 className="text-sm font-bold text-amber-300">Old Testament</h2>
-              <span className="text-xs text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-400/30">{oldTestament.length} books</span>
+          <section ref={otRef} className="scroll-mt-44">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center text-[15px]">📖</span>
+                <h2 className="text-[17px] font-extrabold tracking-tight">Old Testament</h2>
+              </div>
+              <span className="text-xs font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-full">{oldTestament.length} books</span>
             </div>
-            <div className="rounded-xl p-3 border border-amber-400/20 shadow-lg backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.07)' }}>
-              <BookGrid bookList={oldTestament} testament="old" />
-            </div>
-          </div>
+            <BookGrid bookList={oldTestament} testament="old" />
+          </section>
         )}
 
-        {/* New Testament */}
         {newTestament.length > 0 && (
-          <div ref={ntRef}>
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-base">📕</span>
-              <h2 className="text-sm font-bold text-blue-300">New Testament</h2>
-              <span className="text-xs text-blue-300 bg-blue-500/20 px-2 py-0.5 rounded-full border border-blue-400/30">{newTestament.length} books</span>
+          <section ref={ntRef} className="scroll-mt-44">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-[15px]">📕</span>
+                <h2 className="text-[17px] font-extrabold tracking-tight">New Testament</h2>
+              </div>
+              <span className="text-xs font-bold text-blue-800 bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-full">{newTestament.length} books</span>
             </div>
-            <div className="rounded-xl p-3 border border-blue-400/20 shadow-lg backdrop-blur-sm" style={{ background: 'rgba(255,255,255,0.07)' }}>
-              <BookGrid bookList={newTestament} testament="new" />
-            </div>
-          </div>
+            <BookGrid bookList={newTestament} testament="new" />
+          </section>
         )}
 
         {filtered.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-gray-400 text-sm">No books found for "{searchTerm}"</p>
+          <div className="text-center py-14 bg-white rounded-3xl border border-slate-200">
+            <div className="text-4xl mb-3">📖</div>
+            <p className="font-bold text-slate-800">No books found for “{searchTerm}”</p>
+            <p className="text-sm text-slate-500 mt-1">Try English, Luganda, or abbreviation — e.g. Psalms, Zabbuli, Phil</p>
+            <button onClick={() => setSearchTerm('')} className="mt-4 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-xl">Clear search</button>
           </div>
         )}
 
-        {/* Legend */}
-        <div className="text-center text-xs text-white/30 pb-4 space-y-1">
-          <div>Tap any book to open · abbreviation · luganda · chapters</div>
+        <div className="text-center text-[12px] text-slate-400 space-y-1.5 pt-2">
+          <div>Tap any book to open · English name · Luganda name · Chapters</div>
           {downloadedBookIds.size > 0 && (
-            <div className="flex items-center justify-center gap-2 text-green-400">
-              <span className="inline-block w-3 h-3 bg-green-500 rounded-full border border-white/20"></span>
-              Books with green checkmark are available offline
+            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full font-semibold">
+              <Download className="w-3.5 h-3.5" /> {downloadedBookIds.size} book{downloadedBookIds.size > 1 ? 's' : ''} available offline
             </div>
           )}
         </div>
@@ -299,7 +300,7 @@ function BibleReaderContent() {
 
 export default function BibleReaderPage() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center min-h-screen">Loading...</div>}>
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-[#F7F5F0]">Loading...</div>}>
       <BibleReaderContent />
     </Suspense>
   );
