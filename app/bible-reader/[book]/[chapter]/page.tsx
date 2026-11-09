@@ -1,2690 +1,369 @@
-'use client';
-
-import { useState, useEffect, useRef, useCallback, Suspense } from 'react';
-import { ChevronLeft, ChevronRight, Bookmark, Share2, MessageCircle, Copy, Heart, Menu, X, Underline, Plus, Minus } from 'lucide-react';
+"use client";
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import VersePrayerDisplay from '@/app/components/VersePrayerDisplay';
-import CrossReferenceModal from '@/app/components/CrossReferenceModal';
-import TheologicalInsightsModal from '@/app/components/TheologicalInsightsModal';
-import { useScripturePopup, ScriptureVersePopup, ScriptureContext } from '@/components/ScriptureVersePopup';
-import HighlightableText from '@/app/components/HighlightableText';
-import AudioPlayer from '@/app/components/AudioPlayer';
-import VerseShareButton from '@/app/components/VerseShareButton';
-import { stripHtml } from '@/app/utils/stripHtml';
-import { useFontSizeStore, getTextSizeClasses } from '@/app/store/fontSizeStore';
-import {
-  saveChapterVerses,
-  saveChapterContent,
-  saveCommentary,
-  savePrayer,
-  saveBooks,
-  getChapterVerses,
-  getChapterContent,
-  getBooks,
-  getCommentary,
-  getPrayer,
-} from '@/app/utils/offlineStorage';
+import { useParams, useRouter } from 'next/navigation';
+import { ChevronLeft, ChevronRight, BookOpen, Heart, Share2, Link2, MessageSquare, Bookmark, Copy, Check, Languages, Sun, Moon, Minus, Plus } from 'lucide-react';
 
-// Add glitter animation styles
-const glitterStyle = `
-  @keyframes glitter {
-    0%, 100% { opacity: 1; filter: drop-shadow(0 0 2px rgba(168, 85, 247, 0.5)); }
-    50% { opacity: 0.7; filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.8)); }
-  }
-  .glitter-heart {
-    animation: glitter 1.5s infinite;
-  }
-  .text-highlight-yellow { background-color: rgba(253, 224, 71, 0.6) !important; border-radius: 2px; }
-  .text-highlight-green { background-color: rgba(134, 239, 172, 0.6) !important; border-radius: 2px; }
-  .text-highlight-blue { background-color: rgba(147, 197, 253, 0.6) !important; border-radius: 2px; }
-  .text-highlight-pink { background-color: rgba(249, 168, 212, 0.6) !important; border-radius: 2px; }
-  .text-highlight-orange { background-color: rgba(253, 186, 116, 0.6) !important; border-radius: 2px; }
-  .text-underline { text-decoration: underline !important; text-decoration-color: #f97316 !important; text-underline-offset: 3px; }
-  /* Enable text selection on mobile/tablet for highlight feature */
-  [data-verse] { -webkit-user-select: text; user-select: text; -webkit-touch-callout: none; }
-  [data-verse] p { -webkit-user-select: text; user-select: text; -webkit-touch-callout: none; cursor: text; }
-  /* Allow selection in specific contexts (like note inputs) */
-  [data-verse] input, [data-verse] textarea { -webkit-user-select: text; user-select: text; }
-`;
+interface Verse { book_id: number; chapter: number; verse: number; text_english: string; text_luganda: string; }
+interface Book { id: number; book_number: number; name_english: string; name_luganda: string; testament: string; total_chapters: number; }
 
-interface Verse {
-  id: number;
-  book_id: number;
-  chapter: number;
-  verse: number;
-  text_english: string;
-  text_luganda: string;
-}
-
-interface Book {
-  id: number;
-  book_number: number;
-  name_english: string;
-  name_luganda: string;
-  testament: string;
-  total_chapters: number;
-}
-
-interface Prayer {
-  english_prayer: string;
-  luganda_prayer: string;
-}
-
-interface Commentary {
-  commentary_text: string;
-  luganda_commentary_text: string;
-}
-
-interface CrossRef {
-  target_book_id: number;
-  target_chapter: number;
-  target_verse: number;
-}
-
-interface ChapterIntroduction {
-  en_introduction?: string;
-  lu_introduction?: string;
-  en_prayer?: string;
-  lu_prayer?: string;
+function pickText(row: any): { en: string; lu: string } {
+  if (!row) return { en: '', lu: '' };
+  return {
+    en: row.pray_read_english || row.en_prayer || row.prayer_english || row.closing_prayer_english || row.introduction_english || row.en_introduction || row.introduction || '',
+    lu: row.pray_read_luganda || row.lu_prayer || row.prayer_luganda || row.closing_prayer_luganda || row.introduction_luganda || row.lu_introduction || '',
+  };
 }
 
 function ChapterContent() {
   const params = useParams();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  
-  // Handle both book_number (integer) and book_name (string) for backward compatibility
-  const bookParam = params.book as string;
-  const parsedBookNumber = parseInt(bookParam);
-  const bookNumber = isNaN(parsedBookNumber) ? null : parsedBookNumber;
-  const bookName = bookNumber === null ? decodeURIComponent(bookParam) : null;
-  
-  const chapterNum = parseInt(params.chapter as string);
-
-  // Reading plan context (passed via query params from /reading-plans/[id])
-  const planId = searchParams.get('planId');
-  const dayNumber = parseInt(searchParams.get('dayNumber') || '0') || null;
-  const targetVerse = parseInt(searchParams.get('verse') || '0') || null;
-
+  const bookNum = parseInt(String(params.book));
+  const chapterNum = parseInt(String(params.chapter));
   const [book, setBook] = useState<Book | null>(null);
   const [verses, setVerses] = useState<Verse[]>([]);
-  const [prayers, setPrayers] = useState<Record<string, Prayer>>({});
-  const [commentaries, setCommentaries] = useState<Record<string, Commentary>>({});
-  const [crossRefs, setCrossRefs] = useState<Record<string, CrossRef[]>>({});
-  const [bookmarks, setBookmarks] = useState<Set<string>>(new Set());
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [expandedTabs, setExpandedTabs] = useState<Record<string, string>>({});
-  const [expandedPrayers, setExpandedPrayers] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [secondaryLoading, setSecondaryLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [isOffline, setIsOffline] = useState(false);
-  const [servedFromCache, setServedFromCache] = useState(false);
-  const [language, setLanguage] = useState<'english' | 'luganda' | 'both'>('english');
-  const [theme, setTheme] = useState<'light' | 'sepia' | 'dark'>('light');
-  const { fontSize, increaseFontSize, decreaseFontSize } = useFontSizeStore();
-  const textSizes = getTextSizeClasses(fontSize);
-  // Use refs instead of state so handleTouchEnd always reads the latest values synchronously
-  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
-  const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
-  const [shareMessage, setShareMessage] = useState<string>('');
-  const [showSidePanel, setShowSidePanel] = useState(true);
-  const [chapterIntroduction, setChapterIntroduction] = useState<ChapterIntroduction | null>(null);
-  const [chapterPrayers, setChapterPrayers] = useState<any>(null);
-  const [activeSidePanelTab, setActiveSidePanelTab] = useState<string>('intro');
-  const [activeTab, setActiveTab] = useState<'intro' | 'prayer' | 'verses'>('verses');
-  const [chapterLanguage, setChapterLanguage] = useState<'english' | 'luganda' | 'both'>('english');
-  const [crossRefModalOpen, setCrossRefModalOpen] = useState(false);
-  const [selectedVerseForCrossRef, setSelectedVerseForCrossRef] = useState<{ verse: number; bookName: string } | null>(null);
-  const [theologicalInsightsModalOpen, setTheologicalInsightsModalOpen] = useState(false);
-  const [theologicalInsightsMode, setTheologicalInsightsMode] = useState<'chapter' | 'verse'>('chapter');
-  const [theologicalInsightsVerse, setTheologicalInsightsVerse] = useState<number | undefined>(undefined);
-  const { popup: scripturePopup, openVerse: openScriptureVerse, closePopup: closeScripturePopup } = useScripturePopup();
+  const [lang, setLang] = useState<'EN' | 'LU' | 'BOTH'>('EN');
+  const [fontSize, setFontSize] = useState(17);
+  const [dark, setDark] = useState(false);
+  const [rightTab, setRightTab] = useState<'intro' | 'prayer' | 'closing' | 'book'>('prayer');
+  const [chapterIntro, setChapterIntro] = useState<any>(null);
+  const [bookIntro, setBookIntro] = useState<any>(null);
+  const [versePrayers, setVersePrayers] = useState<Record<number, any>>({});
+  const [chapterClosing, setChapterClosing] = useState<any>(null);
+  const [bookClosing, setBookClosing] = useState<any>(null);
+  const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
+  const [crossRefs, setCrossRefs] = useState<any[]>([]);
+  const [loadingCross, setLoadingCross] = useState(false);
+  const [copied, setCopied] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
 
-  // Reading plan navigation state
-  interface PlanDay { id: number; day_number: number; book: string; book_number: number | null; start_chapter: number; end_chapter: number; }
-  const [planDays, setPlanDays] = useState<PlanDay[]>([]);
-  const [planTitle, setPlanTitle] = useState<string>('');
-  const [dayCompleted, setDayCompleted] = useState(false);
-  const [markingComplete, setMarkingComplete] = useState(false);
-
-  // Highlight toolbar state
-  const [highlightToolbar, setHighlightToolbar] = useState<{ x: number; y: number; text: string; range: Range | null } | null>(null);
-  const highlightToolbarRef = useRef<HTMLDivElement>(null);
-  // Saved highlights loaded from DB
-  const [savedHighlights, setSavedHighlights] = useState<any[]>([]);
-  // Track if user is selecting text (to prevent swipe nav on mobile)
-  const selectionActiveRef = useRef(false);
-
-  // Shared handler: show toolbar after any text selection (mouse OR touch)
-  const checkSelection = useCallback(() => {
-    if (highlightToolbarRef.current && document.activeElement && highlightToolbarRef.current.contains(document.activeElement)) return;
-
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.toString().trim().length < 2) {
-      selectionActiveRef.current = false;
-      setHighlightToolbar(null);
-      return;
-    }
-
-    selectionActiveRef.current = true;
-    const range = selection.getRangeAt(0);
-    const rect = range.getBoundingClientRect();
-
-    // Use viewport-relative positioning with fixed, so toolbar always stays visible
-    // Position above selection center, clamped to screen edges
-    const viewportWidth = window.innerWidth;
-    const rawX = rect.left + rect.width / 2;
-    const clampedX = Math.max(80, Math.min(rawX, viewportWidth - 80));
-    const rawY = rect.top - 8; // above selection
-    const clampedY = rawY < 60 ? rect.bottom + 8 : rawY; // if too close to top, put below
-
-    setHighlightToolbar({
-      x: clampedX,
-      y: clampedY,
-      text: selection.toString().trim(),
-      range: range.cloneRange(),
-    });
-  }, []);
-
-  // Handle text selection for highlight toolbar — mouse
-  const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    if (highlightToolbarRef.current?.contains(e.target as Node)) return;
-    setTimeout(checkSelection, 10);
-  }, [checkSelection]);
-
-  // Listen for selectionchange (fires on mobile after touch-drag selection) and contextmenu
+  // Load everything — all APIs, all param styles, so it works no matter what
   useEffect(() => {
-    // Load saved preferences from localStorage
-    try {
-      const savedLanguage = localStorage.getItem('bibleLanguage') as 'english' | 'luganda' | 'both' | null;
-      const savedTheme = localStorage.getItem('bibleTheme') as 'light' | 'sepia' | 'dark' | null;
-      if (savedLanguage) setLanguage(savedLanguage);
-      if (savedTheme) setTheme(savedTheme);
-    } catch (err) {
-      console.error('Failed to load preferences:', err);
-    }
-
-    // Get user email for highlights
-    const email = localStorage.getItem('userEmail');
-    setUserEmail(email || undefined);
-
-    // Listen for selectionchange event on mobile (fires after text selection completes)
-    const handleSelectionChange = () => {
-      setTimeout(checkSelection, 50);
-    };
-    document.addEventListener('selectionchange', handleSelectionChange);
-
-    // Prevent default browser context menu when text is selected
-    const handleContextMenu = (e: MouseEvent) => {
-      const sel = window.getSelection();
-      if (sel && !sel.isCollapsed && sel.toString().trim().length >= 2) {
-        e.preventDefault();
-        setTimeout(checkSelection, 10);
-      }
-    };
-    document.addEventListener('contextmenu', handleContextMenu);
-
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-      document.removeEventListener('contextmenu', handleContextMenu);
-    };
-  }, [checkSelection]);
-
-  // Helper: find verse number from a DOM node by walking up to [data-verse]
-  const getVerseFromNode = (node: Node): { verseNumber: number; sectionType: string } | null => {
-    let el: HTMLElement | null = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
-    while (el) {
-      const v = el.getAttribute('data-verse');
-      const s = el.getAttribute('data-section') || 'verse';
-      if (v) return { verseNumber: parseInt(v), sectionType: s };
-      el = el.parentElement;
-    }
-    return null;
-  };
-
-  // Helper: character offset of a node within its [data-verse] container
-  const getOffsetInContainer = (node: Node, offset: number): number => {
-    let el: HTMLElement | null = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
-    // Walk up to find the verse container
-    let container: HTMLElement | null = null;
-    let cur: HTMLElement | null = el;
-    while (cur) {
-      if (cur.getAttribute('data-verse')) { container = cur; break; }
-      cur = cur.parentElement;
-    }
-    if (!container) return offset;
-    // Count text offset from start of container to current node
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-    let total = 0;
-    while (walker.nextNode()) {
-      const textNode = walker.currentNode;
-      if (textNode === node) return total + offset;
-      total += (textNode.textContent || '').length;
-    }
-    return total + offset;
-  };
-
-  // Save highlight to DB and apply span in DOM
-  const saveAndApplyHighlight = useCallback(async (color: string, isUnderline: boolean) => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed) return;
-
-    const range = selection.getRangeAt(0);
-    const selectedText = selection.toString().trim();
-    if (!selectedText) return;
-
-    // Determine verse info from the anchor node
-    let verseInfo = getVerseFromNode(range.startContainer);
-
-    // Fallback: if selection started outside a [data-verse], try end container
-    if (!verseInfo) verseInfo = getVerseFromNode(range.endContainer);
-
-    // Last resort: find the closest [data-verse] element on the page
-    if (!verseInfo && verses.length > 0) {
-      verseInfo = { verseNumber: verses[0].verse, sectionType: 'verse' };
-    }
-
-    const startOff = getOffsetInContainer(range.startContainer, range.startOffset);
-    const endOff = startOff + selectedText.length;
-
-    // Apply visual span immediately
-    try {
-      const span = document.createElement('span');
-      span.className = isUnderline ? 'text-underline' : `text-highlight-${color}`;
-      span.setAttribute('data-saved-highlight', 'pending');
-      range.surroundContents(span);
-      selection.removeAllRanges();
-      selectionActiveRef.current = false;
-
-      // Build a local highlight object immediately (before DB responds)
-      const localHighlight = {
-        id: `local_${Date.now()}`,
-        book_id: book?.id,
-        chapter: chapterNum,
-        verse_number: verseInfo?.verseNumber ?? 1,
-        start_offset: startOff,
-        end_offset: endOff,
-        highlight_color: isUnderline ? 'underline' : color,
-        text_content: selectedText,
-        user_email: userEmail || null,
-        is_underline: isUnderline,
-        section_type: verseInfo?.sectionType ?? 'verse',
-      };
-
-      // Save to localStorage immediately so it persists on return
-      if (book) {
-        setSavedHighlights(prev => {
-          const updated = [...prev, localHighlight];
-          saveHighlightsToCache(book.id, chapterNum, userEmail || null, updated);
-          return updated;
-        });
-      }
-
-      // Save to DB — always save even if not logged in (userEmail = null)
-      if (book) {
-        fetch('/api/highlights', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            bookId: book.id,
-            chapter: chapterNum,
-            verseNumber: verseInfo?.verseNumber ?? 1,
-            startOffset: startOff,
-            endOffset: endOff,
-            highlightColor: isUnderline ? 'underline' : color,
-            textContent: selectedText,
-            userEmail: userEmail || null,
-            isUnderline,
-            sectionType: verseInfo?.sectionType ?? 'verse',
-          }),
-        })
-          .then(r => r.json())
-          .then(data => {
-            if (data.success && data.highlight?.id) {
-              span.setAttribute('data-saved-highlight', String(data.highlight.id));
-              // Replace the local entry with the real DB entry and update cache
-              setSavedHighlights(prev => {
-                const updated = prev.map(h => h.id === localHighlight.id ? data.highlight : h);
-                if (book) saveHighlightsToCache(book.id, chapterNum, userEmail || null, updated);
-                return updated;
-              });
-            }
-          })
-          .catch(() => {});
-      }
-    } catch {
-      selection.removeAllRanges();
-      selectionActiveRef.current = false;
-    }
-    setHighlightToolbar(null);
-  }, [book, chapterNum, userEmail, verses]);
-
-  const applyHighlight = useCallback((color: string) => {
-    saveAndApplyHighlight(color, false);
-  }, [saveAndApplyHighlight]);
-
-  const applyUnderline = useCallback(() => {
-    saveAndApplyHighlight('underline', true);
-  }, [saveAndApplyHighlight]);
-
-  // Close toolbar on click/tap outside
-  useEffect(() => {
-    const handleClick = (e: MouseEvent | TouchEvent) => {
-      if (highlightToolbar && !highlightToolbarRef.current?.contains(e.target as Node)) {
-        const selection = window.getSelection();
-        if (!selection || selection.isCollapsed) {
-          selectionActiveRef.current = false;
-          setHighlightToolbar(null);
-        }
-      }
-    };
-    document.addEventListener('mousedown', handleClick);
-    document.addEventListener('touchstart', handleClick as EventListener, { passive: true });
-    return () => {
-      document.removeEventListener('mousedown', handleClick);
-      document.removeEventListener('touchstart', handleClick as EventListener);
-    };
-  }, [highlightToolbar]);
-
-  // Re-apply saved highlights to DOM whenever they load or verses re-render
-  const applyHighlightsToDom = useCallback((highlights: any[]) => {
-    if (highlights.length === 0) return;
-    highlights.forEach(h => {
-      // Skip if already applied
-      if (document.querySelector(`[data-saved-highlight="${h.id}"]`)) return;
-
-      // Find the verse container — try data-verse attribute
-      const container = document.querySelector(`[data-verse="${h.verse_number}"]`);
-      if (!container) return;
-
-      const fullText = container.textContent || '';
-      const start = h.start_offset;
-      const end = h.end_offset;
-      if (start < 0 || end > fullText.length || start >= end) return;
-
-      // Walk text nodes to find the right position
-      const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-      let offset = 0;
-      let startNode: Text | null = null;
-      let startNodeOff = 0;
-      let endNode: Text | null = null;
-      let endNodeOff = 0;
-
-      while (walker.nextNode()) {
-        const node = walker.currentNode as Text;
-        const len = node.textContent?.length || 0;
-        if (!startNode && offset + len > start) {
-          startNode = node;
-          startNodeOff = start - offset;
-        }
-        if (!endNode && offset + len >= end) {
-          endNode = node;
-          endNodeOff = end - offset;
-          break;
-        }
-        offset += len;
-      }
-
-      if (!startNode || !endNode) return;
-
+    if (!bookNum || !chapterNum) return;
+    const load = async () => {
+      setLoading(true);
       try {
-        const range = document.createRange();
-        range.setStart(startNode, startNodeOff);
-        range.setEnd(endNode, endNodeOff);
-        const span = document.createElement('span');
-        span.setAttribute('data-saved-highlight', String(h.id));
-        span.className = h.is_underline ? 'text-underline' : `text-highlight-${h.highlight_color}`;
-        range.surroundContents(span);
-      } catch {}
-    });
-  }, []);
-
-  useEffect(() => {
-    if (savedHighlights.length === 0 || verses.length === 0) return;
-
-    // Apply immediately after verses render, with retries for slow DOM
-    const tryApply = (attempts: number) => {
-      applyHighlightsToDom(savedHighlights);
-      // Check if any were missed and retry
-      const missingCount = savedHighlights.filter(h => !document.querySelector(`[data-saved-highlight="${h.id}"]`)).length;
-      if (missingCount > 0 && attempts > 0) {
-        setTimeout(() => tryApply(attempts - 1), 300);
-      }
-    };
-
-    const timer = setTimeout(() => tryApply(3), 150);
-    return () => clearTimeout(timer);
-  }, [savedHighlights, verses, applyHighlightsToDom]);
-
-  // Scroll to target verse from verse-of-the-day link
-  useEffect(() => {
-    if (!targetVerse || loading || verses.length === 0) return;
-    const timer = setTimeout(() => {
-      const el = document.getElementById(`verse-${targetVerse}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.classList.add('ring-2', 'ring-orange-500', 'ring-offset-2');
-        setTimeout(() => el.classList.remove('ring-2', 'ring-orange-500', 'ring-offset-2'), 3000);
-      }
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [targetVerse, loading, verses]);
-
-  // Offline detection (informational only, not blocking)
-  useEffect(() => {
-    const update = () => {
-      const offline = !navigator.onLine;
-      setIsOffline(offline);
-    };
-    update();
-    window.addEventListener('online', update);
-    window.addEventListener('offline', update);
-    return () => { window.removeEventListener('online', update); window.removeEventListener('offline', update); };
-  }, []);
-
-  // Load reading plan context when planId is in URL
-  useEffect(() => {
-    if (!planId) return;
-    fetch(`/api/reading-plans/${planId}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.plan) setPlanTitle(data.plan.title);
-        if (data.days) setPlanDays(data.days);
-      })
-      .catch(() => {});
-
-    // Check if this day is already completed
-    if (dayNumber) {
-      const email = localStorage.getItem('userEmail') || 'guest@example.com';
-      fetch(`/api/reading-progress?email=${email}&planId=${planId}`)
-        .then(r => r.json())
-        .then(data => {
-          const prog = (data.progress || []).find((p: any) => p.day_number === dayNumber);
-          if (prog?.completed) setDayCompleted(true);
-        })
-        .catch(() => {});
-    }
-  }, [planId, dayNumber]);
-
-  // Mark the current day complete
-  const markDayComplete = async () => {
-    if (!planId || !dayNumber || dayCompleted || markingComplete) return;
-    setMarkingComplete(true);
-    const email = localStorage.getItem('userEmail') || 'guest@example.com';
-    try {
-      await fetch('/api/reading-progress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userEmail: email, planId: parseInt(planId), dayNumber, completed: true }),
-      });
-      setDayCompleted(true);
-    } catch {}
-    setMarkingComplete(false);
-  };
-
-  // ── Highlight localStorage helpers ────────────────────────────────────────
-  const getHighlightCacheKey = (bookId: number, chap: number, email: string | null) =>
-    `highlights_${bookId}_${chap}_${email || 'guest'}`;
-
-  const saveHighlightsToCache = (bookId: number, chap: number, email: string | null, highlights: any[]) => {
-    try {
-      const key = getHighlightCacheKey(bookId, chap, email);
-      localStorage.setItem(key, JSON.stringify({ highlights, savedAt: Date.now() }));
-    } catch {}
-  };
-
-  const loadHighlightsFromCache = (bookId: number, chap: number, email: string | null): any[] | null => {
-    try {
-      const key = getHighlightCacheKey(bookId, chap, email);
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      // Cache valid for 90 days
-      if (Date.now() - parsed.savedAt > 90 * 24 * 60 * 60 * 1000) return null;
-      return Array.isArray(parsed.highlights) ? parsed.highlights : null;
-    } catch { return null; }
-  };
-
-  // Track reading time
-  const readingStartTimeRef = useRef<number>(Date.now());
-
-  // Cache helpers
-  const getCacheKey = (bookNum: number, chap: number) => `bibleCache_${bookNum}_${chap}`;
-
-  const saveToCache = (bookNum: number, chap: number, bookObj: Book, versesList: Verse[]) => {
-    try {
-      localStorage.setItem(getCacheKey(bookNum, chap), JSON.stringify({ book: bookObj, verses: versesList, cachedAt: Date.now() }));
-    } catch {}
-  };
-
-  const loadFromCache = (bookNum: number, chap: number): { book: Book; verses: Verse[] } | null => {
-    try {
-      const raw = localStorage.getItem(getCacheKey(bookNum, chap));
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      // Cache valid for 30 days
-      if (Date.now() - parsed.cachedAt > 30 * 24 * 60 * 60 * 1000) return null;
-      return { book: parsed.book, verses: parsed.verses };
-    } catch { return null; }
-  };
-
-  // Font size is now handled by the global store
-  // No need for local localStorage logic here
-
-  // Record reading activity when user leaves the page
-  useEffect(() => {
-    if (!book || !userEmail) return;
-
-    const recordReadingActivity = () => {
-      const durationSeconds = Math.floor((Date.now() - readingStartTimeRef.current) / 1000);
-      
-      // Only record if they spent at least 5 seconds on the page
-      if (durationSeconds >= 5) {
-        fetch('/api/user-activity', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userEmail,
-            bookId: book.id,
-            chapter: chapterNum,
-            durationSeconds,
-          }),
-        }).catch(() => {}); // Silent fail
-      }
-    };
-
-    // Record on page unload
-    window.addEventListener('beforeunload', recordReadingActivity);
-    
-    return () => {
-      window.removeEventListener('beforeunload', recordReadingActivity);
-      recordReadingActivity(); // Also record when component unmounts (navigation)
-    };
-  }, [book, userEmail, chapterNum]);
-
-
-
-  useEffect(() => {
-    if (!bookNumber || !chapterNum) return;
-
-    let cancelled = false;
-
-    // ── PHASE 1: Critical path — book + verses only ──────────────────────────
-    const fetchPrimary = async () => {
-      const timeoutId = setTimeout(async () => {
-        if (!cancelled) {
-          // Try IndexedDB first for offline-first behavior
-          try {
-            const [booksList, offlineVerses] = await Promise.all([
-              getBooks(),
-              getChapterVerses(bookNumber, chapterNum)
-            ]);
-            
-            if (offlineVerses && offlineVerses.length > 0) {
-              const cachedBook = booksList.find((b: any) => b.book_number === bookNumber);
-              if (cachedBook && !cancelled) {
-                const bookObj: Book = {
-                  id: cachedBook.id,
-                  book_number: cachedBook.book_number,
-                  name_english: cachedBook.name_english,
-                  name_luganda: cachedBook.name_luganda,
-                  testament: cachedBook.testament,
-                  total_chapters: cachedBook.total_chapters
-                };
-                setBook(bookObj);
-                setVerses(offlineVerses);
-                setServedFromCache(true);
-                setLoading(false);
-                return;
-              }
-            }
-          } catch (err) {
-            console.warn('⚠️ IndexedDB timeout fallback failed:', err);
-          }
-          
-          // Fallback to localStorage
-          const cached = loadFromCache(bookNumber, chapterNum);
-          if (cached && cached.verses.length > 0) {
-            setBook(cached.book);
-            setVerses(cached.verses);
-            setServedFromCache(true);
-            setLoading(false);
-          } else {
-            // Auto-retry once before showing error
-            fetch(`/api/bible-verses?book=${bookNumber}&chapter=${chapterNum}`)
-              .then(r => r.json())
-              .then(data => {
-                const vList = Array.isArray(data.verses) ? data.verses : [];
-                if (!cancelled && vList.length > 0) {
-                  window.location.reload();
-                } else if (!cancelled) {
-                  setLoadError('slow');
-                  setLoading(false);
-                }
-              })
-              .catch(() => {
-                if (!cancelled) { setLoadError('slow'); setLoading(false); }
-              });
-          }
-        }
-      }, 5000);
-
-      try {
-        // Session (fire-and-forget — don't block verses)
-        fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' })
-          .then(r => r.json())
-          .then(sessionData => {
-            if (cancelled) return;
-            if (sessionData.success && sessionData.user?.email) {
-              setUserEmail(sessionData.user.email);
-              // Log activity once we have the actual book data
-              if (bookNumber !== null) {
-                fetch('/api/activity-log', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ user_email: sessionData.user.email, activity_type: 'book_visit', book_id: bookNumber, chapter: chapterNum })
-                }).catch(() => {});
-              }
-            }
-          }).catch(() => {});
-
-        // Load localStorage immediately (no network needed)
-        if (typeof window !== 'undefined') {
-          const savedBookmarks = localStorage.getItem('bibleBookmarks');
-          if (savedBookmarks) setBookmarks(new Set(JSON.parse(savedBookmarks)));
-          const savedNotes = localStorage.getItem('bibleNotes');
-          if (savedNotes) setNotes(JSON.parse(savedNotes));
-        }
-
-        // Fetch book + verses in parallel
-        // Support both book_number (integer) and book_name (string) for deep linking
-        let bookQueryParam = '';
-        if (bookNumber !== null) {
-          bookQueryParam = `id=${bookNumber}`;
-          console.log(`📚 [Chapter] Phase 1: fetching book_number=${bookNumber} chapter=${chapterNum}`);
-        } else if (bookName) {
-          bookQueryParam = `name=${encodeURIComponent(bookName)}`;
-          console.log(`📚 [Chapter] Phase 1: fetching book_name="${bookName}" chapter=${chapterNum}`);
-        }
-        
-        const [bookRes, versesRes] = await Promise.all([
-          fetch(`/api/bible-books?${bookQueryParam}`),
-          bookNumber !== null 
-            ? fetch(`/api/bible-verses?book=${bookNumber}&chapter=${chapterNum}`)
-            : fetch(`/api/bible-verses?bookName=${encodeURIComponent(bookName!)}&chapter=${chapterNum}`)
+        const [booksRes, versesRes] = await Promise.all([
+          fetch('/api/bible-books').then(r => r.json()).catch(() => []),
+          fetch(`/api/bible-verses?book_number=${bookNum}&chapter=${chapterNum}`).then(r => r.json()).catch(() => []),
         ]);
+        const b = Array.isArray(booksRes) ? booksRes.find((x: any) => x.book_number === bookNum) : null;
+        setBook(b || null);
+        const vList = Array.isArray(versesRes) ? versesRes : (versesRes.verses || []);
+        setVerses(vList);
+        const bookId = b?.id || bookNum;
 
-        console.log(`📚 Book API: ${bookRes.status} | Verses API: ${versesRes.status}`);
-        const [bookData, versesData] = await Promise.all([bookRes.json(), versesRes.json()]);
-        console.log(`📚 Book response:`, bookData);
-        console.log(`📖 Verses response (count):`, Array.isArray(versesData.verses) ? versesData.verses.length : Array.isArray(versesData) ? versesData.length : 0);
-
-        if (cancelled) return;
-
-        if (!bookData.success || !bookData.book) {
-          console.warn(`⚠️ No book found for book_number=${bookNumber}`);
-          setLoading(false);
-          return;
-        }
-
-        const bookObj: Book = {
-          id: bookData.book.id,
-          book_number: bookData.book.book_number,
-          name_english: bookData.book.name_english,
-          name_luganda: bookData.book.name_luganda,
-          testament: bookData.book.testament,
-          total_chapters: bookData.book.chapters || bookData.book.total_chapters
-        };
-        setBook(bookObj);
-
-        const versesList: Verse[] = Array.isArray(versesData.verses) ? versesData.verses : (Array.isArray(versesData) ? versesData : []);
-        console.log(`✅ [Chapter] ${versesList.length} verses loaded for ${bookObj.name_english} ch.${chapterNum}`);
-        setVerses(versesList);
-
-        // ── Cache to localStorage for offline use ─────────────────────────
-        if (versesList.length > 0 && bookObj.book_number) {
-          saveToCache(bookObj.book_number, chapterNum, bookObj, versesList);
-        }
-
-        // ── Cache to IndexedDB for robust offline PWA support ─────────────
+        // Verse prayers — try both endpoints, both param styles
+        let prayers: any[] = [];
         try {
-          if (versesList.length > 0 && bookObj.book_number) {
-            await saveChapterVerses(bookObj.book_number, chapterNum, versesList);
-            await saveChapterContent(bookObj.id, chapterNum, {
-              verses: versesList,
-              book: bookObj,
-            });
-          }
-        } catch (err) {
-          console.warn('⚠️ Failed to cache to IndexedDB:', err);
-        }
-
-        clearTimeout(timeoutId);
-        if (!cancelled) setLoading(false); // ← verses visible now
-
-        // ── PHASE 2: Secondary data — deferred after verses render ─────────
-        setTimeout(() => {
-          if (cancelled) return;
-          fetchSecondary(bookObj, versesList);
-        }, 100);
-
-        // ── Load saved highlights — localStorage first, then DB sync ──────────
-        (() => {
-          if (cancelled) return;
-
-          // Step 1: Load from localStorage immediately (instant, no network)
-          // Try both guest and any email we might already know
-          const guestCached = loadHighlightsFromCache(bookObj.id, chapterNum, null);
-          const emailCached = userEmail ? loadHighlightsFromCache(bookObj.id, chapterNum, userEmail) : null;
-          const cachedHighlights = emailCached || guestCached;
-          if (cachedHighlights && cachedHighlights.length > 0 && !cancelled) {
-            setSavedHighlights(cachedHighlights);
-          }
-
-          // Step 2: Sync from DB in background (no delay needed, runs after verses render)
-          setTimeout(async () => {
-            if (cancelled) return;
-            try {
-              // Get definitive email from session
-              let email: string | null = userEmail || null;
-              if (!email) {
-                try {
-                  const sessionRes = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
-                  const sessionData = await sessionRes.json();
-                  email = sessionData?.user?.email || null;
-                } catch {}
-              }
-
-              // Fetch from DB — merge guest highlights + user highlights
-              const urls = [`/api/highlights?bookId=${bookObj.id}&chapter=${chapterNum}`];
-              if (email) urls.push(`/api/highlights?bookId=${bookObj.id}&chapter=${chapterNum}&userEmail=${encodeURIComponent(email)}`);
-
-              const results = await Promise.all(urls.map(u => fetch(u).then(r => r.json()).catch(() => ({ highlights: [] }))));
-              
-              if (!cancelled) {
-                // Merge both result sets, deduplicate by id
-                const allHighlights: any[] = [];
-                const seen = new Set<string | number>();
-                results.forEach(r => {
-                  if (r.success && Array.isArray(r.highlights)) {
-                    r.highlights.forEach((h: any) => {
-                      if (!seen.has(h.id)) { seen.add(h.id); allHighlights.push(h); }
-                    });
-                  }
-                });
-
-                if (allHighlights.length > 0) {
-                  setSavedHighlights(allHighlights);
-                  // Update localStorage cache with fresh DB data
-                  saveHighlightsToCache(bookObj.id, chapterNum, email, allHighlights);
-                }
-              }
-            } catch {}
-          }, 300);
-        })();
-
-      } catch (error) {
-        clearTimeout(timeoutId);
-        if (!cancelled) {
-          console.warn('⚠️ [Chapter] Primary fetch error, trying offline cache:', error);
-          
-          // ── Fallback 1: Try IndexedDB (robust offline storage) ────────────────────
+          const r1 = await fetch(`/api/verse-prayers?book_number=${bookNum}&chapter=${chapterNum}`);
+          const d1 = await r1.json().catch(() => []);
+          if (Array.isArray(d1) && d1.length) prayers = d1;
+        } catch {}
+        if (!prayers.length) {
           try {
-            const [booksList, offlineVerses] = await Promise.all([
-              getBooks(),
-              getChapterVerses(bookNumber, chapterNum)
-            ]);
-            
-            if (offlineVerses && offlineVerses.length > 0) {
-              console.log(`✅ [OFFLINE] Loaded ${offlineVerses.length} verses from IndexedDB`);
-              
-              // Find the book from cached books
-              const cachedBook = booksList.find((b: any) => b.book_number === bookNumber);
-              
-              if (cachedBook) {
-                const bookObj: Book = {
-                  id: cachedBook.id,
-                  book_number: cachedBook.book_number,
-                  name_english: cachedBook.name_english,
-                  name_luganda: cachedBook.name_luganda,
-                  testament: cachedBook.testament,
-                  total_chapters: cachedBook.total_chapters
-                };
-                setBook(bookObj);
-                setVerses(offlineVerses);
-                setServedFromCache(true);
-                setLoading(false);
-                
-                // Also load offline commentaries and prayers
-                try {
-                  const [offlineCommentaries, offlinePrayers] = await Promise.all([
-                    getCommentary(cachedBook.id, chapterNum),
-                    getPrayer(cachedBook.id, chapterNum)
-                  ]);
-                  
-                  if (offlineCommentaries && offlineCommentaries.length > 0) {
-                    const map: Record<string, Commentary> = {};
-                    offlineCommentaries.forEach((c: any) => { map[`${c.verse_number}`] = c; });
-                    setCommentaries(map);
-                  }
-                  
-                  if (offlinePrayers && offlinePrayers.length > 0) {
-                    const map: Record<string, Prayer> = {};
-                    offlinePrayers.forEach((p: any) => { map[`${p.verse_number}`] = p; });
-                    setPrayers(map);
-                  }
-                } catch (err) {
-                  console.warn('⚠️ Failed to load offline commentaries/prayers:', err);
-                }
-                
-                return; // Successfully loaded from IndexedDB
-              }
-            }
-            
-            // ── Fallback 2: Try localStorage cache ────────────────────
-            const cached = loadFromCache(bookNumber, chapterNum);
-            if (cached && cached.verses.length > 0) {
-              console.log(`✅ [OFFLINE] Loaded from localStorage cache`);
-              setBook(cached.book);
-              setVerses(cached.verses);
-              setServedFromCache(true);
-              setLoading(false);
-            } else {
-              setLoadError(`This chapter is not available offline. Please download it from the Offline Content section or connect to the internet.`);
-              setLoading(false);
-            }
-          } catch (offlineError) {
-            console.error('⚠️ [OFFLINE] Failed to load from offline storage:', offlineError);
-            
-            // Final fallback: localStorage
-            const cached = loadFromCache(bookNumber, chapterNum);
-            if (cached && cached.verses.length > 0) {
-              setBook(cached.book);
-              setVerses(cached.verses);
-              setServedFromCache(true);
-              setLoading(false);
-            } else {
-              setLoadError(`Failed to load chapter data. Please download offline content or connect to the internet.`);
-              setLoading(false);
-            }
-          }
+            const r2 = await fetch(`/api/prayer-passages?book_number=${bookNum}&chapter=${chapterNum}`);
+            const d2 = await r2.json().catch(() => []);
+            if (Array.isArray(d2) && d2.length) prayers = d2;
+          } catch {}
         }
-      }
+        if (!prayers.length) {
+          try {
+            const r3 = await fetch(`/api/verse-prayers?bookId=${bookId}&chapter=${chapterNum}`);
+            const d3 = await r3.json().catch(() => []);
+            if (Array.isArray(d3) && d3.length) prayers = d3;
+          } catch {}
+        }
+        const map: Record<number, any> = {};
+        prayers.forEach((p: any) => { if (p.verse) map[p.verse] = p; });
+        setVersePrayers(map);
+
+        // Chapter intro
+        try {
+          const r = await fetch(`/api/chapter-introductions?bookId=${bookId}&chapter=${chapterNum}`);
+          const d = await r.json().catch(() => null);
+          if (d) setChapterIntro(d);
+        } catch {}
+        // Chapter closing — from chapter-prayers, fallback to chapter-intro closing fields
+        try {
+          const r = await fetch(`/api/chapter-prayers?bookId=${bookId}&chapter=${chapterNum}`);
+          const d = await r.json().catch(() => null);
+          if (d && (pickText(d).en || pickText(d).lu)) setChapterClosing(d);
+        } catch {}
+        if (!chapterClosing) {
+          // will be filled from chapterIntro below via render fallback
+        }
+        // Book intro + book closing
+        try {
+          const r = await fetch(`/api/book-introductions?bookId=${bookId}`);
+          const d = await r.json().catch(() => null);
+          if (d) setBookIntro(d);
+        } catch {}
+        try {
+          const r = await fetch(`/api/book-prayers?bookId=${bookId}`);
+          const d = await r.json().catch(() => null);
+          if (d && (pickText(d).en || pickText(d).lu)) setBookClosing(d);
+        } catch {}
+      } finally { setLoading(false); }
     };
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookNum, chapterNum]);
 
-    // ── PHASE 2: Non-critical features ──────────────────────────────────────
-    const fetchSecondary = async (bookObj: Book, versesList: Verse[]) => {
-      if (!cancelled) setSecondaryLoading(true);
-      try {
-        // Fetch prayers, commentaries, intro, chapter prayers in parallel
-        const [prayersRes, comRes, introRes, chapterPrayersRes] = await Promise.all([
-          fetch(`/api/verse-prayers?book_number=${bookNumber}&chapter=${chapterNum}`),
-          fetch(`/api/verse-commentaries?book_number=${bookNumber}&chapter=${chapterNum}`),
-          fetch(`/api/chapter-introductions?bookId=${bookObj.id}&chapter=${chapterNum}`),
-          fetch(`/api/chapter-prayers?bookId=${bookObj.id}&chapter=${chapterNum}`)
-        ]);
-
-        if (cancelled) return;
-
-        const [prayersData, comData, introData, chapterPrayersData] = await Promise.all([
-          prayersRes.json(), comRes.json(), introRes.json(), chapterPrayersRes.json()
-        ]);
-
-        console.log(`🙏 Prayers: ${Array.isArray(prayersData) ? prayersData.length : 0} | Commentary: ${Array.isArray(comData) ? comData.length : 0}`);
-        console.log(`📕 Chapter intro:`, introData);
-        console.log(`🙏 Chapter prayers:`, chapterPrayersData);
-
-        if (cancelled) return;
-
-        if (Array.isArray(prayersData)) {
-          const map: Record<string, Prayer> = {};
-          prayersData.forEach(p => { map[`${p.verse_number}`] = p; });
-          setPrayers(map);
-          
-          // Cache prayers to IndexedDB
-          try {
-            for (const prayer of prayersData) {
-              await savePrayer(bookObj.id, chapterNum, prayer);
-            }
-          } catch (err) {
-            console.warn('⚠️ Failed to cache prayers:', err);
-          }
-        }
-        if (Array.isArray(comData)) {
-          const map: Record<string, Commentary> = {};
-          comData.forEach(c => { map[`${c.verse_number}`] = c; });
-          setCommentaries(map);
-          
-          // Cache commentaries to IndexedDB
-          try {
-            for (const commentary of comData) {
-              await saveCommentary(bookObj.id, chapterNum, commentary);
-            }
-          } catch (err) {
-            console.warn('⚠️ Failed to cache commentaries:', err);
-          }
-        }
-        if (introData) setChapterIntroduction(introData);
-        if (chapterPrayersData) setChapterPrayers(chapterPrayersData);
-
-        // Cross-refs: fetch all verses in parallel (not sequential loop)
-        if (versesList.length > 0) {
-          const crossResults = await Promise.allSettled(
-            versesList.map(v =>
-              fetch(`/api/cross-references?source_book_number=${bookNumber}&source_chapter=${chapterNum}&source_verse=${v.verse}`)
-                .then(r => r.json())
-                .then(data => ({ verse: v.verse, data }))
-            )
-          );
-          if (!cancelled) {
-            const crossMap: Record<string, CrossRef[]> = {};
-            crossResults.forEach(result => {
-              if (result.status === 'fulfilled' && Array.isArray(result.value.data) && result.value.data.length > 0) {
-                crossMap[`${result.value.verse}`] = result.value.data.map((c: any) => ({
-                  target_book_id: c.target_book_id,
-                  target_chapter: c.target_chapter,
-                  target_verse: c.target_verse
-                }));
-              }
-            });
-            setCrossRefs(crossMap);
-          }
-        }
-      } catch (err) {
-        console.warn('⚠️ [Chapter] Secondary fetch error (non-critical):', err);
-      } finally {
-        if (!cancelled) setSecondaryLoading(false);
-      }
-    };
-
-    fetchPrimary();
-    return () => { cancelled = true; };
-  }, [bookNumber, chapterNum]);
-
-  const toggleBookmark = (verseKey: string) => {
-    const newBookmarks = new Set(bookmarks);
-    if (newBookmarks.has(verseKey)) {
-      newBookmarks.delete(verseKey);
-    } else {
-      newBookmarks.add(verseKey);
-    }
-    setBookmarks(newBookmarks);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('bibleBookmarks', JSON.stringify(Array.from(newBookmarks)));
-    }
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    // Don't initiate swipe tracking if a button/link/input was touched
-    const target = e.target as HTMLElement;
-    if (target.closest('button, a, input, textarea, [role="button"]')) return;
-    if (!loading && verses.length > 0) {
-      touchStartRef.current = {
-        x: e.targetTouches[0].clientX,
-        y: e.targetTouches[0].clientY,
-        t: Date.now(),
-      };
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    // First, check if text was selected during this touch
-    setTimeout(() => {
-      const selection = window.getSelection();
-      if (selection && !selection.isCollapsed && selection.toString().trim().length >= 2) {
-        // Text was selected - don't do swipe navigation
-        selectionActiveRef.current = true;
-        // Trigger highlight toolbar with delay
-        setTimeout(checkSelection, 50);
-        return;
-      }
-      
-      // No text selection, proceed with swipe navigation
-      selectionActiveRef.current = false;
-      const start = touchStartRef.current;
-      touchStartRef.current = null;
-
-      // Don't trigger if touch originated on a button/link
-      const target = e.target as HTMLElement;
-      if (target.closest('button, a, input, textarea, [role="button"]')) return;
-
-      if (!start || loading || verses.length === 0) return;
-
-      const endX = e.changedTouches[0].clientX;
-      const endY = e.changedTouches[0].clientY;
-      const elapsed = Date.now() - start.t;
-
-      const dx = start.x - endX;           // positive = left swipe (next)
-      const dy = start.y - endY;
-      const absDx = Math.abs(dx);
-      const absDy = Math.abs(dy);
-
-      // Reject taps (< 10px movement) and long presses (> 600ms — user is selecting)
-      if (absDx < 10 && absDy < 10) return;
-      if (elapsed > 600) return;
-
-      // Require a clearly horizontal gesture:
-      // • at least 80px horizontal travel
-      // • horizontal component at least 2.5× the vertical component
-      // • vertical drift under 60px (rules out diagonal scrolls)
-      const isHorizontalSwipe =
-        absDx >= 80 &&
-        absDx > absDy * 2.5 &&
-        absDy < 60;
-
-      if (!isHorizontalSwipe) return;
-
-      if (dx > 0 && nextChapter) {
-        window.location.href = `/bible-reader/${bookNumber}/${nextChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`;
-      } else if (dx < 0 && prevChapter) {
-        window.location.href = `/bible-reader/${bookNumber}/${prevChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`;
-      }
-    }, 10);
-  };
-
-  // No-op — kept so nothing referencing it breaks
-  const handleSwipe = () => {};
-
-  const toggleTab = (verseKey: string, tabName: string) => {
-    const key = `${verseKey}-tab`;
-    setExpandedTabs((prev) => ({
-      ...prev,
-      [key]: prev[key] === tabName ? '' : tabName,
-    }));
-  };
-
-  const saveNote = (verseKey: string, noteText: string) => {
-    const newNotes = { ...notes };
-    newNotes[verseKey] = noteText;
-    setNotes(newNotes);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('bibleNotes', JSON.stringify(newNotes));
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text).catch((err) => console.error('Copy failed:', err));
-  };
-
-  const togglePrayerExpanded = (verseKey: string) => {
-    const newPrayers = new Set(expandedPrayers);
-    if (newPrayers.has(verseKey)) {
-      newPrayers.delete(verseKey);
-    } else {
-      newPrayers.add(verseKey);
-    }
-    setExpandedPrayers(newPrayers);
-  };
-
-  const cycleLanguage = () => {
-    const languages: Array<'english' | 'luganda' | 'both'> = ['english', 'luganda', 'both'];
-    const currentIndex = languages.indexOf(language);
-    const nextIndex = (currentIndex + 1) % languages.length;
-    setLanguage(languages[nextIndex]);
-  };
-
-  const cycleChapterLanguage = () => {
-    const languages: Array<'english' | 'luganda' | 'both'> = ['english', 'luganda', 'both'];
-    const currentIndex = languages.indexOf(chapterLanguage);
-    const nextIndex = (currentIndex + 1) % languages.length;
-    setChapterLanguage(languages[nextIndex]);
-  };
-
-  // Strip --tw-* CSS vars and other junk from stored HTML before display
-  const cleanHtml = (raw: string): string => {
-    if (!raw) return raw;
-    if (!raw.includes('--tw-') && !raw.includes('<!--') && !raw.includes('background-color') && !raw.includes('text-shadow')) return raw;
-    if (typeof window === 'undefined') return raw.replace(/<!--[\s\S]*?-->/g, '').replace(/<style[\s\S]*?<\/style>/gi, '');
+  const openCrossRefs = async (verseNum: number) => {
+    setSelectedVerse(verseNum);
+    setLoadingCross(true);
+    setCrossRefs([]);
     try {
-      const tmp = document.createElement('div');
-      tmp.innerHTML = raw.replace(/<!--[\s\S]*?-->/g, '').replace(/<style[\s\S]*?<\/style>/gi, '');
-      const safe = new Set(['font-family','font-size','font-weight','font-style','color','text-decoration','text-decoration-line']);
-      const w = document.createTreeWalker(tmp, NodeFilter.SHOW_ELEMENT, null, false as any);
-      let n = w.nextNode();
-      while (n) {
-        const el = n as Element;
-        if (el.hasAttribute('style')) {
-          const clean = (el.getAttribute('style') || '').split(';').map(s => s.trim()).filter(s => {
-            if (!s) return false; const p = s.split(':')[0].trim().toLowerCase(); return !p.startsWith('--') && safe.has(p);
-          }).join('; ');
-          clean ? el.setAttribute('style', clean) : el.removeAttribute('style');
-        }
-        n = w.nextNode();
-      }
-      return tmp.innerHTML;
-    } catch { return raw; }
+      const r = await fetch(`/api/cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`);
+      const d = await r.json().catch(() => []);
+      if (Array.isArray(d) && d.length) { setCrossRefs(d); setLoadingCross(false); return; }
+    } catch {}
+    try {
+      const r = await fetch(`/api/verse-cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`);
+      const d = await r.json().catch(() => []);
+      if (Array.isArray(d)) setCrossRefs(d);
+    } catch {}
+    setLoadingCross(false);
   };
 
-
-
-  // Render HTML with optional highlightable wrapper
-  const renderHtml = (content: string | null | undefined, sectionKey?: string) => {
-    if (!content) return null;
-    const cleaned = cleanHtml(content);
-    const ctx: ScriptureContext | undefined = book
-      ? { book: book.name_english, bookNumber: book.book_number, chapter: chapterNum }
-      : undefined;
-    if (sectionKey) return (
-      <HighlightableText
-        sectionKey={sectionKey}
-        html={cleaned}
-        className={`leading-relaxed ${textSizes.body}`}
-        userEmail={userEmail}
-        scriptureContext={ctx}
-        onVerseClick={openScriptureVerse}
-      />
-    );
-    return <div className={`leading-relaxed ${textSizes.body}`} dangerouslySetInnerHTML={{ __html: cleaned }} />;
+  const openPrayer = (verseNum: number) => {
+    setSelectedVerse(verseNum);
+    setRightTab('prayer');
+    document.getElementById('right-panel')?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const cycleTheme = () => {
-    const themes: Array<'light' | 'sepia' | 'dark'> = ['light', 'sepia', 'dark'];
-    const currentIndex = themes.indexOf(theme);
-    const nextIndex = (currentIndex + 1) % themes.length;
-    setTheme(themes[nextIndex]);
+  const verseText = (v: Verse) => {
+    if (lang === 'EN') return v.text_english;
+    if (lang === 'LU') return v.text_luganda;
+    return v.text_english; // BOTH handled in render
   };
 
-  const shareVerse = (verse: Verse) => {
-    // Get verse text based on language setting
-    const rawVerseText = language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}
+  const filteredVerses = useMemo(() => {
+    if (!search.trim()) return verses;
+    const q = search.trim().toLowerCase();
+    return verses.filter(v => v.text_english?.toLowerCase().includes(q) || v.text_luganda?.toLowerCase().includes(q) || String(v.verse).includes(q));
+  }, [verses, search]);
 
-${verse.text_luganda}`;
-    // Strip HTML tags before sharing
-    const cleanVerseText = stripHtml(rawVerseText);
-    
-    // Get prayer passage for this verse
-    const prayer = prayers[verse.verse];
-    let prayerText = '';
-    
-    if (prayer) {
-      const rawPrayerText = language === 'english' 
-        ? prayer.english_prayer 
-        : language === 'luganda' 
-        ? prayer.luganda_prayer 
-        : `${prayer.english_prayer}
+  const chapterClosingText = pickText(chapterClosing) .en ? pickText(chapterClosing) : pickText(chapterIntro);
+  // chapterIntro may itself carry closing_prayer_* fields
+  const chapterClosingDisplay = (() => {
+    const fromPrayers = pickText(chapterClosing);
+    if (fromPrayers.en || fromPrayers.lu) return fromPrayers;
+    const fromIntro: any = chapterIntro || {};
+    return { en: fromIntro.closing_prayer_english || fromIntro.en_closing_prayer || '', lu: fromIntro.closing_prayer_luganda || fromIntro.lu_closing_prayer || '' };
+  })();
+  const bookClosingDisplay = pickText(bookClosing).en || pickText(bookClosing).lu ? pickText(bookClosing) : (() => {
+    const b: any = bookIntro || {};
+    return { en: b.closing_prayer_english || '', lu: b.closing_prayer_luganda || '' };
+  })();
+  const chapterIntroDisplay = (() => {
+    const c: any = chapterIntro || {};
+    return { en: c.introduction_english || c.en_introduction || c.introduction || '', lu: c.introduction_luganda || c.lu_introduction || '' };
+  })();
+  const bookIntroDisplay = (() => {
+    const b: any = bookIntro || {};
+    return { en: b.introduction_english || b.en_introduction || b.introduction || '', lu: b.introduction_luganda || b.lu_introduction || '' };
+  })();
 
-${prayer.luganda_prayer}`;
-      prayerText = stripHtml(rawPrayerText);
-    }
-    
-    // Create deep link URL using book_number (not book name) for reliable routing
-    const shareUrl = `${window.location.origin}/bible-reader/${book?.book_number}/${chapterNum}?verse=${verse.verse}`;
-    
-    // Build share text with verse, prayer, and deep link
-    const shareText = prayer 
-      ? `${book?.name_english} ${chapterNum}:${verse.verse}
-
-"${cleanVerseText}"
-
-🙏 Prayer:
-${prayerText}
-
-${shareUrl}`
-      : `${book?.name_english} ${chapterNum}:${verse.verse}
-
-"${cleanVerseText}"
-
-${shareUrl}`;
-    
-    if (navigator.share) {
-      navigator.share({
-        title: `${book?.name_english} ${chapterNum}:${verse.verse}`,
-        text: shareText,
-      }).catch((err) => console.error('Share failed:', err));
-    } else {
-      // Fallback: copy to clipboard
-      navigator.clipboard.writeText(shareText);
-      setShareMessage(prayer ? 'Verse & Prayer copied to clipboard!' : 'Verse copied to clipboard!');
-      setTimeout(() => setShareMessage(''), 2000);
-    }
-  };
+  const hasAnyPrayer = Object.keys(versePrayers).length > 0;
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
-        {/* Skeleton header */}
-        <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
-          <div className="h-5 w-16 bg-gray-200 rounded animate-pulse" />
-          <div className="text-center">
-            <div className="h-5 w-32 bg-gray-200 rounded animate-pulse mb-1 mx-auto" />
-            <div className="h-3 w-20 bg-gray-100 rounded animate-pulse mx-auto" />
+    return <div className="min-h-screen flex items-center justify-center bg-[#F7F5F0]"><div className="text-center"><div className="animate-spin rounded-full h-8 w-8 border-2 border-slate-200 border-t-amber-500 mx-auto mb-3" /><p className="text-slate-500 text-sm">Loading chapter…</p></div></div>;
+  }
+
+  const bg = dark ? 'bg-slate-950 text-slate-100' : 'bg-[#F7F5F0] text-slate-900';
+  const card = dark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200';
+  const muted = dark ? 'text-slate-400' : 'text-slate-500';
+
+  return (
+    <div className={`min-h-screen ${bg}`}>
+      {/* Header */}
+      <div className={`sticky top-0 z-30 backdrop-blur-md border-b ${dark ? 'bg-slate-950/90 border-slate-800' : 'bg-white/90 border-slate-200'}`}>
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-2">
+          <button onClick={() => router.push(`/bible-reader/${bookNum}`)} className="inline-flex items-center gap-1 text-sm font-semibold px-3 py-2 rounded-xl bg-slate-900 text-white hover:bg-slate-800"><ChevronLeft className="w-4 h-4" /> Back</button>
+          <Link href="/dashboard" className="hidden sm:inline-flex px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-semibold hover:bg-slate-200">Dashboard</Link>
+          <div className="flex-1 text-center">
+            <h1 className="text-lg sm:text-xl font-extrabold tracking-tight">{book?.name_english || `Book ${bookNum}`} {chapterNum}</h1>
+            <p className={`text-xs ${muted}`}>{book?.name_luganda || ''} · Chapter {chapterNum} of {book?.total_chapters || '?'}</p>
           </div>
-          <div className="flex gap-1">
-            {[1,2,3,4].map(i => <div key={i} className="h-9 w-9 bg-gray-200 rounded animate-pulse" />)}
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-2.5 py-2 rounded-xl bg-amber-500 text-white text-xs font-bold flex items-center gap-1"><Languages className="w-3.5 h-3.5" />{lang === 'EN' ? 'EN' : lang === 'LU' ? 'LU' : 'BOTH'}</button>
+            <button onClick={() => setDark(!dark)} className="p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200">{dark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button>
+            <button onClick={() => setFontSize(Math.max(14, fontSize - 1))} className="p-2 rounded-xl bg-slate-100 text-slate-700"><Minus className="w-4 h-4" /></button>
+            <button onClick={() => setFontSize(Math.min(24, fontSize + 1))} className="p-2 rounded-xl bg-slate-100 text-slate-700"><Plus className="w-4 h-4" /></button>
           </div>
         </div>
-        <div className="max-w-6xl mx-auto p-6">
-          {/* Skeleton book title */}
-          <div className="mb-8 pb-6 border-b-2 border-orange-200">
-            <div className="h-5 w-28 bg-orange-100 rounded-full animate-pulse mb-3" />
-            <div className="h-14 w-64 bg-gray-200 rounded animate-pulse mb-2" />
-            <div className="h-5 w-24 bg-gray-200 rounded animate-pulse mb-1" />
-            <div className="h-4 w-20 bg-gray-100 rounded animate-pulse" />
-          </div>
-          {/* Skeleton verses */}
-          <div className="space-y-6">
-            {[1,2,3,4,5,6,7].map(i => (
-              <div key={i} className="bg-white rounded-lg border border-gray-100 shadow p-4">
-                <div className="flex gap-3 mb-4">
-                  <div className="h-5 w-5 bg-orange-200 rounded animate-pulse flex-shrink-0 mt-1" />
-                  <div className="flex-1 space-y-2">
-                    <div className="h-4 bg-gray-200 rounded animate-pulse w-full" style={{ animationDelay: `${i * 60}ms` }} />
-                    <div className="h-4 bg-gray-200 rounded animate-pulse w-5/6" style={{ animationDelay: `${i * 60 + 30}ms` }} />
-                    <div className="h-4 bg-gray-200 rounded animate-pulse w-4/6" style={{ animationDelay: `${i * 60 + 60}ms` }} />
+        {/* Chapter nav */}
+        <div className="max-w-6xl mx-auto px-4 pb-3 flex items-center justify-between gap-2">
+          <button disabled={chapterNum <= 1} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum - 1}`)} className="px-3 py-1.5 rounded-lg bg-slate-100 text-sm font-semibold disabled:opacity-40 flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> Prev</button>
+          <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search in this chapter…" className={`flex-1 max-w-xs px-3 py-1.5 text-sm rounded-lg border outline-none ${dark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-300'}`} />
+          <button disabled={book && chapterNum >= book.total_chapters} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum + 1}`)} className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-sm font-semibold disabled:opacity-40 flex items-center gap-1">Next <ChevronRight className="w-4 h-4" /></button>
+        </div>
+      </div>
+
+      <div className="max-w-6xl mx-auto px-4 py-5 grid lg:grid-cols-[1fr_380px] gap-5 items-start">
+        {/* Verses */}
+        <div className="space-y-3">
+          {filteredVerses.map(v => {
+            const prayer = versePrayers[v.verse];
+            const hasPrayer = !!prayer && !!(pickText(prayer).en || pickText(prayer).lu);
+            const isSelected = selectedVerse === v.verse;
+            return (
+              <article key={v.verse} className={`rounded-2xl border p-4 sm:p-5 shadow-sm ${card} ${isSelected ? 'ring-2 ring-amber-500' : ''}`}>
+                <div className="flex gap-3">
+                  <span className="shrink-0 w-7 h-7 rounded-full bg-amber-500 text-white flex items-center justify-center text-sm font-bold mt-0.5">{v.verse}</span>
+                  <div className="flex-1 min-w-0">
+                    {lang === 'BOTH' ? (
+                      <>
+                        <p style={{ fontSize }} className="leading-relaxed font-medium">{v.text_english}</p>
+                        <p style={{ fontSize }} className={`leading-relaxed mt-2 pt-2 border-t ${dark ? 'border-slate-800 text-slate-300' : 'border-slate-100 text-slate-600'}`}>{v.text_luganda}</p>
+                      </>
+                    ) : (
+                      <p style={{ fontSize }} className="leading-relaxed font-medium">{verseText(v)}</p>
+                    )}
                   </div>
+                  <button onClick={() => { navigator.clipboard?.writeText(`${book?.name_english} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1500); }} className={`shrink-0 p-2 rounded-lg ${dark ? 'bg-slate-800' : 'bg-slate-100'} hover:bg-slate-200`} title="Copy verse">{copied === v.verse ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}</button>
                 </div>
-                <div className="border-t pt-3 flex gap-2">
-                  {[1,2,3,4,5].map(j => <div key={j} className="h-7 w-16 bg-gray-100 rounded animate-pulse" />)}
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <button onClick={() => openPrayer(v.verse)} disabled={!hasPrayer} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold ${hasPrayer ? 'bg-rose-600 text-white hover:bg-rose-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><Heart className="w-3.5 h-3.5" /> Prayer {hasPrayer ? '' : '· none'}</button>
+                  <button onClick={() => openCrossRefs(v.verse)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold bg-slate-100 hover:bg-slate-200"><Link2 className="w-3.5 h-3.5" /> Cross-Ref</button>
+                  <button onClick={() => { navigator.clipboard?.writeText(`${book?.name_english} ${chapterNum}:${v.verse} — ${verseText(v)}`); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold bg-slate-100 hover:bg-slate-200"><Share2 className="w-3.5 h-3.5" /> Share</button>
+                  <button onClick={() => openCrossRefs(v.verse)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold bg-violet-100 text-violet-800 hover:bg-violet-200"><MessageSquare className="w-3.5 h-3.5" /> Commentary</button>
                 </div>
-              </div>
+
+                {/* Inline Prayer — shows right under the verse when selected */}
+                {isSelected && hasPrayer && (
+                  <div className={`mt-4 rounded-xl p-4 ${dark ? 'bg-rose-950/30 border border-rose-900/40' : 'bg-rose-50 border border-rose-100'}`}>
+                    <p className="text-xs font-bold tracking-wide text-rose-700 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
+                    {(lang === 'EN' || lang === 'BOTH') && pickText(prayer).en && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{pickText(prayer).en}</p>}
+                    {(lang === 'LU' || lang === 'BOTH') && pickText(prayer).lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${lang === 'BOTH' ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{pickText(prayer).lu}</p>}
+                    {lang === 'EN' && !pickText(prayer).en && pickText(prayer).lu && <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{pickText(prayer).lu}</p>}
+                  </div>
+                )}
+                {isSelected && !hasPrayer && (
+                  <p className="mt-3 text-sm text-slate-500 italic">No prayer for this verse yet.</p>
+                )}
+
+                {/* Inline Cross-Refs */}
+                {isSelected && (
+                  <div className={`mt-3 rounded-xl p-4 ${dark ? 'bg-slate-800/60' : 'bg-slate-50 border border-slate-100'}`}>
+                    <p className="text-xs font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
+                    {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
+                      <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
+                        <li key={i} className="text-sm leading-relaxed">
+                          <Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold text-blue-700 hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>
+                          {cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}
+                        </li>
+                      ))}</ul>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+          {filteredVerses.length === 0 && <div className={`rounded-2xl border p-8 text-center ${card}`}><p className="font-bold">No verses found for “{search}”</p><button onClick={() => setSearch('')} className="mt-3 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-xl">Clear search</button></div>}
+        </div>
+
+        {/* Right panel */}
+        <aside id="right-panel" className={`lg:sticky lg:top-[132px] rounded-2xl border shadow-sm overflow-hidden ${card}`}>
+          <div className="flex border-b border-slate-200/70">
+            {([
+              { id: 'intro', label: '📖 Intro' },
+              { id: 'prayer', label: '🙏 Prayer' },
+              { id: 'closing', label: '🙏 Closing' },
+              { id: 'book', label: '📘 Book' },
+            ] as const).map(t => (
+              <button key={t.id} onClick={() => setRightTab(t.id)} className={`flex-1 py-3 text-[13px] font-bold ${rightTab === t.id ? 'bg-amber-500 text-white' : 'text-slate-600 hover:bg-slate-50'}`}>{t.label}</button>
             ))}
           </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (loadError) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-orange-50 to-white">
-        <div className="text-center max-w-md px-6">
-          <div className="text-5xl mb-4">📖</div>
-          <p className="text-gray-800 text-lg font-semibold mb-2">Chapter couldn't load</p>
-          <p className="text-gray-500 text-sm mb-6">Please check your connection and try again.</p>
-          <div className="flex gap-3 justify-center">
-            <button
-              onClick={() => { setLoadError(null); setLoading(true); window.location.reload(); }}
-              className="px-5 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors font-medium"
-            >
-              🔄 Refresh Page
-            </button>
-            <Link href="/bible-reader" className="px-5 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors font-medium">
-              ← Back to Books
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!book) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <p className="text-gray-600 text-lg font-semibold">❌ Book not found</p>
-          <p className="text-gray-500 text-sm mt-2">Book #{bookNumber} does not exist in the database.</p>
-          <Link href="/bible-reader" className="text-orange-600 hover:text-orange-800 mt-4 inline-block">
-            ← Back to Bible Reader
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (verses.length === 0) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <p className="text-gray-600 text-lg font-semibold">❌ Chapter not found</p>
-          <p className="text-gray-500 text-sm mt-2">No verses available for {book.name_english} chapter {chapterNum}.</p>
-          <p className="text-gray-500 text-xs mt-2">This book may not have been uploaded yet. Check back soon!</p>
-          <Link href={`/bible-reader/${bookNumber}`} className="text-orange-600 hover:text-orange-800 mt-4 inline-block">
-            ← Back to {book.name_english}
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  const isOldTestament = book.testament === 'Old Testament';
-  const nextChapter = chapterNum < book.total_chapters ? chapterNum + 1 : null;
-  const prevChapter = chapterNum > 1 ? chapterNum - 1 : null;
-
-  const getBackgroundClass = () => {
-    if (theme === 'sepia') return 'bg-blue-50';
-    if (theme === 'dark') return 'bg-gray-900';
-    return isOldTestament ? 'bg-gradient-to-b from-orange-50 to-white' : 'bg-gradient-to-b from-blue-50 to-white';
-  };
-
-  return (
-    <div 
-      className={`min-h-screen ${getBackgroundClass()}`}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onMouseUp={handleMouseUp}
-      style={{ '--bible-font-size': fontSize === 'small' ? '14px' : fontSize === 'large' ? '18px' : '16px' } as React.CSSProperties}
-    >
-      <style>{glitterStyle}</style>
-
-      {/* Secondary loading progress bar */}
-      {secondaryLoading && (
-        <div className="fixed top-0 left-0 right-0 z-50 h-0.5 bg-orange-100 overflow-hidden">
-          <div className="h-full bg-orange-500 animate-pulse" style={{ width: '60%', animation: 'loadbar 1.5s ease-in-out infinite' }} />
-        </div>
-      )}
-      <style>{`@keyframes loadbar { 0% { width:10%; margin-left:0 } 50% { width:60%; margin-left:20% } 100% { width:10%; margin-left:90% } }`}</style>
-
-      {/* Offline / Cached banner */}
-      {(isOffline || servedFromCache) && (
-        <div className={`fixed top-0 left-0 right-0 z-40 flex items-center justify-center gap-2 py-1.5 px-4 text-xs font-medium ${
-          isOffline ? 'bg-amber-500 text-white' : 'bg-green-600 text-white'
-        }`}>
-          {isOffline ? (
-            <><span>📴</span> You are offline — showing cached content</>
-          ) : (
-            <><span>✅</span> Loaded from offline cache — <button className="underline opacity-80" onClick={() => window.location.reload()}>Refresh</button> to get latest</>
-          )}
-        </div>
-      )}
-
-      {/* Floating Highlight Toolbar — fixed so it stays visible on mobile */}
-      {highlightToolbar && (
-        <div
-          ref={highlightToolbarRef}
-          style={{
-            position: 'fixed',
-            left: `${highlightToolbar.x}px`,
-            top: `${highlightToolbar.y}px`,
-            transform: 'translate(-50%, -100%)',
-            zIndex: 9999,
-          }}
-          className="flex items-center gap-1 bg-gray-900 text-white rounded-xl shadow-2xl px-2 py-1.5 border border-gray-700"
-          onMouseDown={(e) => e.preventDefault()}
-          onTouchStart={(e) => { e.stopPropagation(); touchStartRef.current = null; }}
-        >
-          {/* Highlight colors */}
-          {[
-            { color: 'yellow', bg: 'bg-yellow-300', label: 'Yellow highlight' },
-            { color: 'green', bg: 'bg-green-300', label: 'Green highlight' },
-            { color: 'blue', bg: 'bg-blue-300', label: 'Blue highlight' },
-            { color: 'pink', bg: 'bg-pink-300', label: 'Pink highlight' },
-            { color: 'orange', bg: 'bg-orange-300', label: 'Orange highlight' },
-          ].map(({ color, bg, label }) => (
-            <button
-              key={color}
-              onClick={() => applyHighlight(color)}
-              title={label}
-              className={`w-6 h-6 rounded-full ${bg} hover:scale-110 transition-transform border-2 border-white/30`}
-            />
-          ))}
-
-          {/* Divider */}
-          <div className="w-px h-5 bg-gray-600 mx-0.5" />
-
-          {/* Underline */}
-          <button
-            onClick={applyUnderline}
-            title="Underline"
-            className="p-1 rounded hover:bg-gray-700 transition-colors"
-          >
-            <Underline className="h-4 w-4 text-orange-400" />
-          </button>
-
-          {/* Dismiss */}
-          <button
-            onClick={() => { window.getSelection()?.removeAllRanges(); setHighlightToolbar(null); }}
-            title="Dismiss"
-            className="p-1 rounded hover:bg-gray-700 transition-colors ml-0.5"
-          >
-            <X className="h-3.5 w-3.5 text-gray-400" />
-          </button>
-        </div>
-      )}
-
-      <div className="max-w-6xl mx-auto">
-        {/* Header Navigation */}
-        <div className={`sticky top-0 border-b p-2 sm:p-4 md:p-6 flex items-center justify-between z-10 gap-1 ${
-          theme === 'sepia' ? 'bg-blue-100 border-blue-300' : theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
-        }`}>
-          <Link
-            href={`/bible-reader/${bookNumber}`}
-            className={`inline-flex items-center transition-colors flex-shrink-0 text-sm ${
-              theme === 'dark' ? 'text-gray-400 hover:text-orange-400' : 'text-gray-600 hover:text-orange-600'
-            }`}
-          >
-            <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span className="hidden xs:inline text-xs sm:text-sm">Back</span>
-          </Link>
-
-          <div className="text-center flex-1 min-w-0 px-1">
-            <h2 className={`text-sm sm:text-lg font-bold truncate ${
-              theme === 'dark' ? 'text-gray-100' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-800'
-            }`}>
-              {book.name_english} {chapterNum}
-            </h2>
-            <p className={`text-xs ${
-              theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
-            }`}>
-              Ch {chapterNum} of {book.total_chapters}
-            </p>
-          </div>
-
-          {/* Language & Theme & Font Size Toggle Buttons - Icons Only */}
-          <div className="flex gap-0.5 sm:gap-1 md:gap-1.5 flex-shrink-0">
-            {/* Language Toggle */}
-            <button
-              onClick={cycleLanguage}
-              title={`Language: ${language} | Click to cycle`}
-              className={`p-2 rounded text-base transition-colors ${
-                language === 'english' ? 'bg-orange-600 text-white' :
-                language === 'luganda' ? 'bg-blue-600 text-white' :
-                theme === 'dark' ? 'bg-purple-700 text-white' : 'bg-purple-600 text-white'
-              }`}
-            >
-              {language === 'english' ? '🇬🇧' : language === 'luganda' ? '🇺🇬' : '🔀'}
-            </button>
-
-            {/* Theme Toggle */}
-            <button
-              onClick={cycleTheme}
-              title={`Theme: ${theme} | Click to cycle`}
-              className={`p-2 rounded text-base transition-colors ${
-                theme === 'light' ? 'bg-yellow-400 text-gray-900' :
-                theme === 'sepia' ? 'bg-blue-600 text-white' :
-                'bg-indigo-700 text-white'
-              }`}
-            >
-              {theme === 'light' ? '☀️' : theme === 'sepia' ? '📄' : '🌙'}
-            </button>
-
-            {/* Font Size Controls */}
-            <button
-              onClick={decreaseFontSize}
-              title="Decrease font size"
-              className={`p-2 rounded text-base transition-colors ${
-                theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-300 text-gray-800 hover:bg-gray-400'
-              }`}
-            >
-              <Minus size={18} />
-            </button>
-            <button
-              onClick={increaseFontSize}
-              title="Increase font size"
-              className={`p-2 rounded text-base transition-colors ${
-                theme === 'dark' ? 'bg-gray-700 text-white hover:bg-gray-600' : 'bg-gray-300 text-gray-800 hover:bg-gray-400'
-              }`}
-            >
-              <Plus size={18} />
-            </button>
-
-            {/* Books */}
-            <button
-              onClick={() => router.push('/bible-reader')}
-              className="p-2 rounded bg-orange-600 text-white hover:bg-orange-700 transition-colors text-base"
-              title="Books"
-            >
-              📚
-            </button>
-
-            {/* Chapter Theological Insights */}
-            <button
-              onClick={() => { setTheologicalInsightsMode('chapter'); setTheologicalInsightsVerse(undefined); setTheologicalInsightsModalOpen(true); }}
-              className={`p-2 rounded text-base transition-colors ${
-                theme === 'dark' ? 'bg-purple-700 text-white hover:bg-purple-800' : 'bg-purple-600 text-white hover:bg-purple-700'
-              }`}
-              title="Chapter Theological Insights"
-            >
-              💡
-            </button>
-
-            {/* Info / Side Panel */}
-            <button
-              onClick={() => setShowSidePanel(!showSidePanel)}
-              className={`p-2 rounded transition-colors ${
-                theme === 'dark' ? 'bg-indigo-700 text-white hover:bg-indigo-800' : 'bg-indigo-600 text-white hover:bg-indigo-700'
-              }`}
-              title="Chapter Info"
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Main Content Layout */}
-        <div className="flex gap-6">
-          {/* Main Content */}
-          <div className={`p-4 md:p-6 flex-1 ${planId ? 'mb-52 md:mb-36' : 'mb-20'} ${showSidePanel ? 'md:pr-0' : ''}`}>
-            {/* Book and Chapter Header */}
-            <div className={`mb-8 pb-6 border-b-2 ${
-              theme === 'dark' ? 'border-gray-700' : theme === 'sepia' ? 'border-blue-300' : (isOldTestament ? 'border-orange-200' : 'border-blue-200')
-            }`}>
-              <div className={`inline-block px-4 py-1 rounded-full text-sm font-semibold mb-3 ${
-                theme === 'dark' ? 'text-indigo-300 bg-indigo-900' : theme === 'sepia' ? 'text-blue-700 bg-blue-100' : (isOldTestament ? 'text-orange-600 bg-orange-100' : 'text-blue-600 bg-blue-100')
-              }`}>
-                {book.testament}
+          <div className="p-4 max-h-[70vh] overflow-y-auto">
+            {rightTab === 'intro' && (
+              <div>
+                <h3 className="font-extrabold text-[15px] mb-2">Chapter {chapterNum} Introduction</h3>
+                {!chapterIntroDisplay.en && !chapterIntroDisplay.lu ? <p className="text-sm text-slate-500 italic">No chapter introduction available.</p> : (
+                  <>
+                    {chapterIntroDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{chapterIntroDisplay.en}</p>}
+                    {chapterIntroDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${chapterIntroDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{chapterIntroDisplay.lu}</p>}
+                  </>
+                )}
               </div>
-              <h1 className={`text-3xl sm:text-5xl md:text-6xl font-bold mb-2 ${
-                theme === 'dark' ? 'text-gray-100' : theme === 'sepia' ? 'text-blue-900' : (isOldTestament ? 'text-orange-900' : 'text-blue-900')
-              }`}>
-                {book.name_english}
-              </h1>
-              <p className={`text-xl font-semibold mb-1 ${
-                theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-800' : (isOldTestament ? 'text-orange-700' : 'text-blue-700')
-              }`}>
-                Chapter {chapterNum}
-              </p>
-              <p className={`text-sm ${
-                theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-600'
-              }`}>{book.name_luganda}</p>
-            </div>
-
-            {/* Verses */}
-            <div className="space-y-6">
-              {verses.map((verse) => {
-                const verseKey = `${book.id}-${chapterNum}-${verse.verse}`;
-                const isBookmarked = bookmarks.has(verseKey);
-                const activeTab = expandedTabs[`${verseKey}-tab`] || '';
-
-                return (
-                  <div
-                    key={verse.id}
-                    id={`verse-${verse.verse}`}
-                    className={`rounded-lg shadow hover:shadow-md transition-shadow p-4 border ${
-                      theme === 'dark' ? 'bg-gray-800 border-gray-700' : theme === 'sepia' ? 'bg-blue-100 border-blue-300' : 'bg-white border-gray-100'
-                    }`}
-                  >
-                    {/* Verse Text */}
-                    <div className="mb-4">
-                      <div className="flex items-start gap-3">
-                        <span className={`font-bold ${textSizes.verse} flex-shrink-0 ${
-                          theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                        }`}>{verse.verse}</span>
-                        <div className="flex-1" data-verse={verse.verse} data-section="verse">
-                          {language === 'both' ? (
-                            <div className="space-y-3">
-                              <div>
-                                <p className={`${textSizes.label} font-semibold mb-1 ${
-                                  theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                                }`}>ENGLISH</p>
-                                <p className={`leading-relaxed ${textSizes.verse} ${
-                                  theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-800'
-                                }`}>{stripHtml(verse.text_english)}</p>
-                              </div>
-                              <div className={`border-t pt-3 ${
-                                theme === 'dark' ? 'border-gray-600' : theme === 'sepia' ? 'border-blue-300' : 'border-gray-200'
-                              }`}>
-                                <p className={`${textSizes.label} font-semibold mb-1 ${
-                                  theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                                }`}>LUGANDA</p>
-                                <p className={`leading-relaxed ${textSizes.verse} ${
-                                  theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-800'
-                                }`}>{stripHtml(verse.text_luganda || verse.text_english)}</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <p className={`leading-relaxed ${textSizes.verse} ${
-                              theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-800'
-                            }`}>
-                              {stripHtml(language === 'english' ? verse.text_english : verse.text_luganda || verse.text_english)}
-                            </p>
-                          )}
-                        </div>
-                        <button
-                          onClick={() => copyToClipboard(language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}\
-\
-${verse.text_luganda}`)}
-                          className={`transition-colors flex-shrink-0 ${
-                            theme === 'dark' ? 'text-gray-500 hover:text-orange-400' : theme === 'sepia' ? 'text-blue-600 hover:text-blue-700' : 'text-gray-400 hover:text-orange-600'
-                          }`}
-                          title="Copy verse"
-                        >
-                          <Copy className="h-4 w-4" />
-                        </button>
+            )}
+            {rightTab === 'prayer' && (
+              <div>
+                <h3 className="font-extrabold text-[15px] mb-1">Pray-Read Passages · Chapter {chapterNum}</h3>
+                <p className={`text-xs mb-3 ${muted}`}>{hasAnyPrayer ? `${Object.keys(versePrayers).length} prayers in this chapter` : 'Prayers are the core of Pray-Read.'}</p>
+                {!hasAnyPrayer ? (
+                  <p className="text-sm text-slate-500 italic">No prayers added yet for this chapter.</p>
+                ) : (
+                  <div className="space-y-4">{Object.entries(versePrayers).sort((a, b) => Number(a[0]) - Number(b[0])).map(([vn, p]) => {
+                    const t = pickText(p);
+                    return (
+                      <div key={vn} className={`rounded-xl p-3 border ${dark ? 'border-slate-700' : 'border-slate-100 bg-slate-50/60'}`}>
+                        <button onClick={() => setSelectedVerse(Number(vn))} className="text-sm font-bold text-rose-700 hover:underline">Verse {vn} — Pray-Read →</button>
+                        {t.en && <p className="text-[14px] leading-relaxed whitespace-pre-wrap mt-1.5 line-clamp-4">{t.en}</p>}
+                        {t.lu && <p className="text-[13px] leading-relaxed whitespace-pre-wrap mt-2 text-slate-500 line-clamp-3">{t.lu}</p>}
                       </div>
-                    </div>
-
-                    {/* Verse Action Buttons */}
-                    <div className={`border-t pt-4 ${
-                      theme === 'dark' ? 'border-gray-600' : theme === 'sepia' ? 'border-blue-300' : 'border-gray-100'
-                    }`}>
-                      {/* Desktop View - Full Labels */}
-                      <div className="hidden md:flex flex-wrap gap-2 mb-4">
-                        {/* Prayer Button */}
-                        <button
-                          onClick={() => togglePrayerExpanded(verseKey)}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-all inline-flex items-center gap-1 ${
-                            expandedPrayers.has(verseKey)
-                              ? 'bg-purple-600 text-white shadow-lg shadow-purple-400'
-                              : prayers[verse.verse]
-                                ? `bg-purple-100 text-purple-700 hover:bg-purple-200 border-2 border-purple-400 ${theme === 'dark' ? 'bg-purple-900 text-purple-200 border-purple-600' : ''}`
-                                : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
-                          }`}
-                          disabled={!prayers[verse.verse]}
-                          title={prayers[verse.verse] ? 'View prayer for this verse' : 'No prayer available'}
-                        >
-                          <Heart className={`h-4 w-4 ${prayers[verse.verse] && !expandedPrayers.has(verseKey) ? 'glitter-heart fill-purple-700' : expandedPrayers.has(verseKey) ? 'fill-current' : ''}`} />
-                          Prayer
-                        </button>
-
-                        {/* Share Button - Social Media */}
-                        <VerseShareButton
-                          bookName={book.name_english}
-                          bookNumber={book.book_number}
-                          chapter={chapterNum}
-                          verse={verse.verse}
-                          verseText={language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}
-
-${verse.text_luganda}`}
-                          prayerText={prayers[verse.verse] ? (language === 'english' ? prayers[verse.verse].english_prayer : language === 'luganda' ? prayers[verse.verse].luganda_prayer : `${prayers[verse.verse].english_prayer}
-
-${prayers[verse.verse].luganda_prayer}`) : undefined}
-                        />
-
-                        <button
-                          onClick={() => {
-                            setSelectedVerseForCrossRef({ verse: verse.verse, bookName: book?.name_english || '' });
-                            setCrossRefModalOpen(true);
-                          }}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                            selectedVerseForCrossRef?.verse === verse.verse && crossRefModalOpen
-                              ? 'bg-orange-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          🔗 Cross-Ref
-                        </button>
-                        <button
-                          onClick={() => toggleTab(verseKey, 'commentary')}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                            expandedTabs[`${verseKey}-tab`] === 'commentary'
-                              ? 'bg-orange-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          📖 Commentary
-                        </button>
-                        <button
-                          onClick={() => toggleTab(verseKey, 'notes')}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                            expandedTabs[`${verseKey}-tab`] === 'notes'
-                              ? 'bg-orange-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          📝 Notes
-                        </button>
-                        {/* Verse Theological Insights */}
-                        <button
-                          onClick={() => { setTheologicalInsightsMode('verse'); setTheologicalInsightsVerse(verse.verse); setTheologicalInsightsModalOpen(true); }}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-colors ${
-                            theme === 'dark' ? 'bg-purple-800 text-purple-200 hover:bg-purple-700' : theme === 'sepia' ? 'bg-purple-100 text-purple-800 hover:bg-purple-200' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                          }`}
-                          title="Verse Theological Insight"
-                        >
-                          💡 Insight
-                        </button>
-                        <button
-                          onClick={() => toggleBookmark(verseKey)}
-                          className={`px-3 py-1 rounded text-sm font-medium transition-colors ml-auto ${
-                            isBookmarked
-                              ? 'bg-blue-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                        >
-                          <Bookmark className="h-4 w-4 inline mr-1" />
-                          Bookmark
-                        </button>
-                      </div>
-
-                      {/* Mobile View - Icons Only */}
-                      <div className="md:hidden flex flex-wrap gap-2 mb-4">
-                        {/* Prayer Button */}
-                        <button
-                          onClick={() => togglePrayerExpanded(verseKey)}
-                          className={`p-2 rounded transition-all ${
-                            expandedPrayers.has(verseKey)
-                              ? 'bg-purple-600 text-white shadow-lg shadow-purple-400'
-                              : prayers[verse.verse]
-                                ? `bg-purple-100 text-purple-700 hover:bg-purple-200 ${theme === 'dark' ? 'bg-purple-900 text-purple-200' : ''}`
-                                : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
-                          }`}
-                          disabled={!prayers[verse.verse]}
-                          title="Prayer"
-                        >
-                          <Heart className={`h-5 w-5 ${prayers[verse.verse] && !expandedPrayers.has(verseKey) ? 'glitter-heart fill-purple-700' : expandedPrayers.has(verseKey) ? 'fill-current' : ''}`} />
-                        </button>
-
-                        {/* Share Button - Mobile Compact */}
-                        <div className="p-1.5" title="Share verse">
-                          <VerseShareButton
-                            bookName={book.name_english}
-                            bookNumber={book.book_number}
-                            chapter={chapterNum}
-                            verse={verse.verse}
-                            verseText={language === 'english' ? verse.text_english : language === 'luganda' ? verse.text_luganda : `${verse.text_english}
-
-${verse.text_luganda}`}
-                            prayerText={prayers[verse.verse] ? (language === 'english' ? prayers[verse.verse].english_prayer : language === 'luganda' ? prayers[verse.verse].luganda_prayer : `${prayers[verse.verse].english_prayer}
-
-${prayers[verse.verse].luganda_prayer}`) : undefined}
-                            className="text-sm px-2 py-1"
-                          />
-                        </div>
-
-                        {/* Cross-Ref Button */}
-                        <button
-                          onClick={() => {
-                            setSelectedVerseForCrossRef({ verse: verse.verse, bookName: book?.name_english || '' });
-                            setCrossRefModalOpen(true);
-                          }}
-                          className={`p-2 rounded transition-colors text-lg ${
-                            selectedVerseForCrossRef?.verse === verse.verse && crossRefModalOpen
-                              ? 'bg-orange-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                          title="Cross-Ref"
-                        >
-                          🔗
-                        </button>
-
-                        {/* Commentary Button */}
-                        <button
-                          onClick={() => toggleTab(verseKey, 'commentary')}
-                          className={`p-2 rounded transition-colors text-lg ${
-                            expandedTabs[`${verseKey}-tab`] === 'commentary'
-                              ? 'bg-orange-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                          title="Commentary"
-                        >
-                          📖
-                        </button>
-
-                        {/* Notes Button */}
-                        <button
-                          onClick={() => toggleTab(verseKey, 'notes')}
-                          className={`p-2 rounded transition-colors text-lg ${
-                            expandedTabs[`${verseKey}-tab`] === 'notes'
-                              ? 'bg-orange-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                          title="Notes"
-                        >
-                          📝
-                        </button>
-
-                        {/* Verse Theological Insight Button (mobile) */}
-                        <button
-                          onClick={() => { setTheologicalInsightsMode('verse'); setTheologicalInsightsVerse(verse.verse); setTheologicalInsightsModalOpen(true); }}
-                          className={`p-2 rounded transition-colors text-lg ${
-                            theme === 'dark' ? 'bg-purple-800 text-purple-200 hover:bg-purple-700' : theme === 'sepia' ? 'bg-purple-100 text-purple-800 hover:bg-purple-200' : 'bg-purple-100 text-purple-700 hover:bg-purple-200'
-                          }`}
-                          title="Verse Insight"
-                        >
-                          💡
-                        </button>
-
-                        {/* Bookmark Button */}
-                        <button
-                          onClick={() => toggleBookmark(verseKey)}
-                          className={`p-2 rounded transition-colors ml-auto ${
-                            isBookmarked
-                              ? 'bg-blue-600 text-white'
-                              : theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                          }`}
-                          title="Bookmark"
-                        >
-                          <Bookmark className="h-5 w-5" />
-                        </button>
-                      </div>
-
-                      {/* Prayer Display (Expanded) */}
-                      {expandedPrayers.has(verseKey) && prayers[verse.verse] && (
-                        <div data-verse={verse.verse} data-section="prayer" className={`mb-4 rounded-lg p-4 border space-y-3 animate-in fade-in duration-200 ${
-                          theme === 'dark' ? 'bg-purple-900 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 border-blue-300' : 'bg-purple-50 border-purple-200'
-                        }`}>
-                          {language === 'both' ? (
-                            <>
-                              {prayers[verse.verse].english_prayer && (
-                                <div>
-                                  <p className={`text-xs font-semibold mb-2 uppercase tracking-wide ${
-                                    theme === 'dark' ? 'text-purple-300' : theme === 'sepia' ? 'text-purple-700' : 'text-purple-700'
-                                  }`}>Prayer - English</p>
-                                  <div className={`leading-relaxed ${
-                                    theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                  }`}>{renderHtml(prayers[verse.verse].english_prayer)}</div>
-                                </div>
-                              )}
-                              {prayers[verse.verse].luganda_prayer && (
-                                <div className={prayers[verse.verse].english_prayer ? `border-t pt-3 ${theme === 'dark' ? 'border-purple-700' : theme === 'sepia' ? 'border-blue-300' : 'border-purple-200'}` : ''}>
-                                  <p className={`text-xs font-semibold mb-2 uppercase tracking-wide ${
-                                    theme === 'dark' ? 'text-blue-300' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-700'
-                                  }`}>Prayer - Luganda</p>
-                                  <div className={`leading-relaxed ${
-                                    theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                  }`}>{renderHtml(prayers[verse.verse].luganda_prayer)}</div>
-                                </div>
-                              )}
-                            </>
-                          ) : (
-                            <div>
-                              <p className={`text-xs font-semibold mb-2 uppercase tracking-wide ${
-                                theme === 'dark' ? 'text-purple-300' : theme === 'sepia' ? 'text-purple-700' : 'text-purple-700'
-                              }`}>{language === 'english' ? 'Prayer - English' : 'Prayer - Luganda'}</p>
-                              <div className={`leading-relaxed ${
-                                theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                              }`}>
-                                {renderHtml(language === 'english'
-                                  ? prayers[verse.verse].english_prayer
-                                  : prayers[verse.verse].luganda_prayer || prayers[verse.verse].english_prayer)}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Share Message */}
-                      {shareMessage && (
-                        <div className={`mb-4 p-3 rounded text-sm font-medium animate-in fade-in duration-200 ${
-                          theme === 'dark' ? 'bg-green-900 text-green-200' : theme === 'sepia' ? 'bg-green-100 text-green-700' : 'bg-green-100 text-green-700'
-                        }`}>
-                          ✓ {shareMessage}
-                        </div>
-                      )}
-
-                      {/* Tab Content */}
-                      {activeTab === 'cross' && crossRefs[verse.verse] && (
-                        <div className={`rounded p-4 mb-4 ${
-                          theme === 'dark' ? 'bg-purple-900' : theme === 'sepia' ? 'bg-blue-50' : 'bg-purple-50'
-                        }`}>
-                          <p className={`text-xs font-semibold mb-3 uppercase tracking-wide ${
-                            theme === 'dark' ? 'text-purple-300' : theme === 'sepia' ? 'text-purple-700' : 'text-purple-700'
-                          }`}>Related Passages</p>
-                          <div className="flex flex-wrap gap-2">
-                            {crossRefs[verse.verse].map((ref: any, idx) => {
-                              // Use target_book_id as book_number for navigation
-                              const bookNumber = ref.target_book_id;
-                              const verseRef = `${ref.target_chapter}:${ref.target_verse}`;
-                              
-                              return (
-                                <Link
-                                  key={idx}
-                                  href={`/bible-reader/${bookNumber}/${ref.target_chapter}`}
-                                  className={`inline-block px-3 py-1.5 rounded text-xs font-medium transition-all hover:shadow-md ${
-                                    theme === 'dark' ? 'bg-purple-800 text-purple-200 hover:bg-purple-700' : theme === 'sepia' ? 'bg-purple-200 text-purple-900 hover:bg-purple-300' : 'bg-purple-200 text-purple-900 hover:bg-purple-300'
-                                  }`}
-                                  title={`Go to verse ${verseRef}`}
-                                >
-                                  {verseRef}
-                                </Link>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {expandedTabs[`${verseKey}-tab`] === 'commentary' && commentaries[verse.verse] && (
-                        <div data-verse={verse.verse} data-section="commentary" className={`rounded p-4 mb-4 ${
-                          theme === 'dark' ? 'bg-green-900' : theme === 'sepia' ? 'bg-blue-50' : 'bg-green-50'
-                        }`}>
-                          {language === 'both' ? (
-                            <div className="space-y-3">
-                              <div>
-                                <p className={`${textSizes.label} font-semibold mb-1 ${
-                                  theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                                }`}>COMMENTARY - ENGLISH</p>
-                                <div className={`${textSizes.body} ${
-                                  theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                }`}>{renderHtml(commentaries[verse.verse].commentary_text, `verse-com-en-${book?.id}-${chapterNum}-${verse.verse}`)}</div>
-                              </div>
-                              <div className={`border-t pt-3 ${
-                                theme === 'dark' ? 'border-green-700' : theme === 'sepia' ? 'border-blue-300' : 'border-green-200'
-                              }`}>
-                                <p className={`${textSizes.label} font-semibold mb-1 ${
-                                  theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                                }`}>COMMENTARY - LUGANDA</p>
-                                <div className={`${textSizes.body} ${
-                                  theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                }`}>{renderHtml(commentaries[verse.verse].luganda_commentary_text || commentaries[verse.verse].commentary_text, `verse-com-lu-${book?.id}-${chapterNum}-${verse.verse}`)}</div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className={`${textSizes.body} ${
-                              theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                            }`}>
-                              {renderHtml(language === 'english'
-                                ? commentaries[verse.verse].commentary_text
-                                : commentaries[verse.verse].luganda_commentary_text || commentaries[verse.verse].commentary_text, `verse-com-${book?.id}-${chapterNum}-${verse.verse}-${language}`)}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {expandedTabs[`${verseKey}-tab`] === 'notes' && (
-                        <div className={`rounded p-4 mb-4 ${
-                          theme === 'dark' ? 'bg-yellow-900' : theme === 'sepia' ? 'bg-blue-50' : 'bg-yellow-50'
-                        }`}>
-                          <textarea
-                            defaultValue={notes[verseKey] || ''}
-                            onChange={(e) => saveNote(verseKey, e.target.value)}
-                            placeholder="Add your notes here..."
-                            className={`w-full p-2 border rounded text-sm focus:ring-2 focus:ring-orange-500 focus:border-transparent ${
-                              theme === 'dark' ? 'bg-gray-800 text-gray-100 border-yellow-700' : theme === 'sepia' ? 'bg-blue-100 text-blue-900 border-blue-300' : 'bg-white border-yellow-200'
-                            }`}
-                            rows={3}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}</div>
+                )}
+              </div>
+            )}
+            {rightTab === 'closing' && (
+              <div className="space-y-5">
+                <div>
+                  <h3 className="font-extrabold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</h3>
+                  {!chapterClosingDisplay.en && !chapterClosingDisplay.lu ? <p className="text-sm text-slate-500 italic">No chapter closing prayer added yet.</p> : (
+                    <>
+                      {chapterClosingDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{chapterClosingDisplay.en}</p>}
+                      {chapterClosingDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${chapterClosingDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{chapterClosingDisplay.lu}</p>}
+                    </>
+                  )}
+                </div>
+                <div className="pt-4 border-t border-slate-100">
+                  <h3 className="font-extrabold text-[15px] mb-2">🙏 Book Closing Prayer — {book?.name_english}</h3>
+                  {!bookClosingDisplay.en && !bookClosingDisplay.lu ? <p className="text-sm text-slate-500 italic">No book closing prayer added yet.</p> : (
+                    <>
+                      {bookClosingDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{bookClosingDisplay.en}</p>}
+                      {bookClosingDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${bookClosingDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClosingDisplay.lu}</p>}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+            {rightTab === 'book' && (
+              <div className="space-y-5">
+                <div>
+                  <h3 className="font-extrabold text-[15px] mb-2">📘 Book Introduction — {book?.name_english}</h3>
+                  {!bookIntroDisplay.en && !bookIntroDisplay.lu ? <p className="text-sm text-slate-500 italic">No book introduction available.</p> : (
+                    <>
+                      {bookIntroDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{bookIntroDisplay.en}</p>}
+                      {bookIntroDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${bookIntroDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookIntroDisplay.lu}</p>}
+                    </>
+                  )}
+                </div>
+                <div className="pt-4 border-t border-slate-100">
+                  <h3 className="font-extrabold text-[15px] mb-2">🙏 Book Closing Prayer</h3>
+                  {!bookClosingDisplay.en && !bookClosingDisplay.lu ? <p className="text-sm text-slate-500 italic">No book closing prayer added yet.</p> : (
+                    <>
+                      {bookClosingDisplay.en && <p className="text-[14.5px] leading-relaxed whitespace-pre-wrap">{bookClosingDisplay.en}</p>}
+                      {bookClosingDisplay.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${bookClosingDisplay.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClosingDisplay.lu}</p>}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-
-          {/* Side Panel - Desktop View */}
-          {showSidePanel && (
-            <div className={`hidden md:block w-96 border-l p-6 sticky top-20 max-h-[calc(100vh-80px)] overflow-y-auto ${
-              theme === 'dark' ? 'bg-gray-800 border-gray-700' : theme === 'sepia' ? 'bg-blue-100 border-blue-300' : 'border-indigo-200'
-            }`} style={theme === 'light' ? { background: 'rgba(219, 234, 254, 0.25)' } : {}}>
-              {/* Info Tabs */}
-              <div className={`flex gap-2 mb-6 border-b ${
-                theme === 'dark' ? 'border-gray-700' : theme === 'sepia' ? 'border-blue-300' : 'border-indigo-200'
-              }`}>
-                <button
-                  onClick={() => setActiveSidePanelTab('intro')}
-                  className={`px-3 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                    activeSidePanelTab === 'intro'
-                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
-                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
-                  📕 Intro
-                </button>
-                <button
-                  onClick={() => setActiveSidePanelTab('commentary')}
-                  className={`px-3 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                    activeSidePanelTab === 'commentary'
-                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
-                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
-                  📖 Commentary
-                </button>
-                <button
-                  onClick={() => setActiveSidePanelTab('prayer')}
-                  className={`px-3 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                    activeSidePanelTab === 'prayer'
-                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
-                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
-                  🙏 Prayer
-                </button>
-                <button
-                  onClick={cycleChapterLanguage}
-                  title={`Currently: ${chapterLanguage.charAt(0).toUpperCase() + chapterLanguage.slice(1)} | Click to cycle`}
-                  className={`ml-auto px-2 py-2 rounded text-xs font-semibold transition-colors ${
-                    chapterLanguage === 'english' ? 'bg-orange-600 text-white' :
-                    chapterLanguage === 'luganda' ? 'bg-blue-600 text-white' :
-                    theme === 'dark' ? 'bg-purple-700 text-white' : 'bg-purple-600 text-white'
-                  }`}
-                >
-                  {chapterLanguage === 'english' ? '🇬🇧 EN' : chapterLanguage === 'luganda' ? '🇺🇬 LU' : '🔀'}
-                </button>
-              </div>
-
-              {/* Chapter Introduction Tab */}
-              {activeSidePanelTab === 'intro' && (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                  <h3 className={`text-lg font-bold ${
-                    theme === 'dark' ? 'text-indigo-300' : theme === 'sepia' ? 'text-blue-900' : 'text-indigo-900'
-                  }`}>📕 Chapter {chapterNum}</h3>
-                  {chapterIntroduction ? (
-                    <div className="space-y-4">
-                      {/* Audio player for chapter intro */}
-                      {(chapterIntroduction as any).audio_url && (
-                        <AudioPlayer src={(chapterIntroduction as any).audio_url} label="Listen to Introduction" theme={theme} variant="intro" />
-                      )}
-                      {chapterLanguage === 'both' ? (
-                        <>
-                          {chapterIntroduction.en_introduction && (
-                            <div>
-                              <p className={`${textSizes.label} font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                              }`}>ENGLISH</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
-                              }`}>
-                                {renderHtml(chapterIntroduction.en_introduction, `ch-intro-en-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                          {chapterIntroduction.lu_introduction && (
-                            <div>
-                              <p className={`${textSizes.label} font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                              }`}>LUGANDA</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
-                              }`}>
-                                {renderHtml(chapterIntroduction.lu_introduction, `ch-intro-lu-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                          theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
-                        }`}>
-                          {renderHtml(chapterLanguage === 'luganda' && chapterIntroduction.lu_introduction
-                            ? chapterIntroduction.lu_introduction
-                            : chapterIntroduction.en_introduction || 'No chapter introduction available', `ch-intro-${book?.id}-${chapterNum}-${chapterLanguage}`)}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className={`text-sm italic ${
-                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
-                    }`}>No chapter introduction added yet</p>
-                  )}
-                </div>
-              )}
-
-              {/* Chapter Commentary Tab */}
-              {activeSidePanelTab === 'commentary' && (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                  <h3 className={`text-lg font-bold ${
-                    theme === 'dark' ? 'text-indigo-300' : theme === 'sepia' ? 'text-blue-900' : 'text-indigo-900'
-                  }`}>📖 Chapter {chapterNum} Commentary</h3>
-                  {Object.keys(commentaries).length > 0 ? (
-                    <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-                      {verses.map((verse) => {
-                        const commentary = commentaries[verse.verse];
-                        if (!commentary) return null;
-                        
-                        return (
-                          <div key={verse.verse} className={`rounded-lg p-4 border ${
-                            theme === 'dark' ? 'bg-gray-700 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 border-blue-300' : 'bg-green-50 border-green-200'
-                          }`}>
-                            <div className={`text-sm font-bold mb-2 ${
-                              theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                            }`}>
-                              Verse {verse.verse}
-                            </div>
-                            {chapterLanguage === 'both' ? (
-                              <div className="space-y-3">
-                                {commentary.commentary_text && (
-                                  <div>
-                                    <p className={`${textSizes.label} font-semibold mb-1 ${
-                                      theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                                    }`}>ENGLISH</p>
-                                    <div className={`${textSizes.body} ${
-                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                    }`}>{renderHtml(commentary.commentary_text)}</div>
-                                  </div>
-                                )}
-                                {commentary.luganda_commentary_text && (
-                                  <div className={commentary.commentary_text ? `border-t pt-3 ${
-                                    theme === 'dark' ? 'border-gray-600' : theme === 'sepia' ? 'border-blue-300' : 'border-green-200'
-                                  }` : ''}>
-                                    <p className={`${textSizes.label} font-semibold mb-1 ${
-                                      theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                                    }`}>LUGANDA</p>
-                                    <div className={`${textSizes.body} ${
-                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                    }`}>{renderHtml(commentary.luganda_commentary_text)}</div>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className={`${textSizes.body} ${
-                                theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                              }`}>
-                                {renderHtml(chapterLanguage === 'english'
-                                  ? commentary.commentary_text
-                                  : commentary.luganda_commentary_text || commentary.commentary_text)}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className={`text-sm italic ${
-                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
-                    }`}>No chapter commentary available yet</p>
-                  )}
-                </div>
-              )}
-
-              {/* Prayer Tab */}
-              {activeSidePanelTab === 'prayer' && (
-                <div className="space-y-6 animate-in fade-in duration-300">
-                  {/* Chapter Closing Prayer */}
-                  {chapterPrayers && (chapterPrayers.en_prayer || chapterPrayers.lu_prayer) && (
-                    <div>
-                      <h4 className={`text-md font-bold mb-3 flex items-center gap-2 ${
-                        theme === 'dark' ? 'text-purple-300' : theme === 'sepia' ? 'text-purple-800' : 'text-purple-900'
-                      }`}>
-                        <span>🙏 Chapter {chapterNum} Closing Prayer</span>
-                      </h4>
-                      {/* Audio player for closing prayer */}
-                      {(chapterPrayers.chapter_closing_prayer_audio_url || chapterPrayers.closing_prayer_audio_url) && (
-                        <AudioPlayer
-                          src={chapterPrayers.chapter_closing_prayer_audio_url || chapterPrayers.closing_prayer_audio_url}
-                          label="Listen to Closing Prayer"
-                          theme={theme}
-                          variant="prayer"
-                        />
-                      )}
-                      {chapterLanguage === 'both' ? (
-                        <>
-                          {chapterPrayers.en_prayer && (
-                            <div>
-                              <p className={`${textSizes.label} font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                              }`}>ENGLISH</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border mb-3 max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
-                              }`}>
-                                {renderHtml(chapterPrayers.en_prayer, `ch-prayer-en-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                          {chapterPrayers.lu_prayer && (
-                            <div>
-                              <p className={`${textSizes.label} font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                              }`}>LUGANDA</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
-                              }`}>
-                                {renderHtml(chapterPrayers.lu_prayer, `ch-prayer-lu-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                          theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
-                        }`}>
-                          {renderHtml(chapterLanguage === 'luganda' && chapterPrayers.lu_prayer
-                            ? chapterPrayers.lu_prayer
-                            : chapterPrayers.en_prayer || 'No chapter prayer available', `ch-prayer-${book?.id}-${chapterNum}-${chapterLanguage}`)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {!chapterPrayers && (
-                    <p className={`text-sm italic text-center py-6 ${
-                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
-                    }`}>No prayers added yet</p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Mobile Side Panel Modal */}
-        {showSidePanel && (
-          <div className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-40" onClick={() => setShowSidePanel(false)} />
-        )}
-        {showSidePanel && (
-          <div className={`md:hidden fixed right-0 top-0 h-full w-72 max-w-[85vw] shadow-lg z-50 overflow-y-auto pt-20 pb-20 ${
-            theme === 'dark' ? 'bg-gray-800' : theme === 'sepia' ? 'bg-blue-100' : ''
-          }`} style={theme === 'light' ? { background: 'rgba(219, 234, 254, 0.85)' } : {}}>
-            <button
-              onClick={() => setShowSidePanel(false)}
-              className={`absolute top-4 right-4 z-10 ${
-                theme === 'dark' ? 'text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'text-blue-800 hover:text-blue-900' : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              <X className="h-6 w-6" />
-            </button>
-
-            <div className="p-4">
-              {/* Tabs */}
-              <div className={`flex gap-2 mb-6 border-b ${
-                theme === 'dark' ? 'border-gray-700' : theme === 'sepia' ? 'border-blue-300' : 'border-indigo-200'
-              }`}>
-                <button
-                  onClick={() => setActiveSidePanelTab('intro')}
-                  className={`px-3 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                    activeSidePanelTab === 'intro'
-                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
-                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
-                  📕 Intro
-                </button>
-                <button
-                  onClick={() => setActiveSidePanelTab('commentary')}
-                  className={`px-2 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                    activeSidePanelTab === 'commentary'
-                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
-                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
-                  📖
-                </button>
-                <button
-                  onClick={() => setActiveSidePanelTab('prayer')}
-                  className={`px-3 py-2 text-sm font-semibold transition-colors border-b-2 ${
-                    activeSidePanelTab === 'prayer'
-                      ? theme === 'dark' ? 'border-indigo-500 text-indigo-400' : theme === 'sepia' ? 'border-blue-700 text-blue-800' : 'border-indigo-600 text-indigo-600'
-                      : theme === 'dark' ? 'border-transparent text-gray-400 hover:text-gray-300' : theme === 'sepia' ? 'border-transparent text-blue-800 hover:text-blue-900' : 'border-transparent text-gray-600 hover:text-gray-800'
-                  }`}
-                >
-                  🙏 Prayer
-                </button>
-                <button
-                  onClick={cycleChapterLanguage}
-                  title={`Currently: ${chapterLanguage.charAt(0).toUpperCase() + chapterLanguage.slice(1)} | Click to cycle`}
-                  className={`ml-auto px-2 py-2 rounded text-xs font-semibold transition-colors ${
-                    chapterLanguage === 'english' ? 'bg-orange-600 text-white' :
-                    chapterLanguage === 'luganda' ? 'bg-blue-600 text-white' :
-                    theme === 'dark' ? 'bg-purple-700 text-white' : 'bg-purple-600 text-white'
-                  }`}
-                >
-                  {chapterLanguage === 'english' ? '🇬🇧 EN' : chapterLanguage === 'luganda' ? '🇺🇬 LU' : '🔀'}
-                </button>
-              </div>
-
-              {/* Content Tabs - Same as desktop */}
-              {activeSidePanelTab === 'intro' && (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                  <h3 className={`text-lg font-bold ${
-                    theme === 'dark' ? 'text-indigo-300' : theme === 'sepia' ? 'text-blue-900' : 'text-indigo-900'
-                  }`}>📕 Chapter {chapterNum}</h3>
-                  {chapterIntroduction ? (
-                    <div className="space-y-4">
-                      {/* Audio player for chapter intro (mobile) */}
-                      {(chapterIntroduction as any).audio_url && (
-                        <AudioPlayer src={(chapterIntroduction as any).audio_url} label="Listen to Introduction" theme={theme} variant="intro" />
-                      )}
-                      {chapterLanguage === 'both' ? (
-                        <>
-                          {chapterIntroduction.en_introduction && (
-                            <div>
-                              <p className={`text-xs font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                              }`}>ENGLISH</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
-                              }`}>
-                                {renderHtml(chapterIntroduction.en_introduction, `ch-intro-m-en-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                          {chapterIntroduction.lu_introduction && (
-                            <div>
-                              <p className={`text-xs font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                              }`}>LUGANDA</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
-                              }`}>
-                                {renderHtml(chapterIntroduction.lu_introduction, `ch-intro-m-lu-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                          theme === 'dark' ? 'bg-gray-700 text-gray-300 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-white text-gray-700 border-indigo-100'
-                        }`}>
-                          {renderHtml(chapterLanguage === 'luganda' && chapterIntroduction.lu_introduction
-                            ? chapterIntroduction.lu_introduction
-                            : chapterIntroduction.en_introduction || 'No chapter introduction available', `ch-intro-m-${book?.id}-${chapterNum}-${chapterLanguage}`)}
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <p className={`text-sm italic ${
-                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
-                    }`}>No chapter introduction added yet</p>
-                  )}
-                </div>
-              )}
-
-              {/* Chapter Commentary Tab (Mobile) */}
-              {activeSidePanelTab === 'commentary' && (
-                <div className="space-y-4 animate-in fade-in duration-300">
-                  <h3 className={`text-lg font-bold ${
-                    theme === 'dark' ? 'text-indigo-300' : theme === 'sepia' ? 'text-blue-900' : 'text-indigo-900'
-                  }`}>📖 Chapter {chapterNum} Commentary</h3>
-                  {Object.keys(commentaries).length > 0 ? (
-                    <div className="space-y-4 max-h-[calc(100vh-200px)] overflow-y-auto">
-                      {verses.map((verse) => {
-                        const commentary = commentaries[verse.verse];
-                        if (!commentary) return null;
-                        
-                        return (
-                          <div key={verse.verse} className={`rounded-lg p-4 border ${
-                            theme === 'dark' ? 'bg-gray-700 border-gray-600' : theme === 'sepia' ? 'bg-blue-50 border-blue-300' : 'bg-green-50 border-green-200'
-                          }`}>
-                            <div className={`text-sm font-bold mb-2 ${
-                              theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                            }`}>
-                              Verse {verse.verse}
-                            </div>
-                            {chapterLanguage === 'both' ? (
-                              <div className="space-y-3">
-                                {commentary.commentary_text && (
-                                  <div>
-                                    <p className={`text-xs font-semibold mb-1 ${
-                                      theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                                    }`}>ENGLISH</p>
-                                    <div className={`${textSizes.body} ${
-                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                    }`}>{renderHtml(commentary.commentary_text)}</div>
-                                  </div>
-                                )}
-                                {commentary.luganda_commentary_text && (
-                                  <div className={commentary.commentary_text ? `border-t pt-3 ${
-                                    theme === 'dark' ? 'border-gray-600' : theme === 'sepia' ? 'border-blue-300' : 'border-green-200'
-                                  }` : ''}>
-                                    <p className={`text-xs font-semibold mb-1 ${
-                                      theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                                    }`}>LUGANDA</p>
-                                    <div className={`${textSizes.body} ${
-                                      theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                                    }`}>{renderHtml(commentary.luganda_commentary_text)}</div>
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className={`${textSizes.body} ${
-                                theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-700'
-                              }`}>
-                                {renderHtml(chapterLanguage === 'english'
-                                  ? commentary.commentary_text
-                                  : commentary.luganda_commentary_text || commentary.commentary_text)}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className={`text-sm italic ${
-                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
-                    }`}>No chapter commentary available yet</p>
-                  )}
-                </div>
-              )}
-
-              {activeSidePanelTab === 'prayer' && (
-                <div className="space-y-6 animate-in fade-in duration-300">
-                  {chapterPrayers && (chapterPrayers.en_prayer || chapterPrayers.lu_prayer) && (
-                    <div>
-                      <h4 className={`text-md font-bold mb-3 flex items-center gap-2 ${
-                        theme === 'dark' ? 'text-purple-300' : theme === 'sepia' ? 'text-purple-800' : 'text-purple-900'
-                      }`}>
-                        <span>🙏 Chapter {chapterNum} Closing Prayer</span>
-                      </h4>
-                      {/* Audio player for closing prayer (mobile) */}
-                      {(chapterPrayers.chapter_closing_prayer_audio_url || chapterPrayers.closing_prayer_audio_url) && (
-                        <AudioPlayer
-                          src={chapterPrayers.chapter_closing_prayer_audio_url || chapterPrayers.closing_prayer_audio_url}
-                          label="Listen to Closing Prayer"
-                          theme={theme}
-                          variant="prayer"
-                        />
-                      )}
-                      {chapterLanguage === 'both' ? (
-                        <>
-                          {chapterPrayers.en_prayer && (
-                            <div>
-                              <p className={`text-xs font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-orange-400' : theme === 'sepia' ? 'text-blue-700' : 'text-orange-600'
-                              }`}>ENGLISH</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border mb-3 max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
-                              }`}>
-                                {renderHtml(chapterPrayers.en_prayer, `ch-prayer-m-en-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                          {chapterPrayers.lu_prayer && (
-                            <div>
-                              <p className={`text-xs font-semibold mb-2 ${
-                                theme === 'dark' ? 'text-blue-400' : theme === 'sepia' ? 'text-blue-700' : 'text-blue-600'
-                              }`}>LUGANDA</p>
-                              <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                                theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
-                              }`}>
-                                {renderHtml(chapterPrayers.lu_prayer, `ch-prayer-m-lu-${book?.id}-${chapterNum}`)}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <div className={`leading-relaxed rounded-lg p-4 border max-h-96 overflow-y-auto ${textSizes.body} ${
-                          theme === 'dark' ? 'bg-purple-900 text-gray-300 border-purple-700' : theme === 'sepia' ? 'bg-blue-50 text-blue-900 border-blue-300' : 'bg-purple-50 text-gray-700 border-purple-200'
-                        }`}>
-                          {renderHtml(chapterLanguage === 'luganda' && chapterPrayers.lu_prayer
-                            ? chapterPrayers.lu_prayer
-                            : chapterPrayers.en_prayer || 'No chapter prayer available', `ch-prayer-m-${book?.id}-${chapterNum}-${chapterLanguage}`)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {!chapterPrayers && (
-                    <p className={`text-sm italic text-center py-6 ${
-                      theme === 'dark' ? 'text-gray-400' : theme === 'sepia' ? 'text-blue-700' : 'text-gray-500'
-                    }`}>No prayers added yet</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Reading Plan Navigation Bar */}
-        {planId && dayNumber && planDays.length > 0 && (() => {
-          const currentIdx = planDays.findIndex(d => d.day_number === dayNumber);
-          const prevDay = currentIdx > 0 ? planDays[currentIdx - 1] : null;
-          const nextDay = currentIdx < planDays.length - 1 ? planDays[currentIdx + 1] : null;
-          return (
-            <div className={`fixed bottom-16 left-0 right-0 border-t z-20 ${
-              theme === 'dark' ? 'bg-[#1a1040] border-purple-900' : theme === 'sepia' ? 'bg-amber-50 border-amber-200' : 'bg-gradient-to-r from-[#f5f0ff] to-[#ede8ff] border-purple-200'
-            }`}>
-              {/* Plan context strip — hidden on very small screens to save space */}
-              <div className={`hidden sm:flex px-4 py-1.5 items-center gap-2 text-xs font-semibold border-b ${
-                theme === 'dark' ? 'border-purple-800 text-purple-300' : 'border-purple-100 text-purple-700'
-              }`}>
-                <span>📖</span>
-                <span className="truncate">{planTitle}</span>
-                <span className="ml-auto opacity-60">Day {dayNumber} of {planDays.length}</span>
-              </div>
-              {/* Plan day nav row */}
-              <div className="px-2 py-1.5 sm:px-3 sm:py-2 flex items-center gap-1 sm:gap-2">
-                {/* Prev Day */}
-                <button
-                  onClick={() => prevDay?.book_number && router.push(`/bible-reader/${prevDay.book_number}/${prevDay.start_chapter}?planId=${planId}&dayNumber=${prevDay.day_number}`)}
-                  disabled={!prevDay}
-                  className={`flex items-center gap-0.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all flex-shrink-0 ${
-                    prevDay
-                      ? (theme === 'dark' ? 'bg-purple-800 text-purple-200 hover:bg-purple-700' : 'bg-purple-100 text-purple-700 hover:bg-purple-200')
-                      : 'opacity-30 cursor-not-allowed bg-gray-100 text-gray-400'
-                  }`}
-                  title={prevDay ? `Day ${prevDay.day_number}: ${prevDay.book} ${prevDay.start_chapter}` : 'First day'}
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Day {prevDay?.day_number ?? '—'}</span>
-                  <span className="sm:hidden">Prev</span>
-                </button>
-
-                {/* Center: plan title on mobile + mark complete */}
-                <div className="flex-1 flex items-center justify-center gap-1.5 min-w-0">
-                  {/* Plan title shown only on mobile (replaces hidden strip) */}
-                  <span className={`sm:hidden text-xs font-semibold truncate max-w-[80px] ${
-                    theme === 'dark' ? 'text-purple-300' : 'text-purple-700'
-                  }`}>Day {dayNumber}/{planDays.length}</span>
-                  {/* Mini progress dots - desktop only */}
-                  <div className="hidden sm:flex items-center gap-1">
-                    {planDays.slice(Math.max(0, currentIdx - 3), Math.min(planDays.length, currentIdx + 4)).map((d) => (
-                      <div
-                        key={d.day_number}
-                        className={`rounded-full transition-all ${
-                          d.day_number === dayNumber
-                            ? 'w-4 h-4 bg-purple-600 ring-2 ring-purple-300'
-                            : d.day_number < dayNumber
-                              ? 'w-2.5 h-2.5 bg-purple-400'
-                              : 'w-2.5 h-2.5 bg-purple-200'
-                        }`}
-                        title={`Day ${d.day_number}: ${d.book}`}
-                      />
-                    ))}
-                  </div>
-                  {/* Mark Complete button */}
-                  <button
-                    onClick={markDayComplete}
-                    disabled={dayCompleted || markingComplete}
-                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-bold transition-all flex-shrink-0 ${
-                      dayCompleted
-                        ? 'bg-green-600 text-white cursor-default'
-                        : markingComplete
-                          ? 'bg-gray-300 text-gray-500 cursor-wait'
-                          : 'bg-purple-600 text-white hover:bg-purple-700 active:scale-95'
-                    }`}
-                  >
-                    {dayCompleted ? '✓ Done' : markingComplete ? '...' : <><span className="hidden sm:inline">✓ Mark Done</span><span className="sm:hidden">✓ Done</span></>}
-                  </button>
-                  {/* Back to plan */}
-                  <button
-                    onClick={() => router.push(`/reading-plans/${planId}`)}
-                    className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all flex-shrink-0 ${
-                      theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : 'bg-white text-purple-700 border border-purple-200 hover:bg-purple-50'
-                    }`}
-                    title="Back to reading plan"
-                  >
-                    📋 <span className="hidden sm:inline">Plan</span>
-                  </button>
-                </div>
-
-                {/* Next Day */}
-                <button
-                  onClick={() => nextDay?.book_number && router.push(`/bible-reader/${nextDay.book_number}/${nextDay.start_chapter}?planId=${planId}&dayNumber=${nextDay.day_number}`)}
-                  disabled={!nextDay}
-                  className={`flex items-center gap-0.5 px-2 py-1.5 rounded-lg text-xs font-semibold transition-all flex-shrink-0 ${
-                    nextDay
-                      ? (theme === 'dark' ? 'bg-purple-800 text-purple-200 hover:bg-purple-700' : 'bg-purple-600 text-white hover:bg-purple-700')
-                      : 'opacity-30 cursor-not-allowed bg-gray-100 text-gray-400'
-                  }`}
-                  title={nextDay ? `Day ${nextDay.day_number}: ${nextDay.book} ${nextDay.start_chapter}` : 'Last day'}
-                >
-                  <span className="hidden sm:inline">Day {nextDay?.day_number ?? '—'}</span>
-                  <span className="sm:hidden">Next</span>
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* Footer Navigation */}
-        <div className={`fixed bottom-0 left-0 right-0 border-t px-2 py-2 sm:p-4 flex justify-between items-center z-20 gap-2 ${
-          theme === 'dark' ? 'bg-gray-800 border-gray-700' : theme === 'sepia' ? 'bg-blue-100 border-blue-300' : 'bg-white border-gray-200'
-        }`}>
-          <button
-            onClick={() => prevChapter && (window.location.href = `/bible-reader/${bookNumber}/${prevChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`)}
-            disabled={!prevChapter}
-            className={`inline-flex items-center px-2 sm:px-4 py-2 rounded transition-colors text-sm flex-shrink-0 ${
-              prevChapter
-                ? (theme === 'dark' ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' : theme === 'sepia' ? 'bg-blue-200 text-blue-800 hover:bg-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200')
-                : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
-            }`}
-          >
-            <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
-            <span className="hidden xs:inline">Prev</span>
-          </button>
-
-          <div className={`text-center font-semibold text-sm sm:text-lg flex-1 min-w-0 ${
-            theme === 'dark' ? 'text-gray-300' : theme === 'sepia' ? 'text-blue-900' : 'text-gray-600'
-          }`}>
-            <span className="hidden sm:inline">Chapter </span>{chapterNum} of {book.total_chapters}
-          </div>
-
-          <button
-            onClick={() => nextChapter && (window.location.href = `/bible-reader/${bookNumber}/${nextChapter}${planId ? `?planId=${planId}&dayNumber=${dayNumber}` : ''}`)}
-            disabled={!nextChapter}
-            className={`inline-flex items-center px-3 sm:px-4 py-2 rounded transition-colors text-sm flex-shrink-0 ${
-              nextChapter
-                ? 'bg-orange-600 text-white hover:bg-orange-700'
-                : 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-50'
-            }`}
-          >
-            Next
-            <ChevronRight className="h-4 w-4 sm:h-5 sm:w-5 ml-1" />
-          </button>
-        </div>
-
-        {/* Cross Reference Modal */}
-        {selectedVerseForCrossRef && book && (
-          <CrossReferenceModal
-            isOpen={crossRefModalOpen}
-            onClose={() => setCrossRefModalOpen(false)}
-            sourceBookId={book.id}
-            sourceChapter={chapterNum}
-            sourceVerse={selectedVerseForCrossRef.verse}
-            sourceBookName={selectedVerseForCrossRef.bookName}
-            theme={theme}
-            onRefresh={() => {
-              // Refresh cross references data if needed
-            }}
-          />
-        )}
-
-        {/* Theological Insights Modal */}
-        <TheologicalInsightsModal
-          isOpen={theologicalInsightsModalOpen}
-          onClose={() => setTheologicalInsightsModalOpen(false)}
-          mode={theologicalInsightsMode}
-          bookId={book?.id ?? 0}
-          bookName={book?.name_english ?? ''}
-          chapter={chapterNum}
-          verseNumber={theologicalInsightsVerse}
-          theme={theme}
-          language={language}
-        />
-
-        {/* Scripture Verse Popup */}
-        <ScriptureVersePopup popup={scripturePopup} onClose={closeScripturePopup} />
+        </aside>
       </div>
-    </div>
-  );
-}
 
-function LoadingFallback() {
-  return (
-    <div className="min-h-screen bg-gradient-to-b from-orange-50 to-white">
-      <div className="sticky top-0 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
-        <div className="h-5 w-16 bg-gray-200 rounded animate-pulse" />
-        <div className="text-center">
-          <div className="h-5 w-32 bg-gray-200 rounded animate-pulse mb-1 mx-auto" />
-          <div className="h-3 w-20 bg-gray-100 rounded animate-pulse mx-auto" />
-        </div>
-        <div className="flex gap-1">
-          {[1,2,3,4].map(i => <div key={i} className="h-9 w-9 bg-gray-200 rounded animate-pulse" />)}
-        </div>
-      </div>
-      <div className="max-w-6xl mx-auto p-6">
-        <div className="mb-8 pb-6 border-b-2 border-orange-200">
-          <div className="h-5 w-28 bg-orange-100 rounded-full animate-pulse mb-3" />
-          <div className="h-14 w-64 bg-gray-200 rounded animate-pulse mb-2" />
-          <div className="h-5 w-24 bg-gray-200 rounded animate-pulse" />
-        </div>
-        <div className="space-y-6">
-          {[1,2,3,4,5].map(i => (
-            <div key={i} className="bg-white rounded-lg border border-gray-100 shadow p-4">
-              <div className="flex gap-3 mb-4">
-                <div className="h-5 w-5 bg-orange-200 rounded animate-pulse flex-shrink-0 mt-1" />
-                <div className="flex-1 space-y-2">
-                  <div className="h-4 bg-gray-200 rounded animate-pulse w-full" />
-                  <div className="h-4 bg-gray-200 rounded animate-pulse w-5/6" />
-                  <div className="h-4 bg-gray-200 rounded animate-pulse w-4/6" />
-                </div>
-              </div>
-            </div>
-          ))}
+      {/* Bottom nav */}
+      <div className={`sticky bottom-0 border-t ${dark ? 'bg-slate-950/95 border-slate-800' : 'bg-white/95 border-slate-200'} backdrop-blur-md`}>
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+          <button disabled={chapterNum <= 1} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum - 1}`)} className="px-4 py-2 rounded-xl bg-slate-100 text-sm font-semibold disabled:opacity-40 flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> Prev</button>
+          <span className="text-sm font-bold">Chapter {chapterNum} of {book?.total_chapters || '?'}</span>
+          <button disabled={book && chapterNum >= book.total_chapters} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum + 1}`)} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-40 flex items-center gap-1">Next <ChevronRight className="w-4 h-4" /></button>
         </div>
       </div>
     </div>
@@ -2692,9 +371,5 @@ function LoadingFallback() {
 }
 
 export default function ChapterPage() {
-  return (
-    <Suspense fallback={<LoadingFallback />}>
-      <ChapterContent />
-    </Suspense>
-  );
+  return <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}><ChapterContent /></Suspense>;
 }
