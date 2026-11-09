@@ -47,6 +47,8 @@ function ChapterContent() {
   const [chapterClosing, setChapterClosing] = useState<any>(null);
   const [bookClosing, setBookClosing] = useState<any>(null);
   const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
+  // One expanded panel per verse: 'prayer' | 'crossref' | null. Second click closes. Switching buttons swaps panels.
+  const [activePanel, setActivePanel] = useState<'prayer' | 'crossref' | null>(null);
   const [crossRefs, setCrossRefs] = useState<any[]>([]);
   const [loadingCross, setLoadingCross] = useState(false);
   const [copied, setCopied] = useState<number | null>(null);
@@ -139,11 +141,27 @@ function ChapterContent() {
   }, [bookNum, chapterNum]);
 
   const openPrayer = (verseNum: number) => {
+    // Second click on the SAME verse's Prayer button = minimize / close
+    if (selectedVerse === verseNum && activePanel === 'prayer') {
+      setSelectedVerse(null);
+      setActivePanel(null);
+      return;
+    }
+    // Otherwise open prayer, and minimize cross-ref if it was open
     setSelectedVerse(verseNum);
+    setActivePanel('prayer');
     setRightTab('prayer');
   };
   const openCrossRefs = async (verseNum: number) => {
+    // Second click on the SAME verse's Cross-Ref button = minimize / close
+    if (selectedVerse === verseNum && activePanel === 'crossref') {
+      setSelectedVerse(null);
+      setActivePanel(null);
+      return;
+    }
+    // Otherwise: MINIMIZE prayer, open cross-ref in light paper
     setSelectedVerse(verseNum);
+    setActivePanel('crossref');
     setLoadingCross(true);
     setCrossRefs([]);
     const bookId = book?.id ?? bookNum;
@@ -240,7 +258,7 @@ function ChapterContent() {
                 </div>
 
                 {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
-                {isSel && rightTab === 'prayer' && (
+                {isSel && activePanel === 'prayer' && (
                   <div className="mt-4 rounded-xl bg-rose-50 border border-rose-100 p-4">
                     <p className="text-[11px] font-bold tracking-wide text-rose-700 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
                     {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
@@ -251,9 +269,9 @@ function ChapterContent() {
                     )}
                   </div>
                 )}
-                {/* Cross-refs for THIS verse */}
-                {isSel && rightTab !== 'prayer' && crossRefs.length >= 0 && (loadingCross || crossRefs.length > 0) && (
-                  <div className="mt-3 rounded-xl bg-slate-50 border border-slate-100 p-4">
+                {/* Cross-refs for THIS verse — LIGHT PAPER card. Opens when Prayer is minimized. */}
+                {isSel && activePanel === 'crossref' && (
+                  <div className="mt-3 rounded-xl bg-[#FFFEF7] border border-amber-200 shadow-md p-4">
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
@@ -292,7 +310,11 @@ function ChapterContent() {
               { id: 'commentary', label: '📖 Commentary' },
               { id: 'prayer', label: '🙏 Prayer' },
             ] as const).map(t => (
-              <button key={t.id} onClick={() => setRightTab(t.id)} className={`flex-1 py-3 text-[14px] font-semibold ${rightTab === t.id ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-600'}`}>{t.label}</button>
+              <button key={t.id} onClick={() => {
+                // Second click on the active Prayer tab = minimize the open prayer
+                if (t.id === 'prayer' && rightTab === 'prayer' && activePanel === 'prayer') { setSelectedVerse(null); setActivePanel(null); return; }
+                setRightTab(t.id);
+              }} className={`flex-1 py-3 text-[14px] font-semibold ${rightTab === t.id ? 'text-slate-900 border-b-2 border-slate-900' : 'text-slate-600'}`}>{t.label}</button>
             ))}
             <button className="w-[52px] bg-orange-600 text-white text-[11px] font-bold leading-tight">GB<br />EN</button>
           </div>
@@ -311,7 +333,18 @@ function ChapterContent() {
             {rightTab === 'commentary' && (
               <div><p className="font-bold text-[16px] mb-3">📖 Commentary</p><p className="text-sm text-slate-500 italic">Select a verse and click Commentary to see its commentary.</p></div>
             )}
-            {rightTab === 'prayer' && (
+            {rightTab === 'prayer' && activePanel === 'crossref' && selectedVerse !== null && (
+              <div className="rounded-xl bg-[#FFFEF7] border border-amber-200 shadow-md p-4">
+                <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
+                {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
+                  <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
+                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold text-blue-700 hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
+                  ))}</ul>
+                )}
+                <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
+              </div>
+            )}
+            {rightTab === 'prayer' && activePanel !== 'crossref' && (
               <div>
                 {/* Prayer tab shows ONLY the selected verse's prayer. This was the bug: the modern page listed ALL prayers here. */}
                 {!selectedVerse ? (
@@ -325,7 +358,7 @@ function ChapterContent() {
                         {selectedPrayer.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{selectedPrayer.lu}</p>}
                       </>
                     )}
-                    <button onClick={() => setSelectedVerse(null)} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Clear selection</button>
+                    <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
                   </div>
                 )}
                 {/* Chapter Closing lives BELOW, after the verse prayer — not mixed into it */}
