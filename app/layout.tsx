@@ -14,16 +14,6 @@ import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
 import VisitorTracker from "@/app/components/VisitorTracker";
 
-export default function RootLayout({ children }) {
-  return (
-    <html>
-      <body>
-        <VisitorTracker />
-        {children}
-      </body>
-    </html>
-  );
-}
 export const metadata: Metadata = {
   title: 'Pray-Read Bible',
   description: 'A Digital Sanctuary — A living Altar where the Word of God ceases to be mere text and becomes Spirit and Life in the daily experience of every believer.',
@@ -56,28 +46,21 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Merriweather:ital,wght@0,300;0,400;0,700;1,400&display=swap" />
-        
-        {/* PWA Meta Tags */}
         <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#1e40af" />
         <meta name="mobile-web-app-capable" content="yes" />
-        
-        {/* Apple Touch Icons */}
         <link rel="apple-touch-icon" href="/icon-192x192.png" />
         <link rel="apple-touch-icon" sizes="152x152" href="/icon-152x152.png" />
         <link rel="apple-touch-icon" sizes="180x180" href="/icon-192x192.png" />
         <link rel="apple-touch-icon" sizes="167x167" href="/icon-192x192.png" />
-        
-        {/* iOS Splash Screens */}
         <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-        
-        {/* Favicon */}
         <link rel="icon" type="image/png" sizes="32x32" href="/icon-72x72.png" />
         <link rel="icon" type="image/png" sizes="16x16" href="/icon-72x72.png" />
       </head>
       <body className="antialiased" suppressHydrationWarning>
         <AppGenProvider>
           <ThemeProvider>
+            <VisitorTracker />
             <SplashScreen />
             <EnableCopyPaste />
             <OfflineIndicator />
