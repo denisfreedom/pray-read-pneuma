@@ -1,0 +1,41 @@
+{
+  "plan_id": null,
+  "note": "plan_id optional - if omitted, entries go to the plan selected in Bulk tab. Dates YYYY-MM-DD.",
+  "entries": [
+    {
+      "scheduled_date": "2026-12-01",
+      "title": "Begin With God",
+      "devotional_text": "<p>Start your day\u2026</p>",
+      "devotional_text_lu": "<p>Tandika olunaku\u2026</p>",
+      "scripture_book": "Psalms",
+      "scripture_chapter": 1,
+      "scripture_verse": 1,
+      "scripture_quotation": "Blessed is the one\u2026",
+      "further_readings": "Proverbs 3:5; Joshua 1:8",
+      "author": "Pray-Read Team",
+      "cover_photo_url": "",
+      "related_scriptures": [
+        {
+          "book": "Proverbs",
+          "chapter": 3,
+          "verse": 5,
+          "text": "Trust in the LORD\u2026"
+        }
+      ]
+    },
+    {
+      "scheduled_date": "2026-12-02",
+      "title": "Walk By Faith",
+      "devotional_text": "<p>Faith is\u2026</p>",
+      "devotional_text_lu": "",
+      "scripture_book": "2 Corinthians",
+      "scripture_chapter": 5,
+      "scripture_verse": 7,
+      "scripture_quotation": "For we live by faith\u2026",
+      "further_readings": "",
+      "author": "Pray-Read Team",
+      "cover_photo_url": "",
+      "related_scriptures": []
+    }
+  ]
+}
