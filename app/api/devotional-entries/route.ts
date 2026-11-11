@@ -1,313 +1,57 @@
-import sql from "@/app/api/utils/sql";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
+import { sql } from '@/lib/db'; // <-- keep YOUR existing db helper import.
 
-export async function GET(request: Request) {
+// app/api/devotional-entries/route.ts
+// GET  /api/devotional-entries              → list, ordered by devotional_number
+// POST /api/devotional-entries              → create ONE (manual form)
+// PUT  /api/devotional-entries              → update ONE  (body includes id)
+// DELETE /api/devotional-entries?id=123     → delete ONE
+// All writes use devotional_number, NOT scheduled_date.
+
+export async function GET() {
   try {
-    const { searchParams } = new URL(request.url);
-    const planId = searchParams.get('planId');
-    const date = searchParams.get('date');
-    const showAll = searchParams.get('showAll') === 'true';
-    const userEmail = searchParams.get('userEmail');
-    const entryId = searchParams.get('entryId');
-
-    // Handle fetching by entryId (for deep linking)
-    if (entryId) {
-      if (userEmail) {
-        const result = await sql`
-          SELECT e.*, 
-            CASE WHEN udp.completed IS NOT NULL THEN udp.completed ELSE false END as user_completed,
-            udp.completed_at as user_completed_at
-          FROM devotional_entries e
-          LEFT JOIN user_devotional_progress udp 
-            ON e.id = udp.entry_id AND udp.user_email = ${userEmail}
-          WHERE e.id = ${entryId}
-            AND e.is_published = true
-        `;
-        return NextResponse.json(result);
-      } else {
-        const result = await sql`
-          SELECT e.*,
-            false as user_completed,
-            NULL as user_completed_at
-          FROM devotional_entries e
-          WHERE e.id = ${entryId}
-            AND e.is_published = true
-        `;
-        return NextResponse.json(result);
-      }
-    }
-
-    if (date && planId) {
-      // Get entry for specific date and plan (compare only date part, ignore time)
-      if (userEmail) {
-        const result = await sql`
-          SELECT e.*, 
-            CASE WHEN udp.completed IS NOT NULL THEN udp.completed ELSE false END as user_completed,
-            udp.completed_at as user_completed_at
-          FROM devotional_entries e
-          LEFT JOIN user_devotional_progress udp 
-            ON e.id = udp.entry_id AND udp.user_email = ${userEmail}
-          WHERE e.plan_id = ${planId}
-            AND DATE(e.scheduled_date) = ${date}::date
-            AND e.is_published = true
-          ORDER BY e.scheduled_date ASC
-        `;
-        return NextResponse.json(result);
-      } else {
-        const result = await sql`
-          SELECT e.*,
-            false as user_completed,
-            NULL as user_completed_at
-          FROM devotional_entries e
-          WHERE e.plan_id = ${planId}
-            AND DATE(e.scheduled_date) = ${date}::date
-            AND e.is_published = true
-          ORDER BY e.scheduled_date ASC
-        `;
-        return NextResponse.json(result);
-      }
-    } else if (planId) {
-      const showAllAdmin = searchParams.get('showAll') === 'true';
-
-      if (showAllAdmin) {
-        // Admin: return ALL entries for this plan regardless of date/published
-        const result = await sql`
-          SELECT e.*,
-            false as user_completed,
-            NULL as user_completed_at
-          FROM devotional_entries e
-          WHERE e.plan_id = ${planId}
-          ORDER BY e.scheduled_date ASC
-        `;
-        return NextResponse.json(result);
-      }
-
-      // Get all entries for a plan (only past and today, published only)
-      // Use CURRENT_DATE (server's date, timezone-safe) instead of JS toISOString
-      if (userEmail) {
-        const result = await sql`
-          SELECT e.*,
-            CASE WHEN udp.completed IS NOT NULL THEN udp.completed ELSE false END as user_completed,
-            udp.completed_at as user_completed_at
-          FROM devotional_entries e
-          LEFT JOIN user_devotional_progress udp 
-            ON e.id = udp.entry_id AND udp.user_email = ${userEmail}
-          WHERE e.plan_id = ${planId}
-            AND DATE(e.scheduled_date) <= CURRENT_DATE
-            AND e.is_published = true
-          ORDER BY e.scheduled_date ASC
-        `;
-        return NextResponse.json(result);
-      } else {
-        const result = await sql`
-          SELECT e.*,
-            false as user_completed,
-            NULL as user_completed_at
-          FROM devotional_entries e
-          WHERE e.plan_id = ${planId}
-            AND DATE(e.scheduled_date) <= CURRENT_DATE
-            AND e.is_published = true
-          ORDER BY e.scheduled_date ASC
-        `;
-        return NextResponse.json(result);
-      }
-    } else if (showAll) {
-      // Get all published entries (for grid view) — use CURRENT_DATE to avoid UTC timezone shift
-      if (userEmail) {
-        const result = await sql`
-          SELECT e.*,
-            CASE WHEN udp.completed IS NOT NULL THEN udp.completed ELSE false END as user_completed,
-            udp.completed_at as user_completed_at
-          FROM devotional_entries e
-          LEFT JOIN user_devotional_progress udp 
-            ON e.id = udp.entry_id AND udp.user_email = ${userEmail}
-          WHERE e.is_published = true 
-            AND DATE(e.scheduled_date) <= CURRENT_DATE
-          ORDER BY e.scheduled_date DESC
-        `;
-        return NextResponse.json(result);
-      } else {
-        const result = await sql`
-          SELECT e.*,
-            false as user_completed,
-            NULL as user_completed_at
-          FROM devotional_entries e
-          WHERE e.is_published = true 
-            AND DATE(e.scheduled_date) <= CURRENT_DATE
-          ORDER BY e.scheduled_date DESC
-        `;
-        return NextResponse.json(result);
-      }
-    } else {
-      // Get recent entries
-      const entries = await sql`
-        SELECT * FROM devotional_entries
-        WHERE is_published = true
-        ORDER BY scheduled_date DESC
-        LIMIT 50
-      `;
-      return NextResponse.json(entries);
-    }
-  } catch (error) {
-    console.error('Error fetching devotional entries:', error);
-    return NextResponse.json({ error: 'Failed to fetch devotional entries' }, { status: 500 });
-  }
+    const rows = await sql`SELECT * FROM devotional_entries ORDER BY devotional_number ASC`;
+    return NextResponse.json(rows);
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Failed to load.' }, { status: 500 }); }
 }
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const {
-      scheduled_date,
-      title,
-      devotional_text,
-      devotional_text_lu,
-      scripture_book,
-      scripture_chapter,
-      scripture_verse,
-      scripture_quotation,
-      related_scriptures,
-      further_readings,
-      author,
-      cover_photo_url,
-      is_published = true
-    } = body;
-
-    // Get or create default devotional plan
-    let defaultPlan = await sql`SELECT id FROM devotional_plans WHERE is_active = true ORDER BY id ASC LIMIT 1`;
-    
-    if (defaultPlan.length === 0) {
-      // Create a default plan if none exists
-      defaultPlan = await sql`
-        INSERT INTO devotional_plans (
-          title, 
-          description, 
-          is_active, 
-          created_at, 
-          updated_at
-        ) VALUES (
-          'Daily Devotionals',
-          'Your daily spiritual journey with God',
-          true,
-          NOW(),
-          NOW()
-        ) RETURNING id
-      `;
-    }
-
-    const planId = defaultPlan[0].id;
-
-    const result = await sql`
-      INSERT INTO devotional_entries (
-        plan_id,
-        scheduled_date,
-        title,
-        devotional_text,
-        devotional_text_lu,
-        scripture_book,
-        scripture_chapter,
-        scripture_verse,
-        scripture_quotation,
-        related_scriptures,
-        further_readings,
-        author,
-        cover_photo_url,
-        is_published,
-        created_at,
-        updated_at
-      ) VALUES (
-        ${planId},
-        ${scheduled_date},
-        ${title},
-        ${devotional_text || null},
-        ${devotional_text_lu || null},
-        ${scripture_book || null},
-        ${scripture_chapter || null},
-        ${scripture_verse || null},
-        ${scripture_quotation || null},
-        ${related_scriptures ? JSON.stringify(related_scriptures) : null},
-        ${further_readings || null},
-        ${author || null},
-        ${cover_photo_url || null},
-        ${is_published},
-        NOW(),
-        NOW()
-      )
-      RETURNING *
-    `;
-
-    return NextResponse.json(result[0]);
-  } catch (error) {
-    console.error('Error creating devotional entry:', error);
-    return NextResponse.json({ error: 'Failed to create devotional entry' }, { status: 500 });
-  }
+function clean(body: any) {
+  const num = String(body.devotional_number || '').padStart(3, '0');
+  if (!/^\d{3}$/.test(num)) throw new Error('devotional_number must be 3 digits, e.g. 001.');
+  if (!String(body.title || '').trim()) throw new Error('Title is required.');
+  if (!String(body.devotional_text || '').trim()) throw new Error('Devotional text is required.');
+  if (!String(body.scripture_book || '').trim()) throw new Error('Scripture book is required.');
+  const chapter = Number(body.scripture_chapter), verse = Number(body.scripture_verse);
+  if (Number.isNaN(chapter) || Number.isNaN(verse)) throw new Error('Chapter / Verse must be numbers.');
+  return { num, title: String(body.title).trim(), text: String(body.devotional_text), textLu: body.devotional_text_lu ? String(body.devotional_text_lu) : null, book: String(body.scripture_book).trim(), chapter, verse, quotation: body.scripture_quotation ? String(body.scripture_quotation) : null, further: body.further_readings ? String(body.further_readings) : null, author: body.author ? String(body.author) : null, cover: body.cover_photo_url ? String(body.cover_photo_url) : null, related: Array.isArray(body.related_scriptures) ? body.related_scriptures : [] };
 }
 
-export async function PUT(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const {
-      id,
-      scheduled_date,
-      title,
-      devotional_text,
-      devotional_text_lu,
-      scripture_book,
-      scripture_chapter,
-      scripture_verse,
-      scripture_quotation,
-      related_scriptures,
-      further_readings,
-      author,
-      cover_photo_url,
-      is_published
-    } = body;
-
-    const result = await sql`
-      UPDATE devotional_entries
-      SET
-        scheduled_date = ${scheduled_date},
-        title = ${title},
-        devotional_text = ${devotional_text || null},
-        devotional_text_lu = ${devotional_text_lu || null},
-        scripture_book = ${scripture_book || null},
-        scripture_chapter = ${scripture_chapter || null},
-        scripture_verse = ${scripture_verse || null},
-        scripture_quotation = ${scripture_quotation || null},
-        related_scriptures = ${related_scriptures ? JSON.stringify(related_scriptures) : null},
-        further_readings = ${further_readings || null},
-        author = ${author || null},
-        cover_photo_url = ${cover_photo_url || null},
-        is_published = ${is_published},
-        updated_at = NOW()
-      WHERE id = ${id}
-      RETURNING *
-    `;
-
-    if (result.length === 0) {
-      return NextResponse.json({ error: 'Devotional entry not found' }, { status: 404 });
-    }
-
-    return NextResponse.json(result[0]);
-  } catch (error) {
-    console.error('Error updating devotional entry:', error);
-    return NextResponse.json({ error: 'Failed to update devotional entry' }, { status: 500 });
-  }
+    const c = clean(await req.json().catch(() => ({})));
+    const dup = await sql`SELECT id FROM devotional_entries WHERE devotional_number = ${c.num} LIMIT 1`;
+    if (dup.length) return NextResponse.json({ error: `Devotional #${c.num} already exists. Edit it, or use Bulk → Replace.` }, { status: 409 });
+    const rows = await sql`INSERT INTO devotional_entries (devotional_number, title, devotional_text, devotional_text_lu, scripture_book, scripture_chapter, scripture_verse, scripture_quotation, related_scriptures, further_readings, author, cover_photo_url) VALUES (${c.num}, ${c.title}, ${c.text}, ${c.textLu}, ${c.book}, ${c.chapter}, ${c.verse}, ${c.quotation}, ${JSON.stringify(c.related)}::jsonb, ${c.further}, ${c.author}, ${c.cover}) RETURNING *`;
+    return NextResponse.json({ success: true, entry: rows[0] });
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Failed to save.' }, { status: 400 }); }
 }
 
-export async function DELETE(request: Request) {
+export async function PUT(req: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
+    const body = await req.json().catch(() => ({}));
+    if (!body.id) return NextResponse.json({ error: 'id is required.' }, { status: 400 });
+    const c = clean(body);
+    const rows = await sql`UPDATE devotional_entries SET devotional_number = ${c.num}, title = ${c.title}, devotional_text = ${c.text}, devotional_text_lu = ${c.textLu}, scripture_book = ${c.book}, scripture_chapter = ${c.chapter}, scripture_verse = ${c.verse}, scripture_quotation = ${c.quotation}, related_scriptures = ${JSON.stringify(c.related)}::jsonb, further_readings = ${c.further}, author = ${c.author}, cover_photo_url = ${c.cover} WHERE id = ${Number(body.id)} RETURNING *`;
+    if (!rows.length) return NextResponse.json({ error: 'Devotional not found.' }, { status: 404 });
+    return NextResponse.json({ success: true, entry: rows[0] });
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Failed to update.' }, { status: 400 }); }
+}
 
-    if (!id) {
-      return NextResponse.json({ error: 'Entry ID is required' }, { status: 400 });
-    }
-
-    await sql`DELETE FROM devotional_entries WHERE id = ${id}`;
+export async function DELETE(req: NextRequest) {
+  try {
+    const id = req.nextUrl.searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'id is required.' }, { status: 400 });
+    await sql`DELETE FROM devotional_entries WHERE id = ${Number(id)}`;
     return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting devotional entry:', error);
-    return NextResponse.json({ error: 'Failed to delete devotional entry' }, { status: 500 });
-  }
+  } catch (e: any) { return NextResponse.json({ error: e?.message || 'Failed to delete.' }, { status: 500 }); }
 }
