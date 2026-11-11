@@ -12,7 +12,7 @@ import InstallPrompt from "@/app/components/InstallPrompt";
 import SplashScreen from "@/app/components/SplashScreen";
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
-import VisitorTracker from '@/components/VisitorTracker';
+import VisitorTracker from "@/app/components/VisitorTracker";
 
 export default function RootLayout({ children }) {
   return (
