@@ -1,0 +1,58 @@
+ 'use client';
+
+import { useEffect } from 'react';
+
+// Mount ONCE in the root layout (<VisitorTracker />) — this is the piece
+// that was missing: nothing ever recorded a visit, so the widget could
+// only ever show 0. This pings /api/visitor-stats on page load and every
+// 60 seconds while the tab is open. No login, no cookies, no personal data:
+// the server only sees an anonymous session id + Vercel's country/city headers.
+export default function VisitorTracker() {
+  useEffect(() => {
+    let sessionId = '';
+    try {
+      sessionId = sessionStorage.getItem('prayread-session') || '';
+      if (!sessionId) {
+        sessionId =
+          typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        sessionStorage.setItem('prayread-session', sessionId);
+      }
+    } catch {
+      // sessionStorage unavailable (private mode) — fall back to a
+      // per-page-load id so the visit still counts once.
+      sessionId = `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    let stopped = false;
+    const ping = async () => {
+      if (stopped) return;
+      try {
+        await fetch('/api/visitor-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+          keepalive: true,
+        });
+      } catch {
+        /* stats must never break the page */
+      }
+    };
+
+    ping();
+    const interval = setInterval(ping, 60000);
+    const onVisibility = () => {
+      if (!document.hidden) ping();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
+
+  return null;
+}
