@@ -1,4 +1,4 @@
-'use client';
+ 'use client';
 
 import { useEffect, useState } from 'react';
 
@@ -12,37 +12,69 @@ interface VisitorData {
   }>;
 }
 
+const EMPTY_DATA: VisitorData = { activeUsers: 0, last24Hours: 0, recentUsers: [] };
+
+// The API may 404 / 500 / return an error shape — never let a bad payload
+// replace good state or crash the widget (old bug: setData(json) blindly,
+// then data.recentUsers.length threw when recentUsers was undefined).
+function sanitize(json: unknown): VisitorData {
+  if (!json || typeof json !== 'object') return EMPTY_DATA;
+  const j = json as Record<string, unknown>;
+  const recent = Array.isArray(j.recentUsers) ? j.recentUsers : [];
+  return {
+    activeUsers: typeof j.activeUsers === 'number' ? j.activeUsers : 0,
+    last24Hours: typeof j.last24Hours === 'number' ? j.last24Hours : 0,
+    recentUsers: recent
+      .filter(
+        (u): u is { country: string; city: string; timestamp: string } =>
+          !!u && typeof u === 'object',
+      )
+      .map((u) => ({
+        country: typeof u.country === 'string' && u.country ? u.country : 'Unknown',
+        city: typeof u.city === 'string' && u.city ? u.city : 'Unknown',
+        timestamp: typeof u.timestamp === 'string' ? u.timestamp : '',
+      })),
+  };
+}
+
 export default function LiveVisitorsWidget() {
-  const [data, setData] = useState<VisitorData>({
-    activeUsers: 0,
-    last24Hours: 0,
-    recentUsers: [],
-  });
+  const [data, setData] = useState<VisitorData>(EMPTY_DATA);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchData = async () => {
       try {
-        const res = await fetch('/api/visitor-stats');
+        const res = await fetch('/api/visitor-stats', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`visitor-stats returned ${res.status}`);
         const json = await res.json();
-        setData(json);
+        if (!cancelled) {
+          setData(sanitize(json));
+          setHasError(false);
+        }
       } catch (error) {
         console.error('Failed to fetch visitor stats:', error);
+        if (!cancelled) setHasError(true);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     fetchData();
     const interval = setInterval(fetchData, 30000); // Update every 30s
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   const formatTimeAgo = (timestamp: string) => {
-    const now = new Date();
-    const then = new Date(timestamp);
-    const seconds = Math.floor((now.getTime() - then.getTime()) / 1000);
-
+    const then = new Date(timestamp).getTime();
+    if (!timestamp || Number.isNaN(then)) return '';
+    const seconds = Math.floor((Date.now() - then) / 1000);
+    if (seconds < 0) return 'Just now'; // clock skew guard
     if (seconds < 60) return 'Just now';
     if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
@@ -72,6 +104,9 @@ export default function LiveVisitorsWidget() {
             style={{ boxShadow: '0 0 8px #4ade80' }}
           />
           <h3 className="text-white font-semibold text-sm tracking-wide">Live Visitors</h3>
+          {hasError && !isLoading && (
+            <span className="text-amber-300/80 text-[11px]">— stats unavailable</span>
+          )}
         </div>
 
         {/* Stats Grid */}
@@ -142,6 +177,10 @@ export default function LiveVisitorsWidget() {
                 className="inline-block w-5 h-5 border-2 border-white/20 border-t-[#c9a84c] rounded-full animate-spin"
               />
             </div>
+          ) : hasError && data.recentUsers.length === 0 ? (
+            <div className="text-center py-6 text-white/30 text-xs">
+              Couldn&apos;t load visitor stats — retrying…
+            </div>
           ) : data.recentUsers.length === 0 ? (
             <div className="text-center py-6 text-white/30 text-xs">
               No recent visitors
@@ -149,7 +188,7 @@ export default function LiveVisitorsWidget() {
           ) : (
             data.recentUsers.map((user, index) => (
               <div
-                key={index}
+                key={`${user.timestamp}-${user.city}-${user.country}-${index}`}
                 className="flex items-center justify-between px-3 py-2.5 rounded-lg transition-all hover:bg-white/5"
                 style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}
               >
