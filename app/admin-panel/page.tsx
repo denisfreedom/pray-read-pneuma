@@ -2,7 +2,7 @@
 import DevotionalAdminTab from '@/app/components/DevotionalAdminTab';
 import { useState, useEffect } from 'react';
 import AdminNavbar from '../components/AdminNavbar';
-import DevotionalManagement from '../components/DevotionalManagement';
+
 import RichTextEditor from '../components/RichTextEditor';
 import BookChapterBulkImport from '../components/BookChapterBulkImport';
 import { Pencil, Trash2, Plus, BookOpen, Users, Globe, MessageSquare, Music, Save, Edit2 } from 'lucide-react';
