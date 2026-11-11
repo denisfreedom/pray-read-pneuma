@@ -1,13 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   saveChapterVerses,
   saveChapterContent,
   saveBooks,
-  getBooks,
   saveDevotional,
-  getAllDevotionals,
   saveVerseOfTheDay,
   saveToStore,
   saveBulkToStore,
@@ -47,8 +45,14 @@ export interface ContentUpdate {
 }
 
 const MAX_RETRIES = 3;
-const CHUNK_SIZE = 10; // Process 10 items at a time
-const RETRY_DELAY = 2000; // 2 seconds between retries
+const CHUNK_SIZE = 10;
+const RETRY_DELAY = 2000;
+// FIX: throttle progress writes — 1,189 chapters used to mean 1,189
+// setState + localStorage writes. Now at most 1 per 500ms per category.
+const PROGRESS_THROTTLE_MS = 500;
+
+type CategoryStatus = 'pending' | 'syncing' | 'completed' | 'error';
+type ProgressMap = SyncStatus['categoryProgress'];
 
 export function useOfflineSync() {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({
@@ -61,457 +65,280 @@ export function useOfflineSync() {
     categoryProgress: {},
   });
 
-  // Load last sync time and progress from localStorage
+  // FIX: guards — one sync at a time, cancellable, no setState after unmount.
+  const syncInProgress = useRef(false);
+  const cancelled = useRef(false);
+  const mounted = useRef(true);
+  const abortController = useRef<AbortController | null>(null);
+  const progressRef = useRef<ProgressMap>({});
+  const lastProgressWrite = useRef<Record<string, number>>({});
+
   useEffect(() => {
+    mounted.current = true;
     const lastSync = localStorage.getItem('lastSyncTime');
     if (lastSync) {
-      setSyncStatus(prev => ({
-        ...prev,
-        lastSyncTime: new Date(lastSync),
-      }));
-    }
-
-    const savedProgress = localStorage.getItem('downloadProgress');
-    if (savedProgress) {
-      try {
-        const progress = JSON.parse(savedProgress);
-        setSyncStatus(prev => ({
-          ...prev,
-          categoryProgress: progress,
-        }));
-      } catch (e) {
-        console.error('Failed to parse saved progress:', e);
+      const d = new Date(lastSync);
+      if (!isNaN(d.getTime())) {
+        setSyncStatus((prev) => ({ ...prev, lastSyncTime: d }));
       }
     }
+    return () => {
+      mounted.current = false;
+      cancelled.current = true;
+      abortController.current?.abort();
+    };
   }, []);
 
-  // Save progress to localStorage
-  const saveProgress = useCallback((progress: Record<string, any>) => {
-    localStorage.setItem('downloadProgress', JSON.stringify(progress));
+  const safeSetStatus = useCallback((updater: (prev: SyncStatus) => SyncStatus) => {
+    if (mounted.current) setSyncStatus(updater);
   }, []);
 
-  // Retry wrapper with exponential backoff
-  const retryFetch = async <T,>(
+  // FIX: cancel a running sync — stops network + loops, clears the spinner.
+  const cancelSync = useCallback(() => {
+    cancelled.current = true;
+    abortController.current?.abort();
+    syncInProgress.current = false;
+    safeSetStatus((prev) => ({ ...prev, isSyncing: false, error: 'Sync cancelled' }));
+  }, [safeSetStatus]);
+
+  const saveProgress = useCallback((progress: ProgressMap) => {
+    try {
+      localStorage.setItem('downloadProgress', JSON.stringify(progress));
+    } catch {
+      // Storage full / private mode — progress just won't resume. Don't crash sync.
+    }
+  }, []);
+
+  // FIX: pure updater — no side effects inside setState. Progress is read
+  // from a ref, merged, saved, then state is set from the same object.
+  const updateCategoryProgress = useCallback((
+    category: string,
+    update: Partial<{ completed: number; total: number; status: CategoryStatus }>,
+    force = false,
+  ) => {
+    const prev = progressRef.current[category] ?? { completed: 0, total: 0, status: 'pending' as CategoryStatus };
+    const next = { ...prev, ...update };
+    // Skip no-op writes; throttle count-only writes; always flush status changes.
+    const statusChanged = update.status !== undefined && update.status !== prev.status;
+    const now = Date.now();
+    const lastWrite = lastProgressWrite.current[category] ?? 0;
+    if (!force && !statusChanged && now - lastWrite < PROGRESS_THROTTLE_MS) {
+      progressRef.current = { ...progressRef.current, [category]: next };
+      return;
+    }
+    lastProgressWrite.current[category] = now;
+    progressRef.current = { ...progressRef.current, [category]: next };
+    saveProgress(progressRef.current);
+    safeSetStatus((prevState) => ({
+      ...prevState,
+      categoryProgress: progressRef.current,
+      currentCategory: category,
+    }));
+  }, [saveProgress, safeSetStatus]);
+
+  const setCategoryError = useCallback((category: string) => {
+    updateCategoryProgress(category, { status: 'error' }, true);
+  }, [updateCategoryProgress]);
+
+  // FIX: don't retry 404s forever — a missing endpoint will never succeed.
+  const retryFetch = useCallback(async <T,>(
     fetchFn: () => Promise<T>,
     retries = MAX_RETRIES,
-    delay = RETRY_DELAY
+    delay = RETRY_DELAY,
   ): Promise<T> => {
     try {
       return await fetchFn();
-    } catch (error) {
-      console.error(`[RETRY] Fetch failed, ${retries} retries left:`, error);
+    } catch (error: any) {
+      if (error?.status === 404 || cancelled.current) throw error;
       if (retries > 0) {
-        console.log(`[RETRY] Waiting ${delay}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        if (cancelled.current) throw error;
         return retryFetch(fetchFn, retries - 1, delay * 1.5);
       }
-      console.error('[RETRY] Max retries exceeded, giving up');
       throw error;
     }
-  };
+  }, []);
 
-  // Update category progress
-  const updateCategoryProgress = useCallback((
+  const fetchJson = useCallback(async (url: string) => {
+    if (!abortController.current || abortController.current.signal.aborted) {
+      abortController.current = new AbortController();
+    }
+    const response = await fetch(url, { signal: abortController.current.signal });
+    if (!response.ok) {
+      const err: any = new Error(`Request failed (${response.status}) for ${url}`);
+      err.status = response.status;
+      throw err;
+    }
+    return response.json();
+  }, []);
+
+  // Shared per-chapter loop used by verses / commentaries / prayers / intros.
+  // FIX: failures are tracked separately and NEVER counted as completed.
+  const syncChapters = useCallback(async (
     category: string,
-    update: Partial<{ completed: number; total: number; status: 'pending' | 'syncing' | 'completed' | 'error' }>
-  ) => {
-    console.log(`[PROGRESS] ${category}:`, update);
-    setSyncStatus(prev => {
-      const newProgress = {
-        ...prev.categoryProgress,
-        [category]: {
-          ...prev.categoryProgress[category],
-          ...update,
-        },
-      };
-      saveProgress(newProgress);
-      return {
-        ...prev,
-        categoryProgress: newProgress,
-        currentCategory: category,
-      };
-    });
-  }, [saveProgress]);
+    books: any[],
+    fetchAndSave: (bookId: number, chapter: number) => Promise<void>,
+  ): Promise<{ succeeded: number; failed: number }> => {
+    const totalChapters = books.reduce((sum, book) => sum + (book.total_chapters || 0), 0);
+    updateCategoryProgress(category, { completed: 0, total: totalChapters, status: 'syncing' }, true);
+    let succeeded = 0;
+    let failed = 0;
 
-  // Sync all Bible books metadata
+    for (const book of books) {
+      if (cancelled.current) break;
+      if (!book.total_chapters) continue;
+      for (let chunkStart = 1; chunkStart <= book.total_chapters; chunkStart += CHUNK_SIZE) {
+        if (cancelled.current) break;
+        const chunkEnd = Math.min(chunkStart + CHUNK_SIZE - 1, book.total_chapters);
+        await Promise.all(
+          Array.from({ length: chunkEnd - chunkStart + 1 }, (_, i) => chunkStart + i).map(async (chapter) => {
+            try {
+              await retryFetch(() => fetchAndSave(book.id, chapter));
+              succeeded++;
+            } catch (error) {
+              if (cancelled.current) return;
+              failed++;
+              console.error(`Failed to sync ${category} ${book.id}:${chapter}`, error);
+            } finally {
+              updateCategoryProgress(category, { completed: succeeded + failed, total: totalChapters });
+            }
+          }),
+        );
+      }
+    }
+    updateCategoryProgress(
+      category,
+      { completed: succeeded + failed, total: totalChapters, status: failed > 0 && succeeded === 0 ? 'error' : 'completed' },
+      true,
+    );
+    return { succeeded, failed };
+  }, [retryFetch, updateCategoryProgress]);
+
   const syncBibleBooks = useCallback(async () => {
     const category = 'Bible Books';
-    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' });
-
+    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' }, true);
     try {
-      const books = await retryFetch(async () => {
-        const response = await fetch('/api/bible-books');
-        if (!response.ok) throw new Error('Failed to fetch books');
-        return response.json();
-      });
-
+      const books = await retryFetch(() => fetchJson('/api/bible-books'));
       await saveBooks(books);
-      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' });
+      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' }, true);
       return books;
     } catch (error) {
-      updateCategoryProgress(category, { status: 'error' });
+      setCategoryError(category);
       console.error('Error syncing books:', error);
       throw error;
     }
-  }, [updateCategoryProgress]);
+  }, [retryFetch, fetchJson, updateCategoryProgress, setCategoryError]);
 
-  // Sync Bible verses in chunks
   const syncBibleVerses = useCallback(async (books: any[]) => {
-    const category = 'Bible Verses';
-    const totalChapters = books.reduce((sum, book) => sum + (book.total_chapters || 0), 0);
-    
-    console.log(`[SYNC] Starting Bible Verses sync - ${books.length} books, ${totalChapters} total chapters`);
-    updateCategoryProgress(category, { completed: 0, total: totalChapters, status: 'syncing' });
+    const { succeeded } = await syncChapters('Bible Verses', books, async (bookId, chapter) => {
+      const data = await fetchJson(`/api/bible-verses?bookId=${bookId}&chapter=${chapter}`);
+      await saveChapterVerses(bookId, chapter, data.verses || []);
+    });
+    return succeeded;
+  }, [syncChapters, fetchJson]);
 
-    let completed = 0;
-    let failedChapters: Array<{ bookId: number; bookNumber: number; chapter: number }> = [];
-
-    for (const book of books) {
-      if (!book.total_chapters) continue;
-
-      console.log(`[SYNC] Starting book: ${book.name_english} (${book.total_chapters} chapters)`);
-
-      // Process chapters in chunks
-      for (let chunkStart = 1; chunkStart <= book.total_chapters; chunkStart += CHUNK_SIZE) {
-        const chunkEnd = Math.min(chunkStart + CHUNK_SIZE - 1, book.total_chapters);
-        const chunkPromises = [];
-
-        console.log(`[SYNC] Processing ${book.name_english} chapters ${chunkStart}-${chunkEnd}`);
-
-        for (let chapter = chunkStart; chapter <= chunkEnd; chapter++) {
-          const fetchChapter = async () => {
-            try {
-              console.log(`[SYNC] Fetching ${book.name_english} ${chapter} (book_id=${book.id})...`);
-              const verses = await retryFetch(async () => {
-                const response = await fetch(`/api/bible-verses?bookId=${book.id}&chapter=${chapter}`);
-                console.log(`[SYNC] Response status for ${book.name_english} ${chapter}:`, response.status);
-                if (!response.ok) throw new Error(`Failed to fetch verses for ${book.name_english} ${chapter}`);
-                const data = await response.json();
-                console.log(`[SYNC] Fetched ${data.verses?.length || 0} verses for ${book.name_english} ${chapter}`);
-                return data;
-              });
-
-              console.log(`[SYNC] Saving ${book.name_english} ${chapter} (${verses.verses?.length || 0} verses)`);
-              await saveChapterVerses(book.id, chapter, verses.verses || []);
-              completed++;
-              console.log(`[SYNC] Progress: ${completed}/${totalChapters} (${Math.round((completed/totalChapters)*100)}%)`);
-              updateCategoryProgress(category, { completed, total: totalChapters });
-            } catch (error) {
-              console.error(`[SYNC ERROR] Failed to sync ${book.name_english} ${chapter}:`, error);
-              failedChapters.push({ bookId: book.id, bookNumber: book.book_number, chapter });
-            }
-          };
-
-          chunkPromises.push(fetchChapter());
-        }
-
-        // Wait for chunk to complete before moving to next
-        console.log(`[SYNC] Waiting for chunk ${chunkStart}-${chunkEnd} to complete...`);
-        await Promise.all(chunkPromises);
-        console.log(`[SYNC] Chunk ${chunkStart}-${chunkEnd} completed`);
-      }
-    }
-
-    // Retry failed chapters one more time
-    if (failedChapters.length > 0) {
-      console.log(`Retrying ${failedChapters.length} failed chapters...`);
-      for (const { bookId, chapter } of failedChapters) {
-        try {
-          const verses = await retryFetch(async () => {
-            const response = await fetch(`/api/bible-verses?bookId=${bookId}&chapter=${chapter}`);
-            if (!response.ok) throw new Error('Retry failed');
-            return response.json();
-          });
-          await saveChapterVerses(bookId, chapter, verses.verses || []);
-          completed++;
-          updateCategoryProgress(category, { completed, total: totalChapters });
-        } catch (error) {
-          console.error(`Final retry failed for book ${bookId} chapter ${chapter}`);
-        }
-      }
-    }
-
-    updateCategoryProgress(category, { status: 'completed' });
-    return completed;
-  }, [updateCategoryProgress]);
-
-  // Sync commentaries
   const syncCommentaries = useCallback(async (books: any[]) => {
-    const category = 'Commentaries';
-    const totalChapters = books.reduce((sum, book) => sum + (book.total_chapters || 0), 0);
-    
-    updateCategoryProgress(category, { completed: 0, total: totalChapters, status: 'syncing' });
-
-    let completed = 0;
-
-    for (const book of books) {
-      if (!book.total_chapters) continue;
-
-      for (let chunkStart = 1; chunkStart <= book.total_chapters; chunkStart += CHUNK_SIZE) {
-        const chunkEnd = Math.min(chunkStart + CHUNK_SIZE - 1, book.total_chapters);
-        const chunkPromises = [];
-
-        for (let chapter = chunkStart; chapter <= chunkEnd; chapter++) {
-          chunkPromises.push(
-            retryFetch(async () => {
-              const response = await fetch(`/api/commentaries?bookId=${book.id}&chapter=${chapter}`);
-              if (response.ok) {
-                const data = await response.json();
-                if (data && Object.keys(data).length > 0) {
-                  await saveToStore('commentaries', {
-                    id: `${book.id}-${chapter}`,
-                    book_id: book.id,
-                    chapter,
-                    ...data,
-                    cached_at: new Date().toISOString(),
-                  });
-                }
-              }
-              completed++;
-              updateCategoryProgress(category, { completed, total: totalChapters });
-            }).catch(err => {
-              console.error(`Failed to sync commentary ${book.id}:${chapter}`, err);
-              completed++;
-              updateCategoryProgress(category, { completed, total: totalChapters });
-            })
-          );
-        }
-
-        await Promise.all(chunkPromises);
+    const { succeeded } = await syncChapters('Commentaries', books, async (bookId, chapter) => {
+      const data = await fetchJson(`/api/commentaries?bookId=${bookId}&chapter=${chapter}`);
+      if (data && Object.keys(data).length > 0) {
+        await saveToStore('commentaries', { id: `${bookId}-${chapter}`, book_id: bookId, chapter, ...data, cached_at: new Date().toISOString() });
       }
-    }
+    });
+    return succeeded;
+  }, [syncChapters, fetchJson]);
 
-    updateCategoryProgress(category, { status: 'completed' });
-    return completed;
-  }, [updateCategoryProgress]);
-
-  // Sync prayers
   const syncPrayers = useCallback(async (books: any[]) => {
-    const category = 'Prayer Passages';
-    const totalChapters = books.reduce((sum, book) => sum + (book.total_chapters || 0), 0);
-    
-    updateCategoryProgress(category, { completed: 0, total: totalChapters, status: 'syncing' });
-
-    let completed = 0;
-
-    for (const book of books) {
-      if (!book.total_chapters) continue;
-
-      for (let chunkStart = 1; chunkStart <= book.total_chapters; chunkStart += CHUNK_SIZE) {
-        const chunkEnd = Math.min(chunkStart + CHUNK_SIZE - 1, book.total_chapters);
-        const chunkPromises = [];
-
-        for (let chapter = chunkStart; chapter <= chunkEnd; chapter++) {
-          chunkPromises.push(
-            retryFetch(async () => {
-              const response = await fetch(`/api/chapter-prayers?bookId=${book.id}&chapter=${chapter}`);
-              if (response.ok) {
-                const data = await response.json();
-                if (data && Object.keys(data).length > 0) {
-                  await saveToStore('prayers', {
-                    id: `${book.id}-${chapter}`,
-                    book_id: book.id,
-                    chapter,
-                    ...data,
-                    cached_at: new Date().toISOString(),
-                  });
-                }
-              }
-              completed++;
-              updateCategoryProgress(category, { completed, total: totalChapters });
-            }).catch(err => {
-              console.error(`Failed to sync prayer ${book.id}:${chapter}`, err);
-              completed++;
-              updateCategoryProgress(category, { completed, total: totalChapters });
-            })
-          );
-        }
-
-        await Promise.all(chunkPromises);
+    const { succeeded } = await syncChapters('Prayer Passages', books, async (bookId, chapter) => {
+      const data = await fetchJson(`/api/chapter-prayers?bookId=${bookId}&chapter=${chapter}`);
+      if (data && Object.keys(data).length > 0) {
+        await saveToStore('prayers', { id: `${bookId}-${chapter}`, book_id: bookId, chapter, ...data, cached_at: new Date().toISOString() });
       }
-    }
+    });
+    return succeeded;
+  }, [syncChapters, fetchJson]);
 
-    updateCategoryProgress(category, { status: 'completed' });
-    return completed;
-  }, [updateCategoryProgress]);
-
-  // Sync introductions
   const syncIntroductions = useCallback(async (books: any[]) => {
-    const category = 'Introductions';
-    const totalChapters = books.reduce((sum, book) => sum + (book.total_chapters || 0), 0);
-    
-    updateCategoryProgress(category, { completed: 0, total: totalChapters, status: 'syncing' });
-
-    let completed = 0;
-
-    for (const book of books) {
-      if (!book.total_chapters) continue;
-
-      for (let chunkStart = 1; chunkStart <= book.total_chapters; chunkStart += CHUNK_SIZE) {
-        const chunkEnd = Math.min(chunkStart + CHUNK_SIZE - 1, book.total_chapters);
-        const chunkPromises = [];
-
-        for (let chapter = chunkStart; chapter <= chunkEnd; chapter++) {
-          chunkPromises.push(
-            retryFetch(async () => {
-              const response = await fetch(`/api/chapter-introductions?bookId=${book.id}&chapter=${chapter}`);
-              if (response.ok) {
-                const data = await response.json();
-                if (data && Object.keys(data).length > 0) {
-                  await saveChapterContent(book.id, chapter, data);
-                }
-              }
-              completed++;
-              updateCategoryProgress(category, { completed, total: totalChapters });
-            }).catch(err => {
-              console.error(`Failed to sync introduction ${book.id}:${chapter}`, err);
-              completed++;
-              updateCategoryProgress(category, { completed, total: totalChapters });
-            })
-          );
-        }
-
-        await Promise.all(chunkPromises);
+    const { succeeded } = await syncChapters('Introductions', books, async (bookId, chapter) => {
+      const data = await fetchJson(`/api/chapter-introductions?bookId=${bookId}&chapter=${chapter}`);
+      if (data && Object.keys(data).length > 0) {
+        await saveChapterContent(bookId, chapter, data);
       }
-    }
+    });
+    return succeeded;
+  }, [syncChapters, fetchJson]);
 
-    updateCategoryProgress(category, { status: 'completed' });
-    return completed;
-  }, [updateCategoryProgress]);
-
-  // Sync theological insights
-  const syncTheologicalInsights = useCallback(async (books: any[]) => {
-    const category = 'Theological Insights';
-    
-    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' });
-
+  const syncSingleList = useCallback(async (
+    category: string,
+    url: string,
+    store: string,
+  ): Promise<number> => {
+    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' }, true);
     try {
-      const insights = await retryFetch(async () => {
-        const response = await fetch('/api/all-theological-insights');
-        if (!response.ok) throw new Error('Failed to fetch theological insights');
-        return response.json();
-      });
-
-      if (Array.isArray(insights)) {
-        await saveBulkToStore('theological_insights', insights);
-      }
-
-      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' });
-      return insights.length || 0;
+      const data = await retryFetch(() => fetchJson(url));
+      if (Array.isArray(data)) await saveBulkToStore(store, data);
+      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' }, true);
+      return Array.isArray(data) ? data.length : 0;
     } catch (error) {
-      updateCategoryProgress(category, { status: 'error' });
-      console.error('Error syncing theological insights:', error);
+      setCategoryError(category);
+      console.error(`Error syncing ${category}:`, error);
       return 0;
     }
-  }, [updateCategoryProgress]);
+  }, [retryFetch, fetchJson, updateCategoryProgress, setCategoryError]);
 
-  // Sync historical context
-  const syncHistoricalContext = useCallback(async (books: any[]) => {
-    const category = 'Historical Context';
-    
-    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' });
+  const syncTheologicalInsights = useCallback(async () =>
+    syncSingleList('Theological Insights', '/api/all-theological-insights', 'theological_insights'),
+  [syncSingleList]);
 
-    try {
-      const context = await retryFetch(async () => {
-        const response = await fetch('/api/all-historical-context');
-        if (!response.ok) throw new Error('Failed to fetch historical context');
-        return response.json();
-      });
+  const syncHistoricalContext = useCallback(async () =>
+    syncSingleList('Historical Context', '/api/all-historical-context', 'historical_context'),
+  [syncSingleList]);
 
-      if (Array.isArray(context)) {
-        await saveBulkToStore('historical_context', context);
-      }
-
-      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' });
-      return context.length || 0;
-    } catch (error) {
-      updateCategoryProgress(category, { status: 'error' });
-      console.error('Error syncing historical context:', error);
-      return 0;
-    }
-  }, [updateCategoryProgress]);
-
-  // Sync devotionals
   const syncDevotionals = useCallback(async () => {
     const category = 'Devotionals';
-    
-    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' });
-
+    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' }, true);
     try {
-      const devotionals = await retryFetch(async () => {
-        const response = await fetch('/api/devotional-plans');
-        if (!response.ok) throw new Error('Failed to fetch devotionals');
-        return response.json();
-      });
-
-      for (const devotional of devotionals) {
+      const devotionals = await retryFetch(() => fetchJson('/api/devotional-plans'));
+      const list = Array.isArray(devotionals) ? devotionals : devotionals?.plans ?? [];
+      for (const devotional of list) {
+        if (cancelled.current) break;
         await saveDevotional(devotional);
       }
-
-      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' });
-      return devotionals.length;
+      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' }, true);
+      return list.length;
     } catch (error) {
-      updateCategoryProgress(category, { status: 'error' });
+      setCategoryError(category);
       console.error('Error syncing devotionals:', error);
       return 0;
     }
-  }, [updateCategoryProgress]);
+  }, [retryFetch, fetchJson, updateCategoryProgress, setCategoryError]);
 
-  // Sync Q&A
-  const syncQA = useCallback(async () => {
-    const category = 'Q&A';
-    
-    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' });
+  const syncQA = useCallback(async () =>
+    syncSingleList('Q&A', '/api/bible-qa', 'qa'),
+  [syncSingleList]);
 
-    try {
-      const qa = await retryFetch(async () => {
-        const response = await fetch('/api/bible-qa');
-        if (!response.ok) throw new Error('Failed to fetch Q&A');
-        return response.json();
-      });
-
-      if (Array.isArray(qa)) {
-        await saveBulkToStore('qa', qa);
-      }
-
-      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' });
-      return qa.length || 0;
-    } catch (error) {
-      updateCategoryProgress(category, { status: 'error' });
-      console.error('Error syncing Q&A:', error);
-      return 0;
-    }
-  }, [updateCategoryProgress]);
-
-  // Sync verse of the day
   const syncVerseOfTheDay = useCallback(async () => {
     const category = 'Verse of the Day';
-    
-    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' });
-
+    updateCategoryProgress(category, { completed: 0, total: 1, status: 'syncing' }, true);
     try {
-      const verse = await retryFetch(async () => {
-        const response = await fetch('/api/verse-of-the-day');
-        if (!response.ok) throw new Error('Failed to fetch verse of the day');
-        return response.json();
-      });
-
+      const verse = await retryFetch(() => fetchJson('/api/verse-of-the-day'));
       const today = new Date().toISOString().split('T')[0];
       await saveVerseOfTheDay(today, verse);
-
-      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' });
+      updateCategoryProgress(category, { completed: 1, total: 1, status: 'completed' }, true);
       return true;
     } catch (error) {
-      updateCategoryProgress(category, { status: 'error' });
+      setCategoryError(category);
       console.error('Error syncing verse of the day:', error);
       return false;
     }
-  }, [updateCategoryProgress]);
+  }, [retryFetch, fetchJson, updateCategoryProgress, setCategoryError]);
 
-  // Save content version after successful download
   const saveContentVersion = useCallback((category: string, version: string) => {
-    const localVersions = JSON.parse(localStorage.getItem('contentVersions') || '{}');
-    
+    let localVersions: Record<string, string> = {};
+    try {
+      localVersions = JSON.parse(localStorage.getItem('contentVersions') || '{}');
+    } catch {
+      localVersions = {};
+    }
     const categoryKeyMap: Record<string, string> = {
       'Bible Books': 'bibleBooks',
       'Bible Verses': 'bibleVerses',
@@ -524,289 +351,188 @@ export function useOfflineSync() {
       'Q&A': 'qa',
       'Verse of the Day': 'verseOfTheDay',
     };
-    
     const key = categoryKeyMap[category];
     if (key) {
       localVersions[key] = version;
-      localStorage.setItem('contentVersions', JSON.stringify(localVersions));
+      try {
+        localStorage.setItem('contentVersions', JSON.stringify(localVersions));
+      } catch { /* ignore */ }
     }
   }, []);
 
-  // Full sync - sync everything sequentially with retry
-  const syncAll = useCallback(async (onProgress?: (progress: number) => void) => {
-    console.log('[SYNC] Starting full syncAll...');
-    setSyncStatus({
-      isSyncing: true,
-      lastSyncTime: null,
-      itemsSynced: 0,
-      totalItems: 0,
-      error: null,
-      currentCategory: '',
-      categoryProgress: {},
-    });
-
+  // Runs one category, records its failure, but lets the rest continue.
+  const runCategory = useCallback(async (
+    category: string,
+    fn: () => Promise<unknown>,
+    versions: any,
+    versionKey: string,
+    onProgress?: (progress: number) => void,
+    progressValue?: number,
+  ): Promise<string | null> => {
     try {
-      // Get server versions
-      console.log('[SYNC] Fetching server versions from /api/offline-sync...');
-      const versionResponse = await fetch('/api/offline-sync');
-      console.log('[SYNC] Version response status:', versionResponse.status);
-      
-      if (!versionResponse.ok) {
-        throw new Error('Failed to fetch server versions');
-      }
-      const responseData = await versionResponse.json();
-      console.log('[SYNC] Server versions received:', responseData);
-      
+      await fn();
+      if (versions?.[versionKey]?.version) saveContentVersion(category, versions[versionKey].version);
+      if (progressValue !== undefined) onProgress?.(progressValue);
+      return null;
+    } catch (error) {
+      console.error(`Category ${category} failed, continuing with the rest:`, error);
+      return category;
+    }
+  }, [saveContentVersion]);
+
+  const beginSync = useCallback((): boolean => {
+    // FIX: refuse a second sync while one is running — no more double downloads.
+    if (syncInProgress.current) {
+      console.warn('Sync already in progress — ignoring duplicate start.');
+      return false;
+    }
+    syncInProgress.current = true;
+    cancelled.current = false;
+    abortController.current = new AbortController();
+    progressRef.current = {};
+    safeSetStatus((prev) => ({
+      ...prev,
+      isSyncing: true,
+      error: null,
+      // FIX: keep the previous lastSyncTime — it used to be wiped to null
+      // at the start of every sync, so the UI showed "never synced".
+      categoryProgress: {},
+    }));
+    return true;
+  }, [safeSetStatus]);
+
+  const finishSync = useCallback((failedCategories: string[]) => {
+    syncInProgress.current = false;
+    const now = new Date();
+    if (failedCategories.length === 0 && !cancelled.current) {
+      try {
+        localStorage.setItem('lastSyncTime', now.toISOString());
+        localStorage.removeItem('downloadProgress');
+      } catch { /* ignore */ }
+    }
+    safeSetStatus((prev) => ({
+      ...prev,
+      isSyncing: false,
+      lastSyncTime: failedCategories.length === 0 && !cancelled.current ? now : prev.lastSyncTime,
+      error: cancelled.current
+        ? 'Sync cancelled'
+        : failedCategories.length > 0
+          ? `Some content failed to download: ${failedCategories.join(', ')}. Your other downloads were saved — try again for the rest.`
+          : null,
+    }));
+    return failedCategories.length === 0 && !cancelled.current;
+  }, [safeSetStatus]);
+
+  const syncAll = useCallback(async (onProgress?: (progress: number) => void) => {
+    if (!beginSync()) return false;
+    const failed: string[] = [];
+    try {
+      const responseData = await fetchJson('/api/offline-sync');
       const versions = responseData?.versions;
-      
       if (!versions || !versions.bibleBooks) {
-        console.error('[SYNC ERROR] Invalid server response:', responseData);
         throw new Error('Invalid server response: missing version data');
       }
-      
-      console.log('[SYNC] Server versions validated:', versions);
 
-      // Initialize category progress
       const categories = [
-        'Bible Books',
-        'Bible Verses',
-        'Commentaries',
-        'Prayer Passages',
-        'Introductions',
-        'Theological Insights',
-        'Historical Context',
-        'Devotionals',
-        'Q&A',
-        'Verse of the Day',
+        'Bible Books', 'Bible Verses', 'Commentaries', 'Prayer Passages',
+        'Introductions', 'Theological Insights', 'Historical Context',
+        'Devotionals', 'Q&A', 'Verse of the Day',
       ];
-
-      const initialProgress: Record<string, any> = {};
-      categories.forEach(cat => {
+      const initialProgress: ProgressMap = {};
+      categories.forEach((cat) => {
         initialProgress[cat] = { completed: 0, total: 0, status: 'pending' };
       });
+      progressRef.current = initialProgress;
+      safeSetStatus((prev) => ({ ...prev, categoryProgress: initialProgress }));
 
-      setSyncStatus(prev => ({
-        ...prev,
-        categoryProgress: initialProgress,
-      }));
-
-      // Step 1: Sync books (metadata) - 5%
-      console.log('[SYNC] Step 1: Syncing Bible Books...');
-      const books = await syncBibleBooks();
-      console.log('[SYNC] Bible Books synced:', books.length, 'books');
-      if (versions?.bibleBooks?.version) {
-        saveContentVersion('Bible Books', versions.bibleBooks.version);
+      // Step 1: books first — everything else needs the book list.
+      let books: any[] = [];
+      try {
+        books = await syncBibleBooks();
+        if (versions?.bibleBooks?.version) saveContentVersion('Bible Books', versions.bibleBooks.version);
+        onProgress?.(5);
+      } catch (error) {
+        console.error('Bible Books failed — cannot continue without the book list.', error);
+        failed.push('Bible Books');
+        return finishSync(failed);
       }
-      onProgress?.(5);
 
-      // Step 2: Sync Bible verses - 5% to 30%
-      console.log('[SYNC] Step 2: Syncing Bible Verses...');
-      await syncBibleVerses(books);
-      console.log('[SYNC] Bible Verses sync completed');
-      if (versions?.bibleVerses?.version) {
-        saveContentVersion('Bible Verses', versions.bibleVerses.version);
+      // FIX: each remaining category runs even if a sibling fails.
+      const steps: Array<[string, () => Promise<unknown>, string, number]> = [
+        ['Bible Verses', () => syncBibleVerses(books), 'bibleVerses', 30],
+        ['Commentaries', () => syncCommentaries(books), 'commentaries', 45],
+        ['Prayer Passages', () => syncPrayers(books), 'prayers', 60],
+        ['Introductions', () => syncIntroductions(books), 'introductions', 70],
+        ['Theological Insights', () => syncTheologicalInsights(), 'theological', 78],
+        ['Historical Context', () => syncHistoricalContext(), 'historical', 86],
+        ['Devotionals', () => syncDevotionals(), 'devotionals', 92],
+        ['Q&A', () => syncQA(), 'qa', 96],
+        ['Verse of the Day', () => syncVerseOfTheDay(), 'verseOfTheDay', 100],
+      ];
+      for (const [category, fn, versionKey, pct] of steps) {
+        if (cancelled.current) break;
+        const failedCategory = await runCategory(category, fn, versions, versionKey, onProgress, pct);
+        if (failedCategory) failed.push(failedCategory);
       }
-      onProgress?.(30);
 
-      // Step 3: Sync commentaries - 30% to 45%
-      await syncCommentaries(books);
-      if (versions?.commentaries?.version) {
-        saveContentVersion('Commentaries', versions.commentaries.version);
-      }
-      onProgress?.(45);
-
-      // Step 4: Sync prayers - 45% to 60%
-      await syncPrayers(books);
-      if (versions?.prayers?.version) {
-        saveContentVersion('Prayer Passages', versions.prayers.version);
-      }
-      onProgress?.(60);
-
-      // Step 5: Sync introductions - 60% to 70%
-      await syncIntroductions(books);
-      if (versions?.introductions?.version) {
-        saveContentVersion('Introductions', versions.introductions.version);
-      }
-      onProgress?.(70);
-
-      // Step 6: Sync theological insights - 70% to 78%
-      await syncTheologicalInsights(books);
-      if (versions?.theological?.version) {
-        saveContentVersion('Theological Insights', versions.theological.version);
-      }
-      onProgress?.(78);
-
-      // Step 7: Sync historical context - 78% to 86%
-      await syncHistoricalContext(books);
-      if (versions?.historical?.version) {
-        saveContentVersion('Historical Context', versions.historical.version);
-      }
-      onProgress?.(86);
-
-      // Step 8: Sync devotionals - 86% to 92%
-      await syncDevotionals();
-      if (versions?.devotionals?.version) {
-        saveContentVersion('Devotionals', versions.devotionals.version);
-      }
-      onProgress?.(92);
-
-      // Step 9: Sync Q&A - 92% to 96%
-      await syncQA();
-      if (versions?.qa?.version) {
-        saveContentVersion('Q&A', versions.qa.version);
-      }
-      onProgress?.(96);
-
-      // Step 10: Sync Verse of the Day - 96% to 100%
-      await syncVerseOfTheDay();
-      if (versions?.verseOfTheDay?.version) {
-        saveContentVersion('Verse of the Day', versions.verseOfTheDay.version);
-      }
-      onProgress?.(100);
-
-      // Complete
-      const now = new Date();
-      localStorage.setItem('lastSyncTime', now.toISOString());
-      localStorage.removeItem('downloadProgress'); // Clear progress after successful completion
-      
-      setSyncStatus(prev => ({
-        ...prev,
-        isSyncing: false,
-        lastSyncTime: now,
-        error: null,
-      }));
-
-      return true;
+      return finishSync(failed);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Sync failed';
-      setSyncStatus(prev => ({
-        ...prev,
-        isSyncing: false,
-        error: errorMessage,
-      }));
+      syncInProgress.current = false;
+      safeSetStatus((prev) => ({ ...prev, isSyncing: false, error: errorMessage }));
       throw error;
     }
   }, [
-    syncBibleBooks,
-    syncBibleVerses,
-    syncCommentaries,
-    syncPrayers,
-    syncIntroductions,
-    syncTheologicalInsights,
-    syncHistoricalContext,
-    syncDevotionals,
-    syncQA,
-    syncVerseOfTheDay,
-    saveContentVersion,
+    beginSync, finishSync, fetchJson, syncBibleBooks, syncBibleVerses,
+    syncCommentaries, syncPrayers, syncIntroductions, syncTheologicalInsights,
+    syncHistoricalContext, syncDevotionals, syncQA, syncVerseOfTheDay,
+    saveContentVersion, runCategory, safeSetStatus,
   ]);
 
-  // Sync a specific chapter
-  const syncChapter = useCallback(async (bookNumber: number, chapter: number) => {
-    try {
-      console.log(`[SYNC CHAPTER] Fetching verses for book ${bookNumber} chapter ${chapter}...`);
-      
-      // Fetch verses
-      const versesResponse = await fetch(`/api/bible-verses?bookId=${bookNumber}&chapter=${chapter}`);
-      if (versesResponse.ok) {
-        const data = await versesResponse.json();
-        const verses = data.verses || [];
-        console.log(`[SYNC CHAPTER] Fetched ${verses.length} verses for book ${bookNumber} chapter ${chapter}`);
-        
-        // Save to IndexedDB
-        console.log(`[SYNC CHAPTER] Writing ${verses.length} verses to IndexedDB...`);
-        await saveChapterVerses(bookNumber, chapter, verses);
-        console.log(`[SYNC CHAPTER] ✓ Verses written to IndexedDB for book ${bookNumber} chapter ${chapter}`);
-        
-        // Verify the write operation
-        const { getByIndex } = await import('@/app/utils/offlineStorage');
-        const savedVerses = await getByIndex('verses', 'book_chapter', [bookNumber, chapter]);
-        console.log(`[SYNC CHAPTER] ✓ Verification: ${savedVerses.length} verses confirmed in IndexedDB for book ${bookNumber} chapter ${chapter}`);
-      } else {
-        console.warn(`[SYNC CHAPTER] Failed to fetch verses for book ${bookNumber} chapter ${chapter}: ${versesResponse.status}`);
-      }
+  // FIX: bookId everywhere — the old code mixed up the database id with
+  // the book number (Genesis = id 1 AND number 1, but that coincidence
+  // breaks for every other book). Callers must pass the book's id.
+  const syncChapter = useCallback(async (bookId: number, chapter: number) => {
+    const versesData = await retryFetch(() => fetchJson(`/api/bible-verses?bookId=${bookId}&chapter=${chapter}`));
+    await saveChapterVerses(bookId, chapter, versesData.verses || []);
+    const content = await retryFetch(() => fetchJson(`/api/bible-content?bookId=${bookId}&chapter=${chapter}`))
+      .catch(() => null); // Chapter content is optional — verses alone still count.
+    if (content) await saveChapterContent(bookId, chapter, content);
+    return true;
+  }, [retryFetch, fetchJson]);
 
-      // Fetch chapter content (commentary, prayers, etc.)
-      console.log(`[SYNC CHAPTER] Fetching chapter content for book ${bookNumber} chapter ${chapter}...`);
-      const contentResponse = await fetch(`/api/bible-content?bookId=${bookNumber}&chapter=${chapter}`);
-      if (contentResponse.ok) {
-        const content = await contentResponse.json();
-        console.log(`[SYNC CHAPTER] Writing chapter content to IndexedDB for book ${bookNumber} chapter ${chapter}...`);
-        await saveChapterContent(bookNumber, chapter, content);
-        console.log(`[SYNC CHAPTER] ✓ Chapter content written to IndexedDB for book ${bookNumber} chapter ${chapter}`);
-      } else {
-        console.warn(`[SYNC CHAPTER] No chapter content available for book ${bookNumber} chapter ${chapter}: ${contentResponse.status}`);
-      }
-
-      console.log(`[SYNC CHAPTER] ✓ Chapter ${bookNumber}:${chapter} sync complete and persisted to IndexedDB`);
-      return true;
-    } catch (error) {
-      console.error(`[SYNC CHAPTER] ✗ Error syncing chapter ${bookNumber}:${chapter}:`, error);
-      throw error;
-    }
-  }, []);
-
-  // Sync a full book (all chapters)
   const syncBook = useCallback(async (bookId: number, totalChapters: number) => {
-    console.log(`[SYNC BOOK] Starting download for book ${bookId}, ${totalChapters} chapters`);
-    const results = [];
-    
+    let successCount = 0;
     for (let chapter = 1; chapter <= totalChapters; chapter++) {
+      if (cancelled.current) break;
       try {
-        console.log(`[SYNC BOOK] Downloading chapter ${chapter}/${totalChapters} for book ${bookId}...`);
         await syncChapter(bookId, chapter);
-        results.push(true);
-        
-        // Update progress
-        setSyncStatus(prev => ({
-          ...prev,
-          itemsSynced: results.length,
-        }));
-        
-        console.log(`[SYNC BOOK] ✓ Chapter ${chapter}/${totalChapters} downloaded and saved to IndexedDB`);
+        successCount++;
+        safeSetStatus((prev) => ({ ...prev, itemsSynced: successCount, totalItems: totalChapters }));
       } catch (error) {
-        console.error(`[SYNC BOOK] ✗ Failed to download chapter ${chapter}/${totalChapters}:`, error);
-        results.push(false);
+        console.error(`Failed to download book ${bookId} chapter ${chapter}:`, error);
       }
     }
-
-    const successCount = results.filter(r => r).length;
-    console.log(`[SYNC BOOK] Book ${bookId} download complete: ${successCount}/${totalChapters} chapters successful`);
-    
-    // Verify persistence to IndexedDB
-    try {
-      const { getByIndex } = await import('@/app/utils/offlineStorage');
-      const sampleVerses = await getByIndex('verses', 'book_chapter', [bookId, 1]);
-      console.log(`[SYNC BOOK] ✓ Persistence verified - ${sampleVerses.length} verses found in IndexedDB for book ${bookId} chapter 1`);
-    } catch (error) {
-      console.error(`[SYNC BOOK] ✗ Failed to verify persistence for book ${bookId}:`, error);
-    }
-
     return successCount;
-  }, [syncChapter]);
+  }, [syncChapter, safeSetStatus]);
 
-  // Sync specific content
   const syncSpecificContent = useCallback(async (
     type: 'book' | 'chapter' | 'devotionals' | 'votd',
-    params?: { bookId?: number; bookNumber?: number; chapter?: number; totalChapters?: number }
+    params?: { bookId?: number; chapter?: number; totalChapters?: number },
   ) => {
-    setSyncStatus(prev => ({ ...prev, isSyncing: true, error: null }));
-
+    if (!beginSync()) return false;
     try {
       let result = false;
-
       switch (type) {
         case 'book':
-          // Use bookId if provided, otherwise fall back to bookNumber for backward compatibility
-          const bookIdToUse = params?.bookId || params?.bookNumber;
-          if (bookIdToUse && params?.totalChapters) {
-            await syncBook(bookIdToUse, params.totalChapters);
+          if (params?.bookId && params?.totalChapters) {
+            await syncBook(params.bookId, params.totalChapters);
             result = true;
           }
           break;
         case 'chapter':
-          const chapterBookId = params?.bookId || params?.bookNumber;
-          if (chapterBookId && params?.chapter) {
-            await syncChapter(chapterBookId, params.chapter);
+          if (params?.bookId && params?.chapter) {
+            await syncChapter(params.bookId, params.chapter);
             result = true;
           }
           break;
@@ -819,49 +545,28 @@ export function useOfflineSync() {
           result = true;
           break;
       }
-
-      const now = new Date();
-      localStorage.setItem('lastSyncTime', now.toISOString());
-      
-      setSyncStatus(prev => ({
-        ...prev,
-        isSyncing: false,
-        lastSyncTime: now,
-      }));
-
-      return result;
+      return finishSync([]);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Sync failed';
-      setSyncStatus(prev => ({
-        ...prev,
-        isSyncing: false,
-        error: errorMessage,
-      }));
+      syncInProgress.current = false;
+      safeSetStatus((prev) => ({ ...prev, isSyncing: false, error: errorMessage }));
       throw error;
     }
-  }, [syncBook, syncChapter, syncDevotionals, syncVerseOfTheDay]);
+  }, [beginSync, finishSync, syncBook, syncChapter, syncDevotionals, syncVerseOfTheDay, safeSetStatus]);
 
-  // Check for content updates
   const checkForUpdates = useCallback(async (): Promise<ContentUpdate[]> => {
     try {
-      const response = await fetch('/api/offline-sync');
-      if (!response.ok) throw new Error('Failed to fetch content versions');
-      
-      const data = await response.json();
-      const { versions } = data || {};
-      
-      // Safety check for versions
-      if (!versions || typeof versions !== 'object') {
-        console.warn('No versions received from API');
-        return [];
+      const data = await fetchJson('/api/offline-sync');
+      const versions = data?.versions;
+      if (!versions || typeof versions !== 'object') return [];
+
+      let localVersions: Record<string, string> = {};
+      try {
+        localVersions = JSON.parse(localStorage.getItem('contentVersions') || '{}');
+      } catch {
+        localVersions = {};
       }
 
-      // Get local versions from localStorage
-      const localVersions = JSON.parse(localStorage.getItem('contentVersions') || '{}');
-      
-      // Compare versions and build update list
-      const updates: ContentUpdate[] = [];
-      
       const categoryMap: Record<string, string> = {
         bibleBooks: 'Bible Books',
         bibleVerses: 'Bible Verses',
@@ -875,186 +580,96 @@ export function useOfflineSync() {
         verseOfTheDay: 'Verse of the Day',
       };
 
-      Object.entries(versions).forEach(([key, value]: [string, any]) => {
-        // Safety checks for version data
-        if (!value || typeof value !== 'object') return;
-        
+      return Object.entries(versions).flatMap(([key, value]: [string, any]) => {
+        if (!value || typeof value !== 'object') return [];
         const localVersion = localVersions[key];
-        const hasUpdate = !localVersion || (value.version && new Date(value.version) > new Date(localVersion));
-        
-        updates.push({
+        const serverVersion: string = value.version ?? new Date().toISOString();
+        // FIX: compare as strings first — versions are NOT always dates.
+        // Fall back to date comparison only when both parse as dates.
+        const localDate = new Date(localVersion ?? '');
+        const serverDate = new Date(serverVersion);
+        const datesComparable = !isNaN(localDate.getTime()) && !isNaN(serverDate.getTime());
+        const hasUpdate = !localVersion
+          || localVersion !== serverVersion
+          || (datesComparable && serverDate > localDate);
+        return [{
           category: categoryMap[key] || key,
           label: value.label || key,
           hasUpdate,
           localVersion,
-          serverVersion: value.version || new Date().toISOString(),
+          serverVersion,
           count: value.count || 0,
-        });
+        }];
       });
-      
-      return updates;
     } catch (error) {
       console.error('Error checking for updates:', error);
       return [];
     }
-  }, []);
+  }, [fetchJson]);
 
-  // Selective sync - sync only selected categories
   const syncSelectedCategories = useCallback(async (
     selectedCategories: string[],
-    serverVersions: Record<string, ContentVersion>,
-    onProgress?: (progress: number) => void
+    _serverVersions: Record<string, ContentVersion>,
+    onProgress?: (progress: number) => void,
   ) => {
-    setSyncStatus({
-      isSyncing: true,
-      lastSyncTime: null,
-      itemsSynced: 0,
-      totalItems: 0,
-      error: null,
-      currentCategory: '',
-      categoryProgress: {},
-    });
-
+    if (!beginSync()) return false;
+    const failed: string[] = [];
     try {
-      const totalCategories = selectedCategories.length;
-      let completedCategories = 0;
-
-      // Initialize category progress
-      const initialProgress: Record<string, any> = {};
-      selectedCategories.forEach(cat => {
-        initialProgress[cat] = { completed: 0, total: 0, status: 'pending' };
-      });
-
-      setSyncStatus(prev => ({
-        ...prev,
-        categoryProgress: initialProgress,
-      }));
-
-      // Get server version info for updating local versions
-      const versionResponse = await fetch('/api/offline-sync');
-      if (!versionResponse.ok) {
-        throw new Error('Failed to fetch server versions');
-      }
-      const responseData = await versionResponse.json();
+      const responseData = await fetchJson('/api/offline-sync');
       const versions = responseData?.versions || {};
 
-      // Sync selected categories sequentially
+      const initialProgress: ProgressMap = {};
+      selectedCategories.forEach((cat) => {
+        initialProgress[cat] = { completed: 0, total: 0, status: 'pending' };
+      });
+      progressRef.current = initialProgress;
+      safeSetStatus((prev) => ({ ...prev, categoryProgress: initialProgress }));
+
+      const needsBooks = selectedCategories.some((c) =>
+        c.includes('Bible') || c.includes('Commentaries') || c.includes('Prayer') || c.includes('Introductions'),
+      );
       let books: any[] = [];
-      
-      for (const category of selectedCategories) {
-        const progressStart = (completedCategories / totalCategories) * 100;
-        const progressEnd = ((completedCategories + 1) / totalCategories) * 100;
-
-        // Get books if needed (for Bible-related categories)
-        if (category.includes('Bible') || category.includes('Commentaries') || 
-            category.includes('Prayer') || category.includes('Introductions')) {
-          if (books.length === 0) {
-            const booksResponse = await fetch('/api/bible-books');
-            books = await booksResponse.json();
-          }
-        }
-
-        switch (category) {
-          case 'Bible Books':
-            await syncBibleBooks();
-            if (versions?.bibleBooks?.version) {
-              saveContentVersion(category, versions.bibleBooks.version);
-            }
-            break;
-          case 'Bible Verses':
-            await syncBibleVerses(books);
-            if (versions?.bibleVerses?.version) {
-              saveContentVersion(category, versions.bibleVerses.version);
-            }
-            break;
-          case 'Commentaries':
-            await syncCommentaries(books);
-            if (versions?.commentaries?.version) {
-              saveContentVersion(category, versions.commentaries.version);
-            }
-            break;
-          case 'Prayer Passages':
-            await syncPrayers(books);
-            if (versions?.prayers?.version) {
-              saveContentVersion(category, versions.prayers.version);
-            }
-            break;
-          case 'Introductions':
-            await syncIntroductions(books);
-            if (versions?.introductions?.version) {
-              saveContentVersion(category, versions.introductions.version);
-            }
-            break;
-          case 'Theological Insights':
-            await syncTheologicalInsights(books);
-            if (versions?.theological?.version) {
-              saveContentVersion(category, versions.theological.version);
-            }
-            break;
-          case 'Historical Context':
-            await syncHistoricalContext(books);
-            if (versions?.historical?.version) {
-              saveContentVersion(category, versions.historical.version);
-            }
-            break;
-          case 'Devotionals':
-            await syncDevotionals();
-            if (versions?.devotionals?.version) {
-              saveContentVersion(category, versions.devotionals.version);
-            }
-            break;
-          case 'Q&A':
-            await syncQA();
-            if (versions?.qa?.version) {
-              saveContentVersion(category, versions.qa.version);
-            }
-            break;
-          case 'Verse of the Day':
-            await syncVerseOfTheDay();
-            if (versions?.verseOfTheDay?.version) {
-              saveContentVersion(category, versions.verseOfTheDay.version);
-            }
-            break;
-        }
-
-        completedCategories++;
-        onProgress?.(progressEnd);
+      if (needsBooks) {
+        books = await syncBibleBooks();
+        if (versions?.bibleBooks?.version) saveContentVersion('Bible Books', versions.bibleBooks.version);
       }
 
-      // Complete
-      const now = new Date();
-      localStorage.setItem('lastSyncTime', now.toISOString());
-      localStorage.removeItem('downloadProgress');
-      
-      setSyncStatus(prev => ({
-        ...prev,
-        isSyncing: false,
-        lastSyncTime: now,
-        error: null,
-      }));
+      const handlers: Record<string, [() => Promise<unknown>, string]> = {
+        'Bible Books': [() => syncBibleBooks(), 'bibleBooks'],
+        'Bible Verses': [() => syncBibleVerses(books), 'bibleVerses'],
+        'Commentaries': [() => syncCommentaries(books), 'commentaries'],
+        'Prayer Passages': [() => syncPrayers(books), 'prayers'],
+        'Introductions': [() => syncIntroductions(books), 'introductions'],
+        'Theological Insights': [() => syncTheologicalInsights(), 'theological'],
+        'Historical Context': [() => syncHistoricalContext(), 'historical'],
+        'Devotionals': [() => syncDevotionals(), 'devotionals'],
+        'Q&A': [() => syncQA(), 'qa'],
+        'Verse of the Day': [() => syncVerseOfTheDay(), 'verseOfTheDay'],
+      };
 
-      return true;
+      const total = selectedCategories.length;
+      for (let i = 0; i < total; i++) {
+        if (cancelled.current) break;
+        const category = selectedCategories[i];
+        const handler = handlers[category];
+        if (!handler) continue;
+        const [fn, versionKey] = handler;
+        const failedCategory = await runCategory(category, fn, versions, versionKey, onProgress, ((i + 1) / total) * 100);
+        if (failedCategory) failed.push(failedCategory);
+      }
+
+      return finishSync(failed);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Sync failed';
-      setSyncStatus(prev => ({
-        ...prev,
-        isSyncing: false,
-        error: errorMessage,
-      }));
+      syncInProgress.current = false;
+      safeSetStatus((prev) => ({ ...prev, isSyncing: false, error: errorMessage }));
       throw error;
     }
   }, [
-    syncBibleBooks,
-    syncBibleVerses,
-    syncCommentaries,
-    syncPrayers,
-    syncIntroductions,
-    syncTheologicalInsights,
-    syncHistoricalContext,
-    syncDevotionals,
-    syncQA,
-    syncVerseOfTheDay,
-    saveContentVersion,
+    beginSync, finishSync, fetchJson, syncBibleBooks, syncBibleVerses,
+    syncCommentaries, syncPrayers, syncIntroductions, syncTheologicalInsights,
+    syncHistoricalContext, syncDevotionals, syncQA, syncVerseOfTheDay,
+    saveContentVersion, runCategory, safeSetStatus,
   ]);
 
   return {
@@ -1068,5 +683,7 @@ export function useOfflineSync() {
     syncVerseOfTheDay,
     checkForUpdates,
     syncSelectedCategories,
+    // NEW: let the UI offer a Cancel button while a download runs.
+    cancelSync,
   };
 }
