@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Bell, Plus, Trash2, Power } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Bell, Plus, Trash2, Power, Check } from 'lucide-react';
 
 interface Reminder {
   id: number;
@@ -20,17 +20,51 @@ const DAYS = [
   { short: 'sat', full: 'Saturday' },
 ];
 
+const ALL_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+// "09:00" -> "9:00 AM" (input stays 24h, display is friendly)
+function formatTime(time: string) {
+  const [h, m] = time.split(':').map(Number);
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hour = h % 12 === 0 ? 12 : h % 12;
+  return `${hour}:${String(m).padStart(2, '0')} ${suffix}`;
+}
+
 export default function RemindersPage() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newTime, setNewTime] = useState('09:00');
-  const [selectedDays, setSelectedDays] = useState<string[]>(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']);
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>('default');
+  const [selectedDays, setSelectedDays] = useState<string[]>(ALL_DAYS);
+  const [notificationPermission, setNotificationPermission] =
+    useState<NotificationPermission>('default');
+  const [saving, setSaving] = useState(false);
 
+  // ── FIX: refs always hold the LATEST values, so the one timer ──
+  // ── created below never goes stale ──
+  const remindersRef = useRef<Reminder[]>([]);
+  const permissionRef = useRef<NotificationPermission>('default');
+  const firedRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    remindersRef.current = reminders;
+    // Keep a copy for the service worker to read later
+    try {
+      localStorage.setItem('bibleReminders', JSON.stringify(reminders));
+    } catch {}
+  }, [reminders]);
+
+  useEffect(() => {
+    permissionRef.current = notificationPermission;
+  }, [notificationPermission]);
+
+  // ── FIX: ONE timer for the whole page, created once, cleaned up ──
   useEffect(() => {
     fetchReminders();
     checkNotificationPermission();
-    scheduleNotifications();
+    const interval = setInterval(checkAndShowNotification, 30000);
+    checkAndShowNotification(); // check immediately on load
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const checkNotificationPermission = () => {
@@ -43,9 +77,6 @@ export default function RemindersPage() {
     if ('Notification' in window) {
       const permission = await Notification.requestPermission();
       setNotificationPermission(permission);
-      if (permission === 'granted') {
-        scheduleNotifications();
-      }
     }
   };
 
@@ -60,25 +91,24 @@ export default function RemindersPage() {
   };
 
   const addReminder = async () => {
+    if (selectedDays.length === 0) return;
+    setSaving(true);
     try {
       const response = await fetch('/api/reminders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          time: newTime,
-          days: selectedDays,
-          enabled: true,
-        }),
+        body: JSON.stringify({ time: newTime, days: selectedDays, enabled: true }),
       });
-      
       if (response.ok) {
         await fetchReminders();
         setShowAddForm(false);
         setNewTime('09:00');
-        scheduleNotifications();
+        setSelectedDays(ALL_DAYS);
       }
     } catch (error) {
       console.error('Error adding reminder:', error);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -87,94 +117,97 @@ export default function RemindersPage() {
       await fetch('/api/reminders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...reminder,
-          enabled: !reminder.enabled,
-        }),
+        body: JSON.stringify({ ...reminder, enabled: !reminder.enabled }),
       });
       await fetchReminders();
-      scheduleNotifications();
     } catch (error) {
       console.error('Error toggling reminder:', error);
     }
   };
 
   const deleteReminder = async (id: number) => {
+    if (!window.confirm('Delete this reminder?')) return;
     try {
       await fetch(`/api/reminders?id=${id}`, { method: 'DELETE' });
       await fetchReminders();
-      scheduleNotifications();
     } catch (error) {
       console.error('Error deleting reminder:', error);
     }
   };
 
-  const scheduleNotifications = () => {
-    // Clear existing scheduled notifications
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
-      // Store reminders in localStorage for the service worker to access
-      localStorage.setItem('bibleReminders', JSON.stringify(reminders));
-      
-      // Schedule check every minute
-      setInterval(checkAndShowNotification, 60000);
-      checkAndShowNotification(); // Check immediately
-    }
-  };
-
+  // ── FIX: reads the LATEST reminders from the ref, and remembers ──
+  // ── what already fired so one reminder fires once per minute ──
   const checkAndShowNotification = () => {
-    if (Notification.permission !== 'granted') return;
-    
+    if (permissionRef.current !== 'granted') return;
     const now = new Date();
     const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const currentDay = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][now.getDay()];
-    
-    reminders.forEach(reminder => {
-      if (reminder.enabled && reminder.time === currentTime && reminder.days.includes(currentDay)) {
-        showNotification();
-      }
+    const todayKey = now.toDateString();
+
+    remindersRef.current.forEach((reminder) => {
+      if (!reminder.enabled) return;
+      if (reminder.time !== currentTime) return;
+      if (!reminder.days.includes(currentDay)) return;
+
+      const fireKey = `${reminder.id}-${todayKey}-${currentTime}`;
+      if (firedRef.current.has(fireKey)) return; // already fired this minute
+      firedRef.current.add(fireKey);
+      showNotification();
     });
   };
 
   const showNotification = () => {
-    if (Notification.permission === 'granted') {
+    if (permissionRef.current !== 'granted') return;
+    try {
       new Notification('Bible Reading Reminder', {
-        body: 'Time for your daily Bible reading! 📖',
-        icon: '/bible-icon.png',
+        body: 'Time for your daily Bible reading!',
+        icon: '/icon-192x192.png',
         tag: 'bible-reminder',
-        requireInteraction: false,
       });
+    } catch (e) {
+      console.error('Could not show notification:', e);
     }
   };
 
   const toggleDay = (day: string) => {
-    setSelectedDays(prev =>
-      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day]
     );
   };
 
+  const activeCount = reminders.filter((r) => r.enabled).length;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50 py-8 px-4">
+    <div className="min-h-screen bg-[#FDFBF6] py-8 px-4">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2 flex items-center gap-3">
-            <Bell className="w-8 h-8 text-purple-600" />
-            Reading Reminders
-          </h1>
-          <p className="text-gray-600">
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-[#1B2340] shadow-lg shadow-[#1B2340]/30 mb-4">
+            <Bell className="w-7 h-7 text-[#E8B84B]" />
+          </div>
+          <p className="text- font-bold tracking-[0.3em] text-[#B98A2F] uppercase mb-1">
+            Pray-Read Bible
+          </p>
+          <h1 className="text-3xl font-bold text-[#1B2340] mb-2">Reading Reminders</h1>
+          <p className="text-[#6B6455]">
             Set daily reminders to stay consistent with your Bible reading
           </p>
+          {reminders.length > 0 && (
+            <p className="mt-2 inline-block text-xs font-semibold text-[#1B2340] bg-[#F3E9CF] border border-[#E8B84B]/50 rounded-full px-3 py-1">
+              {activeCount} active · {reminders.length} total
+            </p>
+          )}
         </div>
 
         {/* Notification Permission */}
         {notificationPermission !== 'granted' && (
-          <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mb-6">
-            <p className="text-yellow-800 mb-3">
-              Enable notifications to receive reading reminders
+          <div className="bg-[#FFF8E6] border border-[#E8B84B]/60 rounded-2xl p-5 mb-6">
+            <p className="text-[#6B4E0B] mb-3 text-sm leading-relaxed">
+              Enable notifications so your reminders can reach you while the app is open.
             </p>
             <button
               onClick={requestNotificationPermission}
-              className="bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 transition-colors"
+              className="bg-[#1B2340] text-white px-5 py-2.5 rounded-lg hover:bg-[#2A3358] transition-colors text-sm font-semibold"
             >
               Enable Notifications
             </button>
@@ -185,64 +218,62 @@ export default function RemindersPage() {
         {!showAddForm && (
           <button
             onClick={() => setShowAddForm(true)}
-            className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-4 rounded-xl mb-6 flex items-center justify-center gap-2 hover:shadow-lg transition-all"
+            className="w-full bg-gradient-to-r from-[#1B2340] to-[#2A3358] text-white py-4 rounded-2xl mb-6 flex items-center justify-center gap-2 hover:shadow-xl hover:shadow-[#1B2340]/20 transition-all font-semibold"
           >
-            <Plus className="w-5 h-5" />
+            <Plus className="w-5 h-5 text-[#E8B84B]" />
             Add New Reminder
           </button>
         )}
 
         {/* Add Reminder Form */}
         {showAddForm && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h3 className="text-lg font-semibold mb-4">New Reminder</h3>
-            
-            {/* Time Picker */}
+          <div className="bg-white rounded-2xl shadow-lg shadow-[#1B2340]/5 border border-[#E8B84B]/30 p-6 mb-6">
+            <h3 className="text-lg font-bold text-[#1B2340] mb-4">New Reminder</h3>
+
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Time
-              </label>
+              <label className="block text-sm font-semibold text-[#1B2340] mb-2">Time</label>
               <input
                 type="time"
                 value={newTime}
                 onChange={(e) => setNewTime(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                className="w-full border border-[#E5DCC3] rounded-xl px-4 py-3 focus:ring-2 focus:ring-[#E8B84B] focus:border-[#E8B84B] outline-none text-[#1B2340]"
               />
             </div>
 
-            {/* Days Selector */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Repeat on
-              </label>
+              <label className="block text-sm font-semibold text-[#1B2340] mb-2">Repeat on</label>
               <div className="flex flex-wrap gap-2">
-                {DAYS.map(day => (
+                {DAYS.map((day) => (
                   <button
                     key={day.short}
                     onClick={() => toggleDay(day.short)}
-                    className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                    title={day.full}
+                    className={`px-4 py-2 rounded-full font-semibold text-sm transition-all ${
                       selectedDays.includes(day.short)
-                        ? 'bg-purple-600 text-white'
-                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        ? 'bg-[#1B2340] text-white'
+                        : 'bg-[#F3EEDF] text-[#6B6455] hover:bg-[#EADFC2]'
                     }`}
                   >
                     {day.short.toUpperCase()}
                   </button>
                 ))}
               </div>
+              {selectedDays.length === 0 && (
+                <p className="text-xs text-red-600 mt-2">Pick at least one day.</p>
+              )}
             </div>
 
-            {/* Action Buttons */}
             <div className="flex gap-3">
               <button
                 onClick={addReminder}
-                className="flex-1 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-700 transition-colors"
+                disabled={saving || selectedDays.length === 0}
+                className="flex-1 bg-[#E8B84B] text-[#1B2340] py-3 rounded-xl hover:bg-[#D9A62E] transition-colors font-bold disabled:opacity-50"
               >
-                Save Reminder
+                {saving ? 'Saving…' : 'Save Reminder'}
               </button>
               <button
                 onClick={() => setShowAddForm(false)}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-lg hover:bg-gray-300 transition-colors"
+                className="flex-1 bg-[#F3EEDF] text-[#6B6455] py-3 rounded-xl hover:bg-[#EADFC2] transition-colors font-semibold"
               >
                 Cancel
               </button>
@@ -253,32 +284,41 @@ export default function RemindersPage() {
         {/* Reminders List */}
         <div className="space-y-4">
           {reminders.length === 0 && !showAddForm && (
-            <div className="text-center py-12 text-gray-500">
-              <Bell className="w-16 h-16 mx-auto mb-4 opacity-30" />
-              <p>No reminders set yet</p>
+            <div className="text-center py-12 bg-white rounded-2xl border border-[#E8B84B]/30">
+              <Bell className="w-14 h-14 mx-auto mb-4 text-[#E8B84B] opacity-60" />
+              <p className="text-[#6B6455] font-medium">No reminders set yet</p>
+              <p className="text-sm text-[#9A927E] mt-1">
+                Tap “Add New Reminder” to create your first one.
+              </p>
             </div>
           )}
 
-          {reminders.map(reminder => (
+          {reminders.map((reminder) => (
             <div
               key={reminder.id}
-              className={`bg-white rounded-xl shadow-md p-6 transition-all ${
-                reminder.enabled ? 'border-l-4 border-purple-600' : 'opacity-60'
+              className={`bg-white rounded-2xl shadow-md shadow-[#1B2340]/5 border p-6 transition-all ${
+                reminder.enabled ? 'border-[#E8B84B]/50' : 'border-gray-200 opacity-60'
               }`}
             >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
-                  <Bell className={`w-6 h-6 ${reminder.enabled ? 'text-purple-600' : 'text-gray-400'}`} />
-                  <span className="text-2xl font-bold text-gray-800">
-                    {reminder.time}
+                  <Bell className={`w-6 h-6 ${reminder.enabled ? 'text-[#B98A2F]' : 'text-gray-400'}`} />
+                  <span className="text-2xl font-bold text-[#1B2340]">
+                    {formatTime(reminder.time)}
                   </span>
+                  {reminder.enabled && (
+                    <span className="flex items-center gap-1 text- font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                      <Check className="w-3 h-3" /> ON
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => toggleReminder(reminder)}
-                    className={`p-2 rounded-lg transition-colors ${
+                    title={reminder.enabled ? 'Turn off' : 'Turn on'}
+                    className={`p-2.5 rounded-xl transition-colors ${
                       reminder.enabled
-                        ? 'bg-purple-100 text-purple-600 hover:bg-purple-200'
+                        ? 'bg-[#F3E9CF] text-[#B98A2F] hover:bg-[#EADFC2]'
                         : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
                     }`}
                   >
@@ -286,7 +326,8 @@ export default function RemindersPage() {
                   </button>
                   <button
                     onClick={() => deleteReminder(reminder.id)}
-                    className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                    title="Delete reminder"
+                    className="p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors"
                   >
                     <Trash2 className="w-5 h-5" />
                   </button>
@@ -294,12 +335,12 @@ export default function RemindersPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                {DAYS.map(day => (
+                {DAYS.map((day) => (
                   <span
                     key={day.short}
-                    className={`px-3 py-1 rounded-full text-sm ${
+                    className={`px-3 py-1 rounded-full text-xs font-semibold ${
                       reminder.days.includes(day.short)
-                        ? 'bg-purple-100 text-purple-700'
+                        ? 'bg-[#1B2340] text-white'
                         : 'bg-gray-100 text-gray-400'
                     }`}
                   >
@@ -313,10 +354,7 @@ export default function RemindersPage() {
 
         {/* Back to Home */}
         <div className="mt-8 text-center">
-          <a
-            href="/"
-            className="inline-block text-purple-600 hover:text-purple-700 font-medium"
-          >
+          <a href="/" className="inline-block text-[#B98A2F] hover:text-[#1B2340] font-semibold text-sm">
             ← Back to Home
           </a>
         </div>
