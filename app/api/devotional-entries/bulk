@@ -2,55 +2,46 @@ import { NextRequest, NextResponse } from 'next/server';
 import { sql } from '@/lib/db'; // <-- keep YOUR existing db helper import.
 
 // POST /api/devotional-entries/bulk
-// Body: { plan_id: number, mode: 'skip' | 'replace', entries: [...] }
-// NEW: entries are keyed by devotional_number ("001", "002"...) — NOT scheduled_date.
+// Body: { mode: 'skip' | 'replace', entries: [...] }   — plan_id OPTIONAL.
+// If your app has no plans, entries are keyed by devotional_number alone.
 // Returns: { success, inserted, updated, skipped, errors[] }
 //
-// DB CHANGE NEEDED (run once in Neon):
+// NEON (run once):
 //   ALTER TABLE devotional_entries ADD COLUMN IF NOT EXISTS devotional_number TEXT;
-//   CREATE UNIQUE INDEX IF NOT EXISTS uq_devotional_entries_plan_number
-//     ON devotional_entries (plan_id, devotional_number);
-//   -- scheduled_date can stay for old rows, or be made nullable:
+//   CREATE UNIQUE INDEX IF NOT EXISTS uq_devotional_entries_number ON devotional_entries (devotional_number);
 //   ALTER TABLE devotional_entries ALTER COLUMN scheduled_date DROP NOT NULL;
-//
-// If your table still REQUIRES scheduled_date, the route below inserts NULL for it.
-// If it errors, make scheduled_date nullable first (see above).
 
 function isNumber(s: any) { return typeof s === 'string' && /^\d{3}$/.test(s); }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const planId = Number(body.plan_id);
     const mode = body.mode === 'replace' ? 'replace' : 'skip';
     const entries = Array.isArray(body.entries) ? body.entries : [];
-    if (!planId) return NextResponse.json({ success: false, error: 'plan_id is required.' }, { status: 400 });
+    const planId = body.plan_id ? Number(body.plan_id) : null;
     if (!entries.length) return NextResponse.json({ success: false, error: 'entries must be a non-empty array.' }, { status: 400 });
     if (entries.length > 400) return NextResponse.json({ success: false, error: 'Max 400 entries per import. Split into two files.' }, { status: 400 });
-
-    const plan = await sql`SELECT id FROM devotional_plans WHERE id = ${planId} LIMIT 1`;
-    if (!plan.length) return NextResponse.json({ success: false, error: `Plan ${planId} not found.` }, { status: 404 });
 
     let inserted = 0, updated = 0, skipped = 0;
     const errors: string[] = [];
     const seen = new Set<string>();
-
     for (let i = 0; i < entries.length; i++) {
       const row = entries[i] || {};
       const num = String(row.devotional_number || '').padStart(3, '0');
-      const label = `Entry ${i + 1} (#${num || 'no number'})`;
+      const label = `Entry ${i + 1} (#${num})`;
       if (!isNumber(num)) { errors.push(`${label}: bad devotional_number — use "001", "002", etc.`); continue; }
-      if (seen.has(num)) { errors.push(`${label}: duplicate devotional_number ${num} inside this file.`); continue; }
+      if (seen.has(num)) { errors.push(`${label}: duplicate number ${num} inside this file.`); continue; }
       seen.add(num);
       if (!String(row.title || '').trim()) { errors.push(`${label}: missing title.`); continue; }
       if (!String(row.devotional_text || '').trim()) { errors.push(`${label}: missing devotional_text.`); continue; }
       if (!String(row.scripture_book || '').trim()) { errors.push(`${label}: missing scripture_book.`); continue; }
       const chapter = Number(row.scripture_chapter), verse = Number(row.scripture_verse);
       if (Number.isNaN(chapter) || Number.isNaN(verse)) { errors.push(`${label}: bad scripture chapter/verse.`); continue; }
-
       const related = Array.isArray(row.related_scriptures) ? row.related_scriptures : [];
       try {
-        const existing = await sql`SELECT id FROM devotional_entries WHERE plan_id = ${planId} AND devotional_number = ${num} LIMIT 1`;
+        const existing = planId
+          ? await sql`SELECT id FROM devotional_entries WHERE plan_id = ${planId} AND devotional_number = ${num} LIMIT 1`
+          : await sql`SELECT id FROM devotional_entries WHERE devotional_number = ${num} LIMIT 1`;
         if (existing.length) {
           if (mode === 'skip') { skipped++; continue; }
           await sql`UPDATE devotional_entries SET title = ${String(row.title)}, devotional_text = ${String(row.devotional_text)}, devotional_text_lu = ${row.devotional_text_lu ? String(row.devotional_text_lu) : null}, scripture_book = ${String(row.scripture_book)}, scripture_chapter = ${chapter}, scripture_verse = ${verse}, scripture_quotation = ${row.scripture_quotation ? String(row.scripture_quotation) : null}, related_scriptures = ${JSON.stringify(related)}::jsonb, further_readings = ${row.further_readings ? String(row.further_readings) : null}, author = ${row.author ? String(row.author) : null}, cover_photo_url = ${row.cover_photo_url ? String(row.cover_photo_url) : null} WHERE id = ${existing[0].id}`;
