@@ -1,5 +1,5 @@
 'use client';
-
+import DevotionalAdminTab from '@/app/components/DevotionalAdminTab';
 import { useState, useEffect } from 'react';
 import AdminNavbar from '../components/AdminNavbar';
 import DevotionalManagement from '../components/DevotionalManagement';
