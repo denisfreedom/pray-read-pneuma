@@ -1,4 +1,4 @@
- 'use client';
+'use client';
 
 import { useEffect } from 'react';
 
@@ -32,7 +32,7 @@ export default function VisitorTracker() {
         await fetch('/api/visitor-stats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId }),
+          body: JSON.stringify({ sessionId, country: 'Unknown', city: 'Unknown' }),
           keepalive: true,
         });
       } catch {
