@@ -1,14 +1,19 @@
-// Service Worker for Pray-Read Bible App
-const CACHE_VERSION = 'v1.0.0';
+// Service Worker for Pray-Read Bible App — FIXED
+// v2: API calls are NEVER cached. App shell cached for offline.
+// Bible content offline comes from IndexedDB (offlineStorage.ts),
+// NOT from this cache.
+const CACHE_VERSION = 'v2.0.0';
 const STATIC_CACHE = `static-${CACHE_VERSION}`;
 const DYNAMIC_CACHE = `dynamic-${CACHE_VERSION}`;
-const API_CACHE = `api-${CACHE_VERSION}`;
+// NOTE: API_CACHE removed on purpose — API responses must never be cached.
 
-// Critical assets to pre-cache on install
+// Critical assets to pre-cache on install.
+// /manifest.json is NOT listed: it currently 404s, and one missing file
+// makes cache.addAll() fail and saves NOTHING. Add it back once the
+// file exists in public/.
 const STATIC_ASSETS = [
   '/',
   '/offline',
-  '/manifest.json',
   '/icon-72x72.png',
   '/icon-96x96.png',
   '/icon-128x128.png',
@@ -19,36 +24,34 @@ const STATIC_ASSETS = [
   '/icon-512x512.png',
 ];
 
-// API routes to cache
-const API_ROUTES = [
-  '/api/bible-books',
-  '/api/bible-verses',
-  '/api/bible-content',
-  '/api/verse-of-the-day',
-];
-
 // Install event - pre-cache critical assets
 self.addEventListener('install', (event) => {
   console.log('[SW] Installing Service Worker...');
   event.waitUntil(
-    caches.open(STATIC_CACHE).then((cache) => {
+    caches.open(STATIC_CACHE).then(async (cache) => {
       console.log('[SW] Pre-caching static assets');
-      return cache.addAll(STATIC_ASSETS.map(url => new Request(url, { cache: 'reload' })));
-    }).catch(err => {
-      console.error('[SW] Pre-cache failed:', err);
+      // Add one by one: one missing file must NOT kill the whole pre-cache.
+      for (const url of STATIC_ASSETS) {
+        try {
+          await cache.add(new Request(url, { cache: 'reload' }));
+        } catch (err) {
+          console.warn('[SW] Skipped missing asset:', url);
+        }
+      }
     })
   );
   self.skipWaiting();
 });
 
-// Activate event - clean up old caches
+// Activate event - clean up old caches (v1 caches get deleted here,
+// because their names no longer match)
 self.addEventListener('activate', (event) => {
   console.log('[SW] Activating Service Worker...');
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== STATIC_CACHE && cacheName !== DYNAMIC_CACHE && cacheName !== API_CACHE) {
+          if (cacheName !== STATIC_CACHE && cacheName !== DYNAMIC_CACHE) {
             console.log('[SW] Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
@@ -64,31 +67,23 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Skip non-GET requests
-  if (request.method !== 'GET') {
-    return;
-  }
-
   // Skip external URLs
   if (url.origin !== self.location.origin) {
     return;
   }
 
-  // Handle API requests with Network First strategy
+  // ── FIX 1: NEVER intercept API calls ──────────────────────────────
+  // All /api/ requests (GET and POST) go straight to the network.
+  // This fixes the visitor counter (no stale cached 0s) and stops the
+  // service worker swallowing POST heartbeats. When offline, the app
+  // code reads Bible content from IndexedDB instead — the service
+  // worker does not need to cache API answers for that.
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirstStrategy(request, API_CACHE));
     return;
   }
 
-  // Handle Bible content with Cache First strategy (for offline reading)
-  if (
-    url.pathname.includes('/bible-reader/') ||
-    url.pathname.includes('/devotional-plans') ||
-    url.pathname.includes('/verse-songs') ||
-    url.pathname.includes('/theological-insights') ||
-    url.pathname.includes('/historical-context')
-  ) {
-    event.respondWith(cacheFirstStrategy(request, DYNAMIC_CACHE));
+  // Skip non-GET requests (POST/PUT/DELETE pass through untouched)
+  if (request.method !== 'GET') {
     return;
   }
 
@@ -110,6 +105,9 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Handle navigation requests with Network First strategy (fallback to offline page)
+  // NOTE: Bible reader pages now come through HERE (network-first),
+  // not the old Cache-First block — so they never go stale, and when
+  // offline they fall back to the cached page or /offline.
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
@@ -139,17 +137,17 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(networkFirstStrategy(request, DYNAMIC_CACHE));
 });
 
-// Network First Strategy - for API requests and dynamic content
+// Network First Strategy - for dynamic content (NOT for API — API is never intercepted)
 async function networkFirstStrategy(request, cacheName) {
   try {
     const networkResponse = await fetch(request);
-    
+
     // Cache successful responses
     if (networkResponse.ok) {
       const cache = await caches.open(cacheName);
       cache.put(request, networkResponse.clone());
     }
-    
+
     return networkResponse;
   } catch (error) {
     // Network failed, try cache
@@ -158,16 +156,16 @@ async function networkFirstStrategy(request, cacheName) {
       console.log('[SW] Serving from cache (offline):', request.url);
       return cachedResponse;
     }
-    
+
     // No cache available
     throw error;
   }
 }
 
-// Cache First Strategy - for static assets and Bible content
+// Cache First Strategy - for static assets only
 async function cacheFirstStrategy(request, cacheName) {
   const cachedResponse = await caches.match(request);
-  
+
   if (cachedResponse) {
     // Update cache in background
     fetch(request)
@@ -181,20 +179,20 @@ async function cacheFirstStrategy(request, cacheName) {
       .catch(() => {
         // Network error, but we have cache
       });
-    
+
     return cachedResponse;
   }
-  
+
   // Not in cache, fetch from network
   try {
     const networkResponse = await fetch(request);
-    
+
     // Cache the response
     if (networkResponse.ok) {
       const cache = await caches.open(cacheName);
       cache.put(request, networkResponse.clone());
     }
-    
+
     return networkResponse;
   } catch (error) {
     // Network failed and no cache
@@ -205,7 +203,7 @@ async function cacheFirstStrategy(request, cacheName) {
 // Background sync for offline actions (if needed)
 self.addEventListener('sync', (event) => {
   console.log('[SW] Background sync:', event.tag);
-  
+
   if (event.tag === 'sync-bible-data') {
     event.waitUntil(syncBibleData());
   }
@@ -226,7 +224,7 @@ self.addEventListener('push', (event) => {
     badge: '/icon-72x72.png',
     data: data.url || '/',
   };
-  
+
   event.waitUntil(
     self.registration.showNotification(title, options)
   );
