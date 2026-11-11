@@ -12,7 +12,18 @@ import InstallPrompt from "@/app/components/InstallPrompt";
 import SplashScreen from "@/app/components/SplashScreen";
 import type { Metadata, Viewport } from 'next';
 import Script from 'next/script';
+import VisitorTracker from '@/components/VisitorTracker';
 
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        <VisitorTracker />
+        {children}
+      </body>
+    </html>
+  );
+}
 export const metadata: Metadata = {
   title: 'Pray-Read Bible',
   description: 'A Digital Sanctuary — A living Altar where the Word of God ceases to be mere text and becomes Spirit and Life in the daily experience of every believer.',
