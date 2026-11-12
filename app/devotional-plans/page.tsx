@@ -52,10 +52,18 @@ function parseRefs(text: string): string[] {
   if (out.length === 0) { text.split(/[;,]/).map(s => s.trim()).filter(Boolean).forEach(s => out.push(s)); }
   return out;
 }
+// FIXED: Bible reader is /bible-reader/{bookNumber}/{chapter}#verse-{verse}
+// OLD route /bible?book=... does NOT exist -> 404, do NOT use it. Book name -> number 1-66.
+const BIBLE_BOOK_NUMBERS: Record<string, number> = {};
+BOOKS.forEach((b, i) => { BIBLE_BOOK_NUMBERS[b.toLowerCase()] = i + 1; });
+BIBLE_BOOK_NUMBERS['psalm'] = 19; BIBLE_BOOK_NUMBERS['song of solomon'] = 22; BIBLE_BOOK_NUMBERS['song of songs'] = 22; BIBLE_BOOK_NUMBERS['judges'] = 7;
 function refToBibleUrl(ref: string) {
   const m = ref.match(/^(.+?)\s+(\d+)(?::(\d+))?/);
-  if (!m) return '/bible';
-  return `/bible?book=${encodeURIComponent(m[1])}&chapter=${m[2]}${m[3] ? `&verse=${m[3]}` : ''}`;
+  if (!m) return '/bible-reader/1/1';
+  const name = m[1].trim().toLowerCase().replace(/\s+/g, ' ');
+  const num = BIBLE_BOOK_NUMBERS[name] || 1;
+  const ch = m[2]; const vs = m[3];
+  return `/bible-reader/${num}/${ch}${vs ? `#verse-${vs}` : ''}`;
 }
 function stripHtml(html: string) { return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
 function excerpt(e: Entry) {
@@ -161,7 +169,14 @@ export default function DevotionalPlansPage() {
   }
 
   const furtherRefs = open ? parseRefs(stripHtml(String(open.further_readings || ''))) : [];
-  const relatedRefs = open ? (Array.isArray(open.related_scriptures) ? open.related_scriptures.map(String) : parseRefs(stripHtml(String(open.related_scriptures || '')))) : [];
+  function refToString(r: any): string {
+    if (!r) return '';
+    if (typeof r === 'string') return r;
+    // DB sometimes stores {reference:'John 3:16', text:'...'} or {verse:'...', book:'...'}
+    if (typeof r === 'object') return String(r.reference || r.verse_ref || r.verse || r.text || '').split('—')[0].trim();
+    return String(r);
+  }
+  const relatedRefs = open ? (Array.isArray(open.related_scriptures) ? open.related_scriptures.map(refToString).flatMap((s: string) => parseRefs(s)).filter(Boolean) : parseRefs(stripHtml(String(open.related_scriptures || '')))) : [];
   const allRefs = [...new Set([...furtherRefs, ...relatedRefs])];
 
   return (
@@ -267,7 +282,7 @@ export default function DevotionalPlansPage() {
                 <div style={{ marginTop: 20, background: '#fff', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px' }}>
                   <div style={{ fontWeight: 800, fontSize: 13, color: '#92400e', marginBottom: 8 }}>📖 FURTHER READINGS — TAP A VERSE TO READ IT</div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {allRefs.map((ref: string) => (
+                    {allRefs.filter((r: any) => typeof r === 'string' && r && r !== '[object Object]').map((ref: string) => (
                       <button key={ref} onClick={() => openVerse(ref)} style={{ cursor: 'pointer', border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', borderRadius: 999, padding: '7px 13px', fontWeight: 700 }}>{ref} →</button>
                     ))}
                   </div>
