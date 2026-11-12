@@ -24,12 +24,16 @@ export default function DevotionalManagement({ books }: { books: Book[] }) {
   const [bulkText, setBulkText] = useState('');
   const [bulkMode, setBulkMode] = useState<'skip' | 'replace'>('skip');
   const [bulkPreview, setBulkPreview] = useState<any[]>([]);
+  // --- Pagination: 30 per page, most recent first. Page 1 = newest 30, Next = older.
+  const [page, setPage] = useState(1);
+  const [sortMode, setSortMode] = useState<'recent' | 'number'>('recent');
+  const PAGE_SIZE = 30;
 
   useEffect(() => { try { setDefaultImage(localStorage.getItem('pr_default_devotional_image') || ''); } catch {} fetchList(); }, []);
   function show(m: string) { setMsg(m); setTimeout(() => setMsg(''), 6000); }
   async function fetchList() {
     setLoading(true);
-    try { const r = await fetch('/api/devotional-entries'); const j = await r.json().catch(() => []); setList(Array.isArray(j) ? j : []); } catch {}
+    try { const r = await fetch('/api/devotional-entries'); const j = await r.json().catch(() => []); setList(Array.isArray(j) ? j : []); setPage(1); } catch {}
     setLoading(false);
   }
   function saveDefault(url: string) { setDefaultImage(url); try { localStorage.setItem('pr_default_devotional_image', url); } catch {} }
@@ -185,14 +189,50 @@ export default function DevotionalManagement({ books }: { books: Book[] }) {
         </div>
       )}
 
+      {/* RECENTLY UPLOADED — 30 per page, Next = older */}
       <div style={{ background: '#fff', borderRadius: 14, padding: 20, marginTop: 16 }}>
-        <h3>Saved Devotionals ({list.length})</h3>
-        {loading ? <p>Loading…</p> : list.length === 0 ? <p>No devotionals yet.</p> : list.map((d: any) => (
-          <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, border: '1px solid #eee', borderRadius: 12, padding: 12, marginTop: 8 }}>
-            <div><strong>D-{String(d.devotional_number).padStart(3, '0')}</strong> — {d.title} <span style={{ color: '#6b7280' }}>· {d.scripture_book} {d.scripture_chapter}:{d.scripture_verse} {d.cover_photo_url ? '🖼️' : '— no cover (uses Default)'}</span></div>
-            <div style={{ display: 'flex', gap: 8 }}><button onClick={() => startEdit(d)} style={{ cursor: 'pointer' }}>✏️ Edit</button><button onClick={() => del(d.id)} style={{ cursor: 'pointer', color: '#dc2626' }}>🗑️ Delete</button></div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <h3 style={{ margin: 0 }}>📚 Recently Uploaded Devotionals ({list.length})</h3>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => { setSortMode('recent'); setPage(1); }} style={{ cursor: 'pointer', padding: '6px 12px', borderRadius: 999, border: '1px solid #7c3aed', background: sortMode === 'recent' ? '#7c3aed' : '#fff', color: sortMode === 'recent' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🕒 Most Recent First</button>
+            <button onClick={() => { setSortMode('number'); setPage(1); }} style={{ cursor: 'pointer', padding: '6px 12px', borderRadius: 999, border: '1px solid #7c3aed', background: sortMode === 'number' ? '#7c3aed' : '#fff', color: sortMode === 'number' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🔢 D-001 →</button>
           </div>
-        ))}
+        </div>
+        {(() => {
+          const sorted = [...list].sort((a: any, b: any) => {
+            if (sortMode === 'number') return (parseInt(String(a.devotional_number) || '0', 10) || 0) - (parseInt(String(b.devotional_number) || '0', 10) || 0);
+            // Recent first: by created_at if present, else by id, else by devotional_number desc
+            const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (da && db && da !== db) return db - da;
+            if ((a.id ?? 0) !== (b.id ?? 0)) return (b.id ?? 0) - (a.id ?? 0);
+            return (parseInt(String(b.devotional_number) || '0', 10) || 0) - (parseInt(String(a.devotional_number) || '0', 10) || 0);
+          });
+          const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+          const cur = Math.min(page, totalPages);
+          const start = (cur - 1) * PAGE_SIZE;
+          const items = sorted.slice(start, start + PAGE_SIZE);
+          const end = Math.min(start + items.length, sorted.length);
+          return (<>
+            <p style={{ color: '#6b7280', margin: '8px 0 0' }}>{sorted.length === 0 ? '' : `Showing ${start + 1}–${end} of ${sorted.length} · Page ${cur} of ${totalPages}`}{sortMode === 'recent' ? ' · Newest first' : ' · D-001 first'}</p>
+            {loading ? <p>Loading…</p> : sorted.length === 0 ? <p>No devotionals yet.</p> : items.map((d: any) => (
+              <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, border: '1px solid #eee', borderRadius: 12, padding: 12, marginTop: 8, alignItems: 'center' }}>
+                <div style={{ minWidth: 0 }}><strong>D-{String(d.devotional_number).padStart(3, '0')}</strong> — {d.title} <span style={{ color: '#6b7280' }}>· {d.scripture_book} {d.scripture_chapter}:{d.scripture_verse} {d.cover_photo_url ? '🖼️' : '— no cover (uses Default)'}</span></div>
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}><button onClick={() => startEdit(d)} style={{ cursor: 'pointer' }}>✏️ Edit</button><button onClick={() => del(d.id)} style={{ cursor: 'pointer', color: '#dc2626' }}>🗑️ Delete</button></div>
+              </div>
+            ))}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={cur <= 1} style={{ cursor: cur <= 1 ? 'not-allowed' : 'pointer', padding: '9px 16px', borderRadius: 999, border: '1px solid #e5e7eb', background: '#fff', fontWeight: 700, opacity: cur <= 1 ? 0.5 : 1 }}>← Prev</button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).filter(n => n === 1 || n === totalPages || Math.abs(n - cur) <= 1).map((n, i, arr) => (
+                  <span key={n} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>{i > 0 && arr[i - 1] !== n - 1 && <span style={{ color: '#9ca3af' }}>…</span>}<button onClick={() => setPage(n)} style={{ cursor: 'pointer', padding: '8px 13px', borderRadius: 999, border: n === cur ? '1px solid #7c3aed' : '1px solid #e5e7eb', background: n === cur ? '#7c3aed' : '#fff', color: n === cur ? '#fff' : '#111', fontWeight: 700 }}>{n}</button></span>
+                ))}
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={cur >= totalPages} style={{ cursor: cur >= totalPages ? 'not-allowed' : 'pointer', padding: '9px 16px', borderRadius: 999, border: '1px solid #7c3aed', background: '#7c3aed', color: '#fff', fontWeight: 700, opacity: cur >= totalPages ? 0.5 : 1 }}>Next → Older</button>
+              </div>
+            )}
+            <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: 13, marginTop: 8 }}>Tap ✏️ Edit on any row — it loads into the form above.</p>
+          </>);
+        })()}
       </div>
     </div>
   );
