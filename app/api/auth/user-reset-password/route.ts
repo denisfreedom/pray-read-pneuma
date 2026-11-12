@@ -1,50 +1,43 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { neon } from '@neondatabase/serverless';
 
-const sql = neon(process.env.DATABASE_URL!);
-
+// POST /api/auth/user-reset-password — FIXED
+// Body: { email, token, newPassword }  (page also sends `password` in some versions — accept both)
+// Validates token + expiry, updates BOTH password and password_hash (so the fixed login finds it),
+// then clears the token so the link cannot be reused.
 export async function POST(request: NextRequest) {
   try {
-    const { email, token, newPassword } = await request.json();
-
-    if (!email || !token || !newPassword) {
-      return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
+    if (!process.env.DATABASE_URL) return NextResponse.json({ success: false, message: 'Database is not configured (DATABASE_URL missing).', error: 'Database is not configured.' }, { status: 500 });
+    const sql = neon(process.env.DATABASE_URL);
+    let body: any = {};
+    try { body = await request.json(); } catch { return NextResponse.json({ success: false, message: 'Invalid JSON body.', error: 'Invalid JSON body.' }, { status: 400 }); }
+    const email = String(body.email || '').trim().toLowerCase();
+    const token = String(body.token || '').trim();
+    const newPassword = String(body.newPassword || body.password || '');
+    if (!email || !token) return NextResponse.json({ success: false, message: 'Invalid reset link. Please request a new one.', error: 'Invalid reset link. Please request a new one.' }, { status: 400 });
+    if (!newPassword || newPassword.length < 6) return NextResponse.json({ success: false, message: 'Password must be at least 6 characters.', error: 'Password must be at least 6 characters.' }, { status: 400 });
+    try {
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_expires TIMESTAMPTZ`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT`;
+      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`;
+    } catch (e: any) { return NextResponse.json({ success: false, message: 'Could not read users table: ' + (e.message || ''), error: 'Could not read users table.' }, { status: 500 }); }
+    let rows: any[] = [];
+    try { rows = await sql`SELECT id, reset_token, reset_token_expires FROM users WHERE LOWER(TRIM(email)) = ${email} LIMIT 1`; }
+    catch (e: any) { return NextResponse.json({ success: false, message: 'Database lookup failed: ' + (e.message || ''), error: 'Database lookup failed.' }, { status: 500 }); }
+    if (!rows.length) return NextResponse.json({ success: false, message: 'Invalid reset link. Please request a new one.', error: 'Invalid reset link. Please request a new one.' }, { status: 400 });
+    const user = rows[0];
+    if (!user.reset_token || user.reset_token !== token) {
+      return NextResponse.json({ success: false, message: 'This reset link is invalid or has already been used. Please request a new one.', error: 'This reset link is invalid or has already been used. Please request a new one.' }, { status: 400 });
     }
-
-    // Find user
-    const users = await sql`
-      SELECT id FROM users WHERE email = ${email}
-    `;
-
-    if (users.length === 0) {
-      return NextResponse.json({ error: 'Invalid reset link' }, { status: 404 });
+    if (user.reset_token_expires && new Date(user.reset_token_expires).getTime() < Date.now()) {
+      return NextResponse.json({ success: false, message: 'This reset link has expired. Please request a new one.', error: 'This reset link has expired. Please request a new one.' }, { status: 400 });
     }
-
-    const userId = users[0].id;
-
-    // Verify reset token
-    const tokens = await sql`
-      SELECT * FROM user_password_reset_tokens 
-      WHERE user_id = ${userId} AND reset_code = ${token} AND expires_at > NOW()
-    `;
-
-    if (tokens.length === 0) {
-      return NextResponse.json({ error: 'Invalid or expired reset code' }, { status: 400 });
-    }
-
-    // Update password (in production, hash the password!)
-    await sql`
-      UPDATE users SET password = ${newPassword} WHERE id = ${userId}
-    `;
-
-    // Delete used reset token
-    await sql`
-      DELETE FROM user_password_reset_tokens WHERE user_id = ${userId}
-    `;
-
-    return NextResponse.json({ message: 'Password reset successful! Redirecting to login...' });
-  } catch (error) {
-    console.error('Reset password error:', error);
-    return NextResponse.json({ error: 'Failed to reset password' }, { status: 500 });
+    // Update BOTH columns (same as signup) + clear token so link cannot be reused
+    await sql`UPDATE users SET password = ${newPassword}, password_hash = ${newPassword}, reset_token = NULL, reset_token_expires = NULL WHERE id = ${user.id}`;
+    return NextResponse.json({ success: true, message: 'Password reset successful! Redirecting to login...' });
+  } catch (e: any) {
+    console.error('Reset error:', e);
+    return NextResponse.json({ success: false, message: 'Reset failed: ' + (e.message || 'server error'), error: 'Reset failed.' }, { status: 500 });
   }
 }
