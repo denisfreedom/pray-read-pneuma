@@ -12,7 +12,7 @@ import LiveVisitorsWidget from './LiveVisitorsWidget';
 // 5) Theme: navy + ivory + gold, matching the rest of the app (not pure black).
 // 6) Socials: Facebook, YouTube, X, WhatsApp, Telegram, Instagram — all real links.
 
-const LOGO_LOCAL = '/assets/logo.png';
+const LOGO_LOCAL = '/assets/PrayRead-logo.png'; // public/assets/PrayRead-logo.png -> URL is /assets/PrayRead-logo.png
 const LOGO_FALLBACK = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
 
 // ── ONE SOURCE OF TRUTH FOR ALL LINKS ──────────────────────────────
@@ -91,7 +91,7 @@ export default function AppFooter() {
           <div className="lg:col-span-1 space-y-5">
             <Link href="/" className="inline-flex items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={LOGO_LOCAL} alt="Pray-Read Bible" className="h-12 w-auto" onError={(e) => { (e.currentTarget as HTMLImageElement).src = LOGO_FALLBACK; }} />
+              <img src={LOGO_LOCAL} alt="Pray-Read Bible" width={180} height={48} className="h-12 w-auto max-w-[200px] object-contain" onError={(e) => { const img = e.currentTarget as HTMLImageElement; if (img.src !== LOGO_FALLBACK) img.src = LOGO_FALLBACK; }} />
             </Link>
             <p className="text-white/60 text-sm leading-relaxed max-w-xs">The vision of Pray-Read Bible is to recover believers from merely studying Scripture with the mind to encountering Christ as living Word in their spirit.</p>
             <div className="flex items-center gap-2 flex-wrap">
