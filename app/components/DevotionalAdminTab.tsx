@@ -11,10 +11,22 @@ export default function DevotionalAdminTab() {
   const [defaultImageUrl, setDefaultImageUrl] = useState('');
   const [form, setForm] = useState({ devotional_number: '', title: '', scripture_book: '', scripture_chapter: '', scripture_verse: '', scripture_quotation: '', devotional_text: '', devotional_text_lu: '', further_readings: '', related_scriptures: '', cover_photo_url: '', author: 'Pr. Denis' });
   const [bulkJson, setBulkJson] = useState('');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  // --- SAVED LIST (was missing entirely) ---
+  const [saved, setSaved] = useState<any[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [sortMode, setSortMode] = useState<'recent' | 'number'>('recent');
+  const PAGE_SIZE = 30;
+  async function fetchSaved() {
+    setListLoading(true);
+    try { const r = await fetch('/api/devotional-entries'); const j = await r.json().catch(() => []); const arr = Array.isArray(j) ? j : (Array.isArray((j as any).entries) ? (j as any).entries : (Array.isArray((j as any).data) ? (j as any).data : (Array.isArray((j as any).devotionals) ? (j as any).devotionals : []))); setSaved(arr); setPage(1); } catch (e: any) { setMsg('❌ Could not load saved list: ' + (e.message || 'fetch failed')); }
+    setListLoading(false);
+  }
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { try { setDefaultImageUrl(localStorage.getItem('pr_default_devotional_image') || ''); } catch {} }, []);
+  useEffect(() => { try { setDefaultImageUrl(localStorage.getItem('pr_default_devotional_image') || ''); } catch {} fetchSaved(); }, []);
   function saveDefault(url: string) {
     setDefaultImageUrl(url);
     try { localStorage.setItem('pr_default_devotional_image', url); } catch {}
@@ -37,29 +49,83 @@ export default function DevotionalAdminTab() {
     setBusy(true); setMsg('');
     try {
       const payload = { ...form, devotional_number: parseInt(form.devotional_number, 10), scripture_chapter: parseInt(form.scripture_chapter, 10) || 0, scripture_verse: parseInt(form.scripture_verse, 10) || 0, devotional_text: formatHeadings(form.devotional_text), default_image_url: defaultImageUrl, cover_photo_url: form.cover_photo_url || defaultImageUrl };
-      const r = await fetch('/api/devotional-entries', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const r = await fetch('/api/devotional-entries', { method: editingId ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(editingId ? { ...payload, id: editingId } : payload) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Save failed');
       setMsg('✅ Saved ' + (payload.devotional_number ? 'D-' + String(payload.devotional_number).padStart(3, '0') : 'devotional') + '. It will show with the default image unless you gave it its own cover.');
+      setEditingId(null); fetchSaved();
     } catch (e: any) { setMsg('❌ ' + e.message); }
     setBusy(false);
   }
 
+  // --- BULK V5: accepts pasted text OR uploaded file, accepts array / {entries} / single object ---
+  function parseBulkText(text: string): any[] {
+    const t = String(text || '').trim();
+    if (!t) throw new Error('Bulk box is empty. Choose a JSON file or paste a devotional array.');
+    let parsed: any;
+    try { parsed = JSON.parse(t); } catch { throw new Error('That is not valid JSON. If you pasted Related Scriptures (book/chapter/verse/text), that is not a devotional — paste the full devotional array starting with [{ "devotional_number": ... }].'); }
+    let arr: any[] = [];
+    if (Array.isArray(parsed)) arr = parsed;
+    else if (Array.isArray(parsed.entries)) arr = parsed.entries;
+    else if (Array.isArray(parsed.devotionals)) arr = parsed.devotionals;
+    else if (parsed && typeof parsed === 'object' && parsed.devotional_number) arr = [parsed];
+    else throw new Error('JSON parsed, but no devotional array found. It must be an array like [{ "devotional_number": 257, "title": "...", ... }] or { "entries": [...] }. What you pasted looks like: ' + t.slice(0, 80));
+    // Filter out stray Related-Scripture fragments (book/chapter/verse/text with no devotional_number/title)
+    const bad = arr.filter((e: any) => !e || (!e.devotional_number && !e.title));
+    if (bad.length && arr.length === bad.length) throw new Error('This JSON has only book/chapter/verse/text fragments (Related Scriptures), not devotionals. Paste the full devotional file — it must have devotional_number + title per entry.');
+    if (bad.length) arr = arr.filter((e: any) => e && (e.devotional_number || e.title));
+    return arr;
+  }
+  async function handleBulkFile(file: File | null) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      setBulkJson(text);
+      const arr = parseBulkText(text);
+      setMsg(`📄 Loaded ${file.name} — ${arr.length} devotional(s) ready. Tap Import JSON.`);
+    } catch (e: any) { setMsg('❌ ' + e.message); }
+  }
   async function bulkImport() {
     setBusy(true); setMsg('');
     try {
-      let arr = JSON.parse(bulkJson);
-      if (!Array.isArray(arr)) arr = [arr];
+      let arr = parseBulkText(bulkJson);
       // Fill default_image_url into every entry that has no cover
       arr = arr.map((e: any) => ({ ...e, default_image_url: e.default_image_url || defaultImageUrl, cover_photo_url: e.cover_photo_url || e.default_image_url || defaultImageUrl, devotional_text: formatHeadings(e.devotional_text || '') }));
-      const r = await fetch('/api/devotional-entries/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(arr) });
+      // FIX: API expects { mode, entries } — NOT a raw array. Raw array => "entries must be a non-empty array."
+      const r = await fetch('/api/devotional-entries/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'skip', entries: arr }) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || 'Bulk import failed');
       setMsg('✅ Bulk import done: ' + JSON.stringify(j));
+      setEditingId(null); setBulkJson(''); fetchSaved();
     } catch (e: any) { setMsg('❌ ' + e.message); }
     setBusy(false);
   }
 
+
+  function startEdit(d: any) {
+    setForm({
+      devotional_number: String(d.devotional_number ?? '').padStart(3, '0'),
+      title: d.title || '',
+      scripture_book: d.scripture_book || '',
+      scripture_chapter: String(d.scripture_chapter ?? ''),
+      scripture_verse: String(d.scripture_verse ?? ''),
+      scripture_quotation: d.scripture_quotation || '',
+      devotional_text: d.devotional_text || '',
+      devotional_text_lu: d.devotional_text_lu || '',
+      further_readings: d.further_readings || '',
+      related_scriptures: Array.isArray(d.related_scriptures) ? d.related_scriptures.join('\n') : String(d.related_scriptures || ''),
+      cover_photo_url: d.cover_photo_url || '',
+      author: d.author || 'Pr. Denis',
+    });
+    setEditingId(d.id ?? null);
+    setTab('manual');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setMsg('✏️ Editing D-' + String(d.devotional_number).padStart(3, '0') + ' — change anything, then Save Devotional.');
+  }
+  async function deleteSaved(id: number) {
+    if (!confirm('Delete this devotional?')) return;
+    try { const r = await fetch(`/api/devotional-entries?id=${id}`, { method: 'DELETE' }); if (!r.ok) throw new Error('Delete failed'); setMsg('✅ Deleted'); fetchSaved(); } catch (e: any) { setMsg('❌ ' + e.message); }
+  }
   const field = (label: string, key: string, ph = '', ta = false) => (
     <label style={{ display: 'block', marginBottom: 12 }}>{label}
       {ta
@@ -105,15 +171,62 @@ export default function DevotionalAdminTab() {
             <input value={form.cover_photo_url} onChange={e => set('cover_photo_url', e.target.value)} placeholder="https://…/this-devotional.jpg  — leave empty = use Default Image" style={{ width: '100%', padding: 10, borderRadius: 10, border: '1px solid #e5e7eb', marginTop: 4 }} />
           </label>
           {(form.cover_photo_url || defaultImageUrl) && <img src={form.cover_photo_url || defaultImageUrl} alt="Cover preview" style={{ width: '100%', maxWidth: 420, height: 180, objectFit: 'cover', borderRadius: 12, marginBottom: 12 }} />}
-          <button onClick={saveManual} disabled={busy} style={{ padding: '12px 22px', borderRadius: 12, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Saving…' : 'Save Devotional'}</button>
+          <button onClick={saveManual} disabled={busy} style={{ padding: '12px 22px', borderRadius: 12, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Saving…' : editingId ? '✏️ Update Devotional' : 'Save Devotional'}</button>
         </div>
       ) : (
         <div>
-          <p style={{ color: '#6b7280' }}>Paste JSON array. Each entry may have <code>cover_photo_url</code> and/or <code>default_image_url</code>. Empty cover = Default Image above is filled in automatically on import.</p>
-          <textarea value={bulkJson} onChange={e => setBulkJson(e.target.value)} rows={14} placeholder='[{"devotional_number":257,"title":"...","scripture_book":"1 Peter",...}]' style={{ width: '100%', padding: 12, borderRadius: 12, border: '1px solid #e5e7eb', fontFamily: 'monospace' }} />
+          <p style={{ color: '#6b7280' }}>Choose a JSON file <strong>or</strong> paste JSON below. Each entry may have <code>cover_photo_url</code> and/or <code>default_image_url</code>. Empty cover = Default Image above is filled in automatically on import.</p>
+          <label style={{ display: 'inline-block', cursor: 'pointer', padding: '11px 18px', borderRadius: 10, background: '#111827', color: '#fff', fontWeight: 800, marginBottom: 10 }}>📁 Choose JSON File to Upload<input type="file" accept=".json,application/json" onChange={e => handleBulkFile(e.target.files?.[0] || null)} style={{ display: 'none' }} /></label>
+          <span style={{ color: '#6b7280', marginLeft: 10, fontSize: 13 }}>No pasting needed — pick the .json file from your computer.</span>
+          <textarea value={bulkJson} onChange={e => setBulkJson(e.target.value)} rows={14} placeholder='[{"devotional_number":257,"title":"...","scripture_book":"1 Peter",...}] — or use Choose JSON File above' style={{ width: '100%', padding: 12, borderRadius: 12, border: '1px solid #e5e7eb', fontFamily: 'monospace', marginTop: 6 }} />
           <button onClick={bulkImport} disabled={busy} style={{ marginTop: 12, padding: '12px 22px', borderRadius: 12, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>{busy ? 'Importing…' : 'Import JSON'}</button>
         </div>
       )}
+      {/* SAVED / ALREADY UPLOADED — 30 per page, Next = older */}
+      <div style={{ marginTop: 22, borderTop: '1px solid #eee', paddingTop: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+          <h3 style={{ margin: 0 }}>📚 Already Uploaded Devotionals ({saved.length})</h3>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => { setSortMode('recent'); setPage(1); }} style={{ cursor: 'pointer', padding: '6px 12px', borderRadius: 999, border: '1px solid #7c3aed', background: sortMode === 'recent' ? '#7c3aed' : '#fff', color: sortMode === 'recent' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🕒 Most Recent First</button>
+            <button onClick={() => { setSortMode('number'); setPage(1); }} style={{ cursor: 'pointer', padding: '6px 12px', borderRadius: 999, border: '1px solid #7c3aed', background: sortMode === 'number' ? '#7c3aed' : '#fff', color: sortMode === 'number' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🔢 D-001 →</button>
+            <button onClick={fetchSaved} style={{ cursor: 'pointer', padding: '6px 12px', borderRadius: 999, border: '1px solid #e5e7eb', background: '#fff' }}>↻ Refresh</button>
+          </div>
+        </div>
+        {(() => {
+          const sorted = [...saved].sort((a: any, b: any) => {
+            if (sortMode === 'number') return (parseInt(String(a.devotional_number) || '0', 10) || 0) - (parseInt(String(b.devotional_number) || '0', 10) || 0);
+            const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (da && db && da !== db) return db - da;
+            if ((a.id ?? 0) !== (b.id ?? 0)) return (b.id ?? 0) - (a.id ?? 0);
+            return (parseInt(String(b.devotional_number) || '0', 10) || 0) - (parseInt(String(a.devotional_number) || '0', 10) || 0);
+          });
+          const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+          const cur = Math.min(page, totalPages);
+          const start = (cur - 1) * PAGE_SIZE;
+          const items = sorted.slice(start, start + PAGE_SIZE);
+          const end = Math.min(start + items.length, sorted.length);
+          return (<>
+            <p style={{ color: '#6b7280', margin: '8px 0 0' }}>{sorted.length === 0 ? '' : `Showing ${start + 1}–${end} of ${sorted.length} · Page ${cur} of ${totalPages}`}{sortMode === 'recent' ? ' · Newest first' : ' · D-001 first'}</p>
+            {listLoading ? <p>Loading…</p> : sorted.length === 0 ? <p>No devotionals saved yet. Upload one above.</p> : items.map((d: any) => (
+              <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, border: '1px solid #eee', borderRadius: 12, padding: 12, marginTop: 8, alignItems: 'center' }}>
+                <div style={{ minWidth: 0 }}><strong>D-{String(d.devotional_number).padStart(3, '0')}</strong> — {d.title} <span style={{ color: '#6b7280' }}>· {d.scripture_book} {d.scripture_chapter}:{d.scripture_verse} {d.cover_photo_url ? '🖼️' : '— no cover (uses Default)'}</span></div>
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}><button onClick={() => startEdit(d)} style={{ cursor: 'pointer' }}>✏️ Edit</button><button onClick={() => deleteSaved(d.id)} style={{ cursor: 'pointer', color: '#dc2626' }}>🗑️ Delete</button></div>
+              </div>
+            ))}
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={cur <= 1} style={{ cursor: cur <= 1 ? 'not-allowed' : 'pointer', padding: '9px 16px', borderRadius: 999, border: '1px solid #e5e7eb', background: '#fff', fontWeight: 700, opacity: cur <= 1 ? 0.5 : 1 }}>← Prev</button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).filter(n => n === 1 || n === totalPages || Math.abs(n - cur) <= 1).map((n, i, arr) => (
+                  <span key={n} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>{i > 0 && arr[i - 1] !== n - 1 && <span style={{ color: '#9ca3af' }}>…</span>}<button onClick={() => setPage(n)} style={{ cursor: 'pointer', padding: '8px 13px', borderRadius: 999, border: n === cur ? '1px solid #7c3aed' : '1px solid #e5e7eb', background: n === cur ? '#7c3aed' : '#fff', color: n === cur ? '#fff' : '#111', fontWeight: 700 }}>{n}</button></span>
+                ))}
+                <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={cur >= totalPages} style={{ cursor: cur >= totalPages ? 'not-allowed' : 'pointer', padding: '9px 16px', borderRadius: 999, border: '1px solid #7c3aed', background: '#7c3aed', color: '#fff', fontWeight: 700, opacity: cur >= totalPages ? 0.5 : 1 }}>Next → Older</button>
+              </div>
+            )}
+            <p style={{ textAlign: 'center', color: '#9ca3af', fontSize: 13, marginTop: 8 }}>Tap ✏️ Edit on any row — it loads into the Manual form above.</p>
+          </>);
+        })()}
+      </div>
       {msg && <p style={{ marginTop: 14, whiteSpace: 'pre-wrap' }}>{msg}</p>}
     </div>
   );
