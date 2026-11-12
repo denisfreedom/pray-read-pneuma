@@ -58,6 +58,30 @@ function refToBibleUrl(ref: string) {
   return `/bible?book=${encodeURIComponent(m[1])}&chapter=${m[2]}${m[3] ? `&verse=${m[3]}` : ''}`;
 }
 function stripHtml(html: string) { return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
+function excerpt(e: Entry) {
+  let html = String(e.devotional_text || '');
+  // Take text AFTER the Reflection heading if present, else whole body
+  const m = html.match(/Reflection<\/h3>([\s\S]*)/i);
+  if (m) html = m[1];
+  // Drop any remaining headings + Scripture Reading lines + quotation
+  html = html.replace(/<h3[^>]*>.*?<\/h3>/gi, ' ');
+  html = html.replace(/Scripture Reading[^<]*/gi, ' ');
+  let t = stripHtml(html);
+  // Also drop the scripture quotation if it leaked in
+  const q = stripHtml(String(e.scripture_quotation || ''));
+  if (q && t.startsWith(q.slice(0, 40))) t = t.slice(q.length).trim();
+  return t.slice(0, 160) + (t.length > 160 ? '…' : '');
+}
+function fullText(e: Entry) {
+  // Full readable message for sharing: title + scripture + body without HTML
+  const body = stripHtml(String(e.devotional_text || '')).replace(/Reflection|Practical Application|Meditation|Short Prayer/g, (s) => '\n\n' + s + ': ');
+  return body.trim();
+}
+function imageUrl(e: Entry) {
+  const u = String(e.cover_photo_url || e.default_image_url || '');
+  if (u) return u;
+  try { return `${window.location.origin}/assets/default-devotional.png`; } catch { return '/assets/default-devotional.png'; }
+}
 
 export default function DevotionalPlansPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -109,7 +133,10 @@ export default function DevotionalPlansPage() {
   }
   function shareText(e: Entry) {
     const further = parseRefs(String(e.further_readings || '')).join(', ');
-    return `${e.title} — ${e.scripture_book} ${e.scripture_chapter}:${e.scripture_verse}\n${shareUrl(e)}${further ? `\nFurther readings: ${further}` : ''}`;
+    const img = imageUrl(e);
+    const full = fullText(e);
+    // Image + full message + ONE return link (no duplicate links)
+    return `🙏 ${e.title} — ${e.scripture_book} ${e.scripture_chapter}:${e.scripture_verse}\n\n🖼️ ${img}\n\n${full}${further ? `\n\n📖 Further readings: ${further}` : ''}\n\n👉 Read more devotionals here: ${shareUrl(e)}`;
   }
   function shareOn(e: Entry, network: string) {
     const url = encodeURIComponent(shareUrl(e)); const text = encodeURIComponent(shareText(e));
@@ -139,6 +166,16 @@ export default function DevotionalPlansPage() {
 
   return (
     <div style={{ background: '#fffdf5', minHeight: '100vh' }}>
+      <style>{`
+        @media (max-width: 640px) {
+          .dev-list-card { flex-direction: column !important; }
+          .dev-list-img { width: 100% !important; }
+          .dev-list-img > div { height: 170px !important; }
+          .dev-list-body { padding: 14px 16px 18px !important; }
+          .dev-list-body h3 { font-size: 20px !important; line-height: 1.3 !important; }
+          .dev-grid { grid-template-columns: 1fr 1fr !important; gap: 10px !important; }
+        }
+      `}</style>
       <div style={{ background: 'linear-gradient(100deg,#6d28d9,#a21caf 55%,#f43f5e)', padding: '48px 20px 56px', textAlign: 'center', color: '#fff' }}>
         <p style={{ maxWidth: 640, margin: '0 auto', fontSize: 20, lineHeight: 1.5 }}>Short, rich devotionals to deepen your faith — in English and Luganda, with Scripture, further readings, and a streak to keep you going.</p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 22, flexWrap: 'wrap' }}>
@@ -157,7 +194,7 @@ export default function DevotionalPlansPage() {
         {loading ? <p style={{ textAlign: 'center', color: '#6b7280', padding: 40 }}>Loading devotionals…</p> : filtered.length === 0 ? (
           <div style={{ background: '#fff', border: '1px solid #eee', borderRadius: 20, padding: 36, textAlign: 'center', color: '#6b7280', marginTop: 18 }}>{entries.length === 0 ? 'No devotionals yet. Check back soon.' : 'No devotionals match your search.'}</div>
         ) : view === 'calendar' ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 14, marginTop: 18 }}>
+          <div className="dev-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 14, marginTop: 18 }}>
             {filtered.map((e: any) => (
               <div key={e.id} onClick={() => { setOpen(e); setLang('en'); }} style={{ cursor: 'pointer', background: '#fff', border: `1px solid ${done.includes(numOf(e)) ? '#bbf7d0' : '#eee'}`, borderRadius: 16, overflow: 'hidden' }}>
                 <Cover e={e} height={130} />
@@ -168,12 +205,13 @@ export default function DevotionalPlansPage() {
         ) : (
           <div style={{ display: 'grid', gap: 14, marginTop: 18 }}>
             {filtered.map((e: any) => (
-              <div key={e.id} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 16, overflow: 'hidden', display: 'flex', gap: 0 }}>
-                <div style={{ width: 230, flexShrink: 0, cursor: 'pointer' }} onClick={() => { setOpen(e); setLang('en'); }}><Cover e={e} height={140} /></div>
-                <div style={{ padding: '14px 16px', flex: 1 }}>
+              <div key={e.id} className="dev-list-card" style={{ background: '#fff', border: '1px solid #eee', borderRadius: 16, overflow: 'hidden', display: 'flex', gap: 0 }}>
+                <div className="dev-list-img" style={{ width: 230, flexShrink: 0, cursor: 'pointer' }} onClick={() => { setOpen(e); setLang('en'); }}><Cover e={e} height={140} /></div>
+                <div className="dev-list-body" style={{ padding: '14px 16px', flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>{done.includes(numOf(e)) && <span style={{ color: '#16a34a', fontWeight: 700, fontSize: 13 }}>✓ Completed</span>}</div>
                   <h3 style={{ margin: '4px 0 2px', fontSize: 18 }}>{e.title}</h3>
-                  <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>{e.scripture_book} {e.scripture_chapter}:{e.scripture_verse} · {e.devotional_text_lu ? 'English + Luganda' : 'English'} · {stripHtml(e.devotional_text).slice(0, 110)}…</p>
+                  <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>{e.scripture_book} {e.scripture_chapter}:{e.scripture_verse} · {e.devotional_text_lu ? 'English + Luganda' : 'English'}</p>
+                  <p style={{ margin: '6px 0 0', color: '#374151', fontSize: 14, lineHeight: 1.5 }}>{excerpt(e)}</p>
                   <button onClick={() => { setOpen(e); setLang('en'); }} style={{ marginTop: 10, cursor: 'pointer', border: '1px solid #7c3aed', color: '#7c3aed', background: '#fff', borderRadius: 999, padding: '7px 16px', fontWeight: 700 }}>Read →</button>
                 </div>
               </div>
@@ -191,7 +229,7 @@ export default function DevotionalPlansPage() {
       {/* Beautiful popup */}
       {open && (() => { const [c1, c2, c3] = paletteFor(open); return (
         <div onClick={() => setOpen(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,10,40,0.62)', backdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 14 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#fffdf8', borderRadius: 22, maxWidth: 780, width: '100%', margin: '22px 0', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,0.35)' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: 'rgba(224,242,254,0.92)', backdropFilter: 'blur(6px)', border: '1px solid rgba(147,197,253,0.6)', borderRadius: 22, maxWidth: 780, width: '100%', margin: '22px 0', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,0.35)' }}>
             {/* Header = auto cover */}
             <div style={{ position: 'relative' }}>
               {(open.cover_photo_url || open.default_image_url)
@@ -206,19 +244,19 @@ export default function DevotionalPlansPage() {
               </div>
             </div>
 
-            <div style={{ padding: '18px 22px 24px' }}>
+            <div style={{ padding: '18px 22px 24px', background: 'rgba(224,242,254,0.55)' }}>
               {/* SHARE ROW — FIRST */}
               <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 14, padding: '12px 14px', marginBottom: 16 }}>
                 <div style={{ fontWeight: 800, fontSize: 13, color: '#4c1d95', marginBottom: 8 }}>SHARE THIS DEVOTIONAL</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button onClick={() => shareOn(open, 'facebook')} title="Share on Facebook" style={{ cursor: 'pointer', border: 'none', background: '#1877f2', color: '#fff', borderRadius: 999, padding: '8px 14px', fontWeight: 700 }}>f Facebook</button>
-                  <button onClick={() => shareOn(open, 'whatsapp')} title="Share on WhatsApp" style={{ cursor: 'pointer', border: 'none', background: '#25d366', color: '#fff', borderRadius: 999, padding: '8px 14px', fontWeight: 700 }}>💬 WhatsApp</button>
-                  <button onClick={() => shareOn(open, 'telegram')} title="Share on Telegram" style={{ cursor: 'pointer', border: 'none', background: '#229ed9', color: '#fff', borderRadius: 999, padding: '8px 14px', fontWeight: 700 }}>✈️ Telegram</button>
-                  <button onClick={() => shareOn(open, 'instagram')} title="Copy for Instagram" style={{ cursor: 'pointer', border: 'none', background: 'linear-gradient(45deg,#f58529,#dd2a7b,#8134af)', color: '#fff', borderRadius: 999, padding: '8px 14px', fontWeight: 700 }}>📸 Instagram</button>
-                  <button onClick={() => shareOn(open, 'linkedin')} title="Share on LinkedIn" style={{ cursor: 'pointer', border: 'none', background: '#0a66c2', color: '#fff', borderRadius: 999, padding: '8px 14px', fontWeight: 700 }}>in LinkedIn</button>
-                  <button onClick={() => copyLink(open)} title="Copy share link" style={{ cursor: 'pointer', border: '1px solid #7c3aed', background: '#fff', color: '#7c3aed', borderRadius: 999, padding: '8px 14px', fontWeight: 700 }}>🔗 {copied ? 'Copied!' : 'Copy Link'}</button>
+                  <button onClick={() => shareOn(open, 'facebook')} title="Share on Facebook" aria-label="Share on Facebook" style={{ cursor: 'pointer', border: 'none', background: '#1877f2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>f</button>
+                  <button onClick={() => shareOn(open, 'whatsapp')} title="Share on WhatsApp" aria-label="Share on WhatsApp" style={{ cursor: 'pointer', border: 'none', background: '#25d366', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>💬</button>
+                  <button onClick={() => shareOn(open, 'telegram')} title="Share on Telegram" aria-label="Share on Telegram" style={{ cursor: 'pointer', border: 'none', background: '#229ed9', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✈️</button>
+                  <button onClick={() => shareOn(open, 'instagram')} title="Share on Instagram" aria-label="Share on Instagram" style={{ cursor: 'pointer', border: 'none', background: 'linear-gradient(45deg,#f58529,#dd2a7b,#8134af)', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📸</button>
+                  <button onClick={() => shareOn(open, 'linkedin')} title="Share on LinkedIn" aria-label="Share on LinkedIn" style={{ cursor: 'pointer', border: 'none', background: '#0a66c2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>in</button>
+                  <button onClick={() => copyLink(open)} title="Copy share link" aria-label="Copy share link" style={{ cursor: 'pointer', border: '1px solid #7c3aed', background: '#fff', color: '#7c3aed', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{copied ? '✓' : '🔗'}</button>
                 </div>
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 7 }}>Shares the full devotional + its further reading scriptures. Instagram copies the text so you can paste it in IG.</div>
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 7 }}></div>
               </div>
 
               {open.scripture_quotation && <div style={{ background: '#fff', border: '1px solid #ede9fe', borderLeft: '5px solid #7c3aed', padding: '14px 16px', borderRadius: 10, marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 800, color: '#7c3aed', marginBottom: 4 }}>SCRIPTURE</div><div dangerouslySetInnerHTML={{ __html: String(open.scripture_quotation) }} /></div>}
