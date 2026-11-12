@@ -102,6 +102,32 @@ export default function DevotionalAdminTab() {
   }
 
 
+  // --- FIX: Related Scriptures stored as objects -> back to readable lines ---
+  // DB shape is [{book:'Colossians',chapter:3,verse:17,text:'Encourages...'}, ...] OR [{reference:'Colossians 3:17', text:'...'}]
+  // Old Edit did String(object) = "[object Object]". This unpacks it.
+  function relatedToText(val: any): string {
+    if (!val) return '';
+    let arr: any[] = [];
+    if (Array.isArray(val)) arr = val;
+    else if (typeof val === 'string') {
+      const s = val.trim();
+      if (!s || s.includes('[object Object]')) {
+        // Try to recover: if it is a JSON string of objects, parse it; else drop the corrupted lines
+        try { const p = JSON.parse(s); if (Array.isArray(p)) arr = p; else return ''; } catch { return s.split('\n').filter((l: string) => l.trim() && !l.includes('[object Object]')).join('\n'); }
+      } else return s;
+    } else if (typeof val === 'object') arr = [val];
+    else return String(val);
+    return arr.map((r: any) => {
+      if (!r) return '';
+      if (typeof r === 'string') return r.includes('[object Object]') ? '' : r;
+      const ref = String(r.reference || r.verse_ref || r.ref || ((r.book ? `${r.book} ${r.chapter ?? ''}${r.verse ? ':' + r.verse : ''}` : '') || '')).trim();
+      const txt = String(r.text || r.explanation || r.note || r.description || '').trim();
+      if (ref && txt) return `${ref} — ${txt}`;
+      if (ref) return ref;
+      if (txt) return txt;
+      return '';
+    }).filter(Boolean).join('\n');
+  }
   function startEdit(d: any) {
     setForm({
       devotional_number: String(d.devotional_number ?? '').padStart(3, '0'),
@@ -113,7 +139,7 @@ export default function DevotionalAdminTab() {
       devotional_text: d.devotional_text || '',
       devotional_text_lu: d.devotional_text_lu || '',
       further_readings: d.further_readings || '',
-      related_scriptures: Array.isArray(d.related_scriptures) ? d.related_scriptures.join('\n') : String(d.related_scriptures || ''),
+      related_scriptures: relatedToText(d.related_scriptures),
       cover_photo_url: d.cover_photo_url || '',
       author: d.author || 'Pr. Denis',
     });
