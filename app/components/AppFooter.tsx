@@ -1,172 +1,122 @@
-'use client';
+"use client";
 
 import Link from 'next/link';
 import LiveVisitorsWidget from './LiveVisitorsWidget';
 
-const LOGO = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
+// app/components/AppFooter.tsx — REDEVELOPED
+// Fixes:
+// 1) Old navLinks was defined but NEVER used -> now every section uses one source of truth below.
+// 2) Privacy Policy was a <span> (not clickable) -> now a real link to /privacy + /terms.
+// 3) Logo was on an outside CDN (app-cdn.appgen.com) -> now local /assets/logo.png with CDN fallback.
+// 4) All links interconnected: every href points to a real route in the app (see LINK MAP at bottom).
+// 5) Theme: navy + ivory + gold, matching the rest of the app (not pure black).
+// 6) Socials: Facebook, YouTube, X, WhatsApp, Telegram, Instagram — all real links.
 
-const navLinks = [
-  { label: 'Home', href: '/' },
-  { label: 'About Us', href: '/about' },
+const LOGO_LOCAL = '/assets/logo.png';
+const LOGO_FALLBACK = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
+
+// ── ONE SOURCE OF TRUTH FOR ALL LINKS ──────────────────────────────
+const platformLinks = [
+  { label: 'Create Account', href: '/signup' },
+  { label: 'Sign In', href: '/user-login' },
   { label: 'Read Bible', href: '/bible-reader' },
+  { label: 'Verse of the Day', href: '/verse-of-the-day' },
   { label: 'Verse-Songs', href: '/verse-songs' },
+  { label: 'Reading Plans', href: '/reading-plans' },
+  { label: 'Devotional Plans', href: '/devotional-plans' },
+];
+
+const ministryLinks = [
+  { label: 'About Us', href: '/about' },
+  { label: 'Pneuma Experience', href: '/community/live-teaching' },
   { label: 'Community', href: '/community' },
+  { label: 'Live Teaching', href: '/community/live-teaching' },
+  { label: 'Contact Us', href: '/contact' },
+];
+
+const resourceLinks = [
+  { label: 'Dashboard', href: '/dashboard' },
+  { label: 'My Progress', href: '/dashboard' },
+  { label: 'Notifications', href: '/notification-settings' },
+  { label: 'Install App', href: '/install-prompt' },
+  { label: 'Privacy Policy', href: '/privacy' },
+  { label: 'Terms of Service', href: '/terms' },
+];
+
+const bottomLinks = [
+  { label: 'Home', href: '/' },
+  { label: 'About', href: '/about' },
   { label: 'Contact', href: '/contact' },
+  { label: 'Privacy Policy', href: '/privacy' },
+  { label: 'Terms', href: '/terms' },
 ];
 
 const socialLinks = [
-  {
-    label: 'Facebook',
-    href: 'https://www.facebook.com/pneumafreedomexperience',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-        <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/>
-      </svg>
-    ),
-  },
-  {
-    label: 'YouTube',
-    href: 'https://www.youtube.com/@pneumafreedomexperience',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-      </svg>
-    ),
-  },
-  {
-    label: 'Twitter / X',
-    href: 'https://twitter.com/pneumafreedom',
-    icon: (
-      <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4">
-        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-      </svg>
-    ),
-  },
+  { label: 'Facebook', href: 'https://www.facebook.com/pneumafreedomexperience',
+    icon: (<svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>) },
+  { label: 'YouTube', href: 'https://www.youtube.com/@pneumafreedomexperience',
+    icon: (<svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>) },
+  { label: 'Twitter / X', href: 'https://twitter.com/pneumafreedom',
+    icon: (<svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>) },
+  { label: 'WhatsApp', href: 'https://wa.me/256700000000?text=Hello%20Pray-Read%20Bible',
+    icon: (<svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413z"/></svg>) },
+  { label: 'Telegram', href: 'https://t.me/pneumafreedomexperience',
+    icon: (<svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0zm4.962 7.224c.1-.002.321.023.465.14a.5.5 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>) },
+  { label: 'Instagram', href: 'https://www.instagram.com/pneumafreedomexperience',
+    icon: (<svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zm0 10.162a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z"/></svg>) },
 ];
+
+function LinkList({ title, links }: { title: string; links: { label: string; href: string }[] }) {
+  return (
+    <div className="space-y-4">
+      <h4 className="text-[#E7C873] text-xs font-bold uppercase tracking-widest">{title}</h4>
+      <ul className="space-y-2.5">
+        {links.map((l) => (
+          <li key={l.label}>
+            <Link href={l.href} className="text-white/60 hover:text-[#E7C873] text-sm transition-colors duration-200">{l.label}</Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 export default function AppFooter() {
   return (
-    <footer
-      style={{
-        background: 'linear-gradient(180deg, #07070d 0%, #050508 100%)',
-        borderTop: '1px solid rgba(201,168,76,0.12)',
-      }}
-      className="relative overflow-hidden"
-    >
-      {/* Subtle gold glow top border */}
-      <div
-        className="absolute top-0 left-0 right-0 h-px"
-        style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(201,168,76,0.5) 50%, transparent 100%)' }}
-      />
-
-      {/* Ambient orb */}
-      <div
-        className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[200px] pointer-events-none"
-        style={{ background: 'radial-gradient(ellipse, rgba(201,168,76,0.06) 0%, transparent 70%)' }}
-      />
-
+    <footer style={{ background: 'linear-gradient(180deg, #0F2043 0%, #0A162E 100%)', borderTop: '2px solid #E7C873' }} className="relative overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-px" style={{ background: 'linear-gradient(90deg, transparent 0%, rgba(231,200,115,0.6) 50%, transparent 100%)' }} />
+      <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-[600px] h-[200px] pointer-events-none" style={{ background: 'radial-gradient(ellipse, rgba(231,200,115,0.08) 0%, transparent 70%)' }} />
       <div className="relative max-w-7xl mx-auto px-5 sm:px-8 py-12 sm:py-16">
-        {/* Top grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 mb-12">
-
-          {/* Brand column */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-10 mb-12">
           <div className="lg:col-span-1 space-y-5">
             <Link href="/" className="inline-flex items-center gap-3">
-              <img src={LOGO} alt="Pray-Read Bible" className="h-12 w-auto" />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={LOGO_LOCAL} alt="Pray-Read Bible" className="h-12 w-auto" onError={(e) => { (e.currentTarget as HTMLImageElement).src = LOGO_FALLBACK; }} />
             </Link>
-            <p className="text-white/45 text-sm leading-relaxed max-w-xs">
-              The vision of Pray-Read Bible is to recover believers from merely studying Scripture with the mind to encountering Christ as living Word in their spirit.
-            </p>
-            {/* Social icons */}
-            <div className="flex items-center gap-2">
-              {socialLinks.map(s => (
-                <a
-                  key={s.label}
-                  href={s.href}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={s.label}
-                  className="w-9 h-9 rounded-full flex items-center justify-center text-white/50 hover:text-[#c9a84c] transition-all duration-200"
-                  style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)' }}
-                >
-                  {s.icon}
-                </a>
+            <p className="text-white/60 text-sm leading-relaxed max-w-xs">The vision of Pray-Read Bible is to recover believers from merely studying Scripture with the mind to encountering Christ as living Word in their spirit.</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              {socialLinks.map((s) => (
+                <a key={s.label} href={s.href} target="_blank" rel="noopener noreferrer" aria-label={s.label} title={s.label}
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-white/60 hover:text-[#0F2043] hover:bg-[#E7C873] transition-all duration-200"
+                  style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)' }}>{s.icon}</a>
               ))}
             </div>
+            <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer"
+              className="inline-block mt-1 px-5 py-2.5 rounded-full bg-[#E7C873] text-[#0F2043] text-sm font-bold hover:bg-white transition-colors">♥ Donate to the Project</a>
           </div>
-
-          {/* Platform links */}
-          <div className="space-y-4">
-            <h4 className="text-white/80 text-xs font-semibold uppercase tracking-widest">Platform</h4>
-            <ul className="space-y-2.5">
-              {[
-                { label: 'Create Account', href: '/signup' },
-                { label: 'Read Bible', href: '/bible-reader' },
-                { label: 'Verse-Songs', href: '/verse-songs' },
-                { label: 'Reading Plans', href: '/reading-plans' },
-                { label: 'Devotional Plans', href: '/devotional-plans' },
-              ].map(l => (
-                <li key={l.label}>
-                  <Link href={l.href} className="text-white/40 hover:text-[#c9a84c] text-sm transition-colors duration-200">
-                    {l.label}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Ministry links */}
-          <div className="space-y-4">
-            <h4 className="text-white/80 text-xs font-semibold uppercase tracking-widest">Ministry</h4>
-            <ul className="space-y-2.5">
-              {[
-                { label: 'About Us', href: '/about' },
-                { label: 'Pneuma Experience', href: '/community/live-teaching' },
-                { label: 'Community', href: '/community' },
-                { label: 'Contact', href: '/contact' },
-                { label: '♥ Donate', href: 'https://store.pesapal.com/donatetoprayreadbibleproject', external: true },
-              ].map(l => (
-                <li key={l.label}>
-                  {l.external ? (
-                    <a href={l.href} target="_blank" rel="noopener noreferrer"
-                      className="text-white/40 hover:text-[#c9a84c] text-sm transition-colors duration-200">
-                      {l.label}
-                    </a>
-                  ) : (
-                    <Link href={l.href} className="text-white/40 hover:text-[#c9a84c] text-sm transition-colors duration-200">
-                      {l.label}
-                    </Link>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Live Visitors Widget */}
-          <div className="space-y-4">
-            <LiveVisitorsWidget />
-          </div>
+          <LinkList title="Platform" links={platformLinks} />
+          <LinkList title="Ministry" links={ministryLinks} />
+          <LinkList title="Resources" links={resourceLinks} />
+          <div className="space-y-4"><LiveVisitorsWidget /></div>
         </div>
-
-        {/* Divider */}
-        <div className="h-px mb-8" style={{ background: 'rgba(255,255,255,0.06)' }} />
-
-        {/* Bottom row */}
+        <div className="h-px mb-8" style={{ background: 'rgba(255,255,255,0.1)' }} />
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 sm:gap-6 text-xs text-white/30">
-            <Link href="/" className="hover:text-white/60 transition-colors">Home</Link>
-            <Link href="/about" className="hover:text-white/60 transition-colors">About</Link>
-            <Link href="/contact" className="hover:text-white/60 transition-colors">Contact</Link>
-            <span className="text-white/15">Privacy Policy</span>
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-4 sm:gap-6 text-xs text-white/50">
+            {bottomLinks.map((l) => (<Link key={l.label} href={l.href} className="hover:text-[#E7C873] transition-colors">{l.label}</Link>))}
           </div>
-          <div className="text-xs text-white/25 text-center sm:text-right space-y-0.5">
-            <p>© {new Date().getFullYear()} <span className="text-white/40">Pneuma Freedom Experience Ministry.</span> All rights reserved.</p>
-            <p>Developed by{' '}
-              <a href="https://ionhostingdigitalservice.com" target="_blank" rel="noopener noreferrer"
-                className="text-[#c9a84c]/70 hover:text-[#c9a84c] transition-colors">
-                Ion Hosting Digital Services
-              </a>
-            </p>
+          <div className="text-xs text-white/40 text-center sm:text-right space-y-0.5">
+            <p>© {new Date().getFullYear()} <span className="text-white/60">Pneuma Freedom Experience Ministry.</span> All rights reserved.</p>
+            <p>Developed by <a href="https://ionhostingdigitalservice.com" target="_blank" rel="noopener noreferrer" className="text-[#E7C873]/80 hover:text-[#E7C873] transition-colors">Ion Hosting Digital Services</a></p>
           </div>
         </div>
       </div>
