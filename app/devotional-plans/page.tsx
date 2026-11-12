@@ -141,10 +141,11 @@ export default function DevotionalPlansPage() {
   }
   function shareText(e: Entry) {
     const further = parseRefs(String(e.further_readings || '')).join(', ');
-    const img = imageUrl(e);
     const full = fullText(e);
-    // Image + full message + ONE return link (no duplicate links)
-    return `🙏 ${e.title} — ${e.scripture_book} ${e.scripture_chapter}:${e.scripture_verse}\n\n🖼️ ${img}\n\n${full}${further ? `\n\n📖 Further readings: ${further}` : ''}\n\n👉 Read more devotionals here: ${shareUrl(e)}`;
+    // NO raw image link in the text — WhatsApp shows it as a broken link line.
+    // The image comes from the link preview (OG image = app logo / default image in layout).
+    // One link only, at the end.
+    return `🙏 ${e.title} — ${e.scripture_book} ${e.scripture_chapter}:${e.scripture_verse}\n\n${full}${further ? `\n\n📖 Further readings: ${further}` : ''}\n\n👉 Read more devotionals here: ${shareUrl(e)}`;
   }
   function shareOn(e: Entry, network: string) {
     const url = encodeURIComponent(shareUrl(e)); const text = encodeURIComponent(shareText(e));
