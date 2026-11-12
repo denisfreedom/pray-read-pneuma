@@ -47,7 +47,6 @@ function ChapterContent() {
   const [versePrayers, setVersePrayers] = useState<Record<number, any>>({});
   const [chapterClosing, setChapterClosing] = useState<any>(null);
   const [bookClosing, setBookClosing] = useState<any>(null);
-  const [bookIntro, setBookIntro] = useState<any>(null); // V7: Book Introduction, shown in sidebar Intro tab
   const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
   // One expanded panel per verse: 'prayer' | 'crossref' | null. Second click closes. Switching buttons swaps panels.
   const [activePanel, setActivePanel] = useState<'prayer' | 'crossref' | 'commentary' | null>(null);
@@ -62,75 +61,37 @@ function ChapterContent() {
   });
   const [commentary, setCommentary] = useState<Record<number, any>>({});
   const [menuOpen, setMenuOpen] = useState(false);
-  // V6/V8: Select / Highlight / Underline — PRIVATE to this device/browser only.
-  // Saved in localStorage on THIS phone/browser only. Never sent to Neon / server, never shared with other users.
-  // Another user on another phone sees a clean page. Clearing browser data clears your marks.
-  type Mark = { id: string; text: string; style: 'highlight' | 'underline'; color: string };
-  const [marks, setMarks] = useState<Record<string, Mark[]>>(() => {
-    try { return JSON.parse(localStorage.getItem(`prayread-marks-${bookNum}-${chapterNum}`) || '{}'); } catch { return {}; }
-  });
-  const [pendingMark, setPendingMark] = useState<{ key: string; verse: number; langKey: string; text: string; x: number; y: number } | null>(null);
-  const markKey = (verse: number, langKey: string) => `${verse}-${langKey}`;
-  // V7: generic keys for every section — prayer-1-EN, intro-ch-EN, closing-ch-EN, book-intro-EN, book-closing-EN, commentary-1-EN, crossref-1-EN
-  // Verse keys stay as "1-EN" so V6 marks are kept.
-  const saveMarks = (next: Record<string, Mark[]>) => {
-    setMarks(next);
-    try { localStorage.setItem(`prayread-marks-${bookNum}-${chapterNum}`, JSON.stringify(next)); } catch {}
-  };
-  const applyMark = (style: 'highlight' | 'underline', color: string) => {
-    if (!pendingMark) return;
-    const key = pendingMark.key || markKey(pendingMark.verse, pendingMark.langKey);
-    const existing = marks[key] || [];
-    // Don't duplicate the exact same mark
-    if (existing.some(m => m.text === pendingMark.text && m.style === style && m.color === color)) { setPendingMark(null); return; }
-    saveMarks({ ...marks, [key]: [...existing, { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: pendingMark.text, style, color }] });
-    setPendingMark(null);
-    try { window.getSelection()?.removeAllRanges(); } catch {}
-  };
-  const clearMarks = (verse: number, langKey: string) => {
-    const next = { ...marks }; delete next[markKey(verse, langKey)]; saveMarks(next);
-  };
-  // Split a verse string by its saved marks and wrap each match
-  const renderMarked = (text: string, verse: number, langKey: string) => {
-    const list = marks[markKey(verse, langKey)] || [];
-    if (!text || !list.length) return <>{text}</>;
-    // Build segments: walk through text, cutting out each mark in order of first occurrence
-    let remaining = text;
-    const out: React.ReactNode[] = [];
-    let k = 0;
-    // Apply marks one by one, longest first so a full-verse mark wins over a word mark
-    const sorted = [...list].sort((a, b) => b.text.length - a.text.length);
-    // Simple non-overlapping approach: for the longest mark still present, split once, recurse on the pieces
-    const renderWith = (str: string, ms: Mark[]): React.ReactNode[] => {
-      if (!ms.length) return [str];
-      const [first, ...rest] = ms;
-      const idx = str.indexOf(first.text);
-      if (idx === -1) return renderWith(str, rest);
-      const before = str.slice(0, idx);
-      const match = str.slice(idx, idx + first.text.length);
-      const after = str.slice(idx + first.text.length);
-      return [
-        ...(before ? renderWith(before, rest) : []),
-        <span key={first.id + '-' + k++} className={first.style === 'highlight' ? `px-0.5 rounded ${first.color}` : `underline decoration-2 underline-offset-4 ${first.color}`}>{match}</span>,
-        ...(after ? renderWith(after, rest) : []),
-      ];
+
+  // --- V6: JUMP TO VERSE — when opened as /bible-reader/45/6#verse-14, scroll to verse 14 + highlight it.
+  // The old page ignored the #verse-... hash, so it always landed on verse 1.
+  const [jumpedVerse, setJumpedVerse] = useState<number | null>(null);
+  useEffect(() => {
+    if (loading || !verses.length) return;
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    const m = hash.match(/#verse-(\d+)/);
+    if (!m) return;
+    const vn = parseInt(m[1], 10);
+    if (!vn) return;
+    setSelectedVerse(vn);
+    setJumpedVerse(vn);
+    // Wait a tick for the DOM to be painted, then scroll
+    let tries = 0;
+    const tick = () => {
+      const el = document.getElementById(`verse-${vn}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Flash highlight — remove after 3s
+        el.style.transition = 'box-shadow 0.3s, background 0.3s';
+        const prevBg = el.style.background;
+        el.style.background = '#fef08a';
+        el.style.boxShadow = '0 0 0 3px #f59e0b, 0 10px 30px rgba(0,0,0,0.15)';
+        setTimeout(() => { el.style.background = prevBg; el.style.boxShadow = ''; }, 3000);
+      } else if (tries < 10) { tries++; setTimeout(tick, 200); }
     };
-    return <>{renderWith(remaining, sorted)}</>;
-  };
-  const onSelectText = (verse: number, langKey: string) => {
-    // Runs on mouseUp / touchEnd inside a verse paragraph
-    setTimeout(() => {
-      try {
-        const sel = window.getSelection();
-        const txt = sel?.toString() || '';
-        if (!txt.trim() || txt.trim().length < 2) { setPendingMark(null); return; }
-        const range = sel!.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        // Only accept selections that are inside this verse's paragraph (anchor node inside the page)
-        setPendingMark({ key: markKey(verse, langKey), verse, langKey, text: txt, x: rect.left + rect.width / 2, y: rect.top + window.scrollY });
-      } catch { setPendingMark(null); }
-    }, 10);
-  };
+    const t1 = setTimeout(tick, 150);
+    return () => clearTimeout(t1);
+  }, [loading, verses]);
+
 
   useEffect(() => {
     if (!bookNum || !chapterNum) return;
@@ -214,66 +175,11 @@ function ChapterContent() {
           const d = await r.json().catch(() => null);
           if (d && (pickClosing(d).en || pickClosing(d).lu)) setBookClosing(d);
         } catch {}
-        try {
-          const r = await fetch(`/api/book-introductions?bookId=${bookId}`);
-          const d = await r.json().catch(() => null);
-          if (d && (pickIntro(d).en || pickIntro(d).lu)) setBookIntro(d);
-          else if (Array.isArray(d) && d.length) setBookIntro(d[0]);
-        } catch {}
       } finally { setLoading(false); }
     };
     load();
   }, [bookNum, chapterNum]);
 
-
-  // V7 generic: any section can be selected
-  const onSelectGeneric = (key: string) => {
-    setTimeout(() => {
-      try {
-        const sel = window.getSelection();
-        const txt = sel?.toString() || '';
-        if (!txt.trim() || txt.trim().length < 2) { setPendingMark(null); return; }
-        const range = sel!.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-        setPendingMark({ key, verse: 0, langKey: '', text: txt, x: rect.left + rect.width / 2, y: rect.top + window.scrollY });
-      } catch { setPendingMark(null); }
-    }, 10);
-  };
-
-  // V8 mobile: tap 🖍️ Mark = mark the WHOLE verse without dragging. Toolbar appears at the bottom, not under your finger.
-  const markWholeVerse = (v: any) => {
-    const txt = verseText(v);
-    if (!txt) return;
-    setPendingMark({ key: markKey(v.verse, lang === 'LU' ? 'LU' : 'EN'), verse: v.verse, langKey: lang === 'LU' ? 'LU' : 'EN', text: txt, x: 0, y: 0 });
-  };
-  const markWholeText = (key: string, txt: string) => {
-    if (!txt) return;
-    setPendingMark({ key, verse: 0, langKey: '', text: txt, x: 0, y: 0 });
-  };
-  const renderMarkedByKey = (text: string, key: string) => {
-    const list = marks[key] || [];
-    if (!text || !list.length) return <>{text}</>;
-    const sorted = [...list].sort((a, b) => b.text.length - a.text.length);
-    let k = 0;
-    const renderWith = (str: string, ms: Mark[]): React.ReactNode[] => {
-      if (!ms.length) return [str];
-      const [first, ...rest] = ms;
-      const idx = str.indexOf(first.text);
-      if (idx === -1) return renderWith(str, rest);
-      const before = str.slice(0, idx);
-      const match = str.slice(idx, idx + first.text.length);
-      const after = str.slice(idx + first.text.length);
-      return [
-        ...(before ? renderWith(before, rest) : []),
-        <span key={first.id + '-' + k++} className={first.style === 'highlight' ? `px-0.5 rounded ${first.color}` : `underline decoration-2 underline-offset-4 ${first.color}`}>{match}</span>,
-        ...(after ? renderWith(after, rest) : []),
-      ];
-    };
-    return <>{renderWith(text, sorted)}</>;
-  };
-  const clearMarksByKey = (key: string) => {
-    const next = { ...marks }; delete next[key]; saveMarks(next);
-  };
   const openPrayer = (verseNum: number) => {
     // Second click on the SAME verse's Prayer button = minimize / close
     if (selectedVerse === verseNum && activePanel === 'prayer') {
@@ -365,7 +271,6 @@ function ChapterContent() {
   const intro = pickIntro(chapterIntro);
   const closing = pickClosing(chapterClosing).en || pickClosing(chapterClosing).lu ? pickClosing(chapterClosing) : pickClosing(chapterIntro);
   const bookClose = pickClosing(bookClosing);
-  const bookIntroVal = pickIntro(bookIntro);
   const selectedPrayer = selectedVerse ? pickPrayer(versePrayers[selectedVerse]) : { en: '', lu: '' };
   const verseText = (v: any) => lang === 'LU' ? (v.text_luganda || v.text_english) : lang === 'BOTH' ? v.text_english : (v.text_english || v.text_luganda);
 
@@ -406,15 +311,15 @@ function ChapterContent() {
             </div>
           ) : verses.map((v: any) => {
             const hasPrayer = !!(pickPrayer(versePrayers[v.verse]).en || pickPrayer(versePrayers[v.verse]).lu);
-            const isSel = selectedVerse === v.verse;
+            const isSel = selectedVerse === v.verse || jumpedVerse === v.verse;
             const pr = pickPrayer(versePrayers[v.verse]);
             return (
               <article id={`verse-${v.verse}`} key={v.verse} className={`${themeClasses.card} rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''}`}>
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
-                    <p onMouseUp={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} onTouchEnd={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} className={`leading-relaxed ${themeClasses.text} select-text cursor-text`} style={{ fontSize: bodySize }}>{renderMarked(verseText(v), v.verse, lang === 'LU' ? 'LU' : 'EN')}</p>
-                    {lang === 'BOTH' && v.text_luganda && <p onMouseUp={() => onSelectText(v.verse, 'LU')} onTouchEnd={() => onSelectText(v.verse, 'LU')} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider} select-text cursor-text`} style={{ fontSize: bodySize }}>{renderMarked(v.text_luganda, v.verse, 'LU')}</p>}
+                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
+                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`}>{v.text_luganda}</p>}
                   </div>
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
                 </div>
@@ -426,20 +331,16 @@ function ChapterContent() {
                   <button onClick={() => openCrossRefs(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'crossref' ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>🔗 Cross-Ref</button>
                   <button onClick={() => openCommentary(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'commentary' ? 'bg-blue-200 text-blue-900' : 'bg-slate-100 text-slate-800'}`}>📖 Commentary</button>
                   <button onClick={() => toggleBookmark(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13px] font-medium ${bookmarks.includes(v.verse) ? 'bg-amber-400 text-amber-950' : 'bg-slate-100 text-slate-700'}`}>{bookmarks.includes(v.verse) ? '🔖 Saved ✓' : '🔖 Bookmark'}</button>
-                  {(marks[markKey(v.verse, 'EN')]?.length || marks[markKey(v.verse, 'LU')]?.length) ? (
-                    <button onClick={() => { clearMarks(v.verse, 'EN'); clearMarks(v.verse, 'LU'); }} className="px-3 py-1.5 rounded-lg text-[13px] font-medium bg-yellow-100 text-yellow-900">✏️ Clear marks ✕</button>
-                  ) : null}
-                  <button onClick={() => markWholeVerse(v)} title="Mark this whole verse — no dragging needed" className="px-3 py-1.5 rounded-lg text-[13px] font-medium bg-yellow-200 text-yellow-950">🖍️ Mark</button>
                 </div>
 
                 {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
                 {isSel && activePanel === 'prayer' && (
                   <div className={`mt-4 rounded-xl ${themeClasses.prayer} border p-4`}>
-                    <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2 flex items-center justify-between">🙏 Pray-Read · Verse {v.verse} <button onClick={() => markWholeText(`prayer-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`, lang === 'LU' ? pr.lu : pr.en)} className="normal-case tracking-normal px-2 py-0.5 rounded-full bg-yellow-200 text-yellow-950 text-[11px] font-bold">🖍️ Mark prayer</button></p>
+                    <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
                     {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
-                        {pr.en && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(pr.en, `prayer-${v.verse}-EN`)}</p>}
-                        {pr.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-LU`)} className={`leading-relaxed whitespace-pre-wrap select-text cursor-text ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`} style={{ fontSize: bodySize }}>{renderMarkedByKey(pr.lu, `prayer-${v.verse}-LU`)}</p>}
+                        {pr.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{pr.en}</p>}
+                        {pr.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{pr.lu}</p>}
                       </>
                     )}
                   </div>
@@ -450,7 +351,7 @@ function ChapterContent() {
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
-                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span onMouseUp={() => onSelectGeneric(`crossref-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`crossref-${selectedVerse}-EN`)} className={`${crossBody} select-text cursor-text`}> — {renderMarkedByKey(cr.text_english, `crossref-${selectedVerse}-EN`)}</span>}</li>
+                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className={crossBody}> — {cr.text_english}</span>}</li>
                       ))}</ul>
                     )}
                   </div>
@@ -460,7 +361,7 @@ function ChapterContent() {
                   <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
                     <p className={`text-[11px] font-bold tracking-wide ${linkColor} uppercase mb-2`}>📖 Commentary · Verse {v.verse}</p>
                     {commentary[v.verse] ? (
-                      <p onMouseUp={() => onSelectGeneric(`commentary-${v.verse}-EN`)} onTouchEnd={() => onSelectGeneric(`commentary-${v.verse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse]), `commentary-${v.verse}-EN`)}</p>
+                      <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse])}</p>
                     ) : (
                       <p className="text-sm text-slate-600 leading-relaxed">No written commentary saved for this verse yet. Pray-read the verse above — the Prayer tab for this verse carries the meditation for it. Commentary is added from Admin → Commentaries.</p>
                     )}
@@ -474,16 +375,16 @@ function ChapterContent() {
           {(closing.en || closing.lu) && (
             <div className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-4 border-2 border-amber-200`}>
               <p className="text-[11px] font-bold tracking-wide text-amber-700 uppercase mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
-              {closing.en && <p onMouseUp={() => onSelectGeneric(`closing-ch-EN`)} onTouchEnd={() => onSelectGeneric(`closing-ch-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(closing.en, `closing-ch-EN`)}</p>}
-              {closing.lu && <p onMouseUp={() => onSelectGeneric(`closing-ch-LU`)} onTouchEnd={() => onSelectGeneric(`closing-ch-LU`)} className={`leading-relaxed whitespace-pre-wrap select-text cursor-text ${closing.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`} style={{ fontSize: bodySize }}>{renderMarkedByKey(closing.lu, `closing-ch-LU`)}</p>}
+              {closing.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{closing.en}</p>}
+              {closing.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${closing.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{closing.lu}</p>}
             </div>
           )}
           {/* Book Closing Prayer — only after the LAST chapter */}
           {chapterNum === Number(totalChapters) && (bookClose.en || bookClose.lu) && (
             <div className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-3 border-2 border-purple-200`}>
               <p className="text-[11px] font-bold tracking-wide text-purple-700 uppercase mb-2">🙏 Book Closing Prayer — {bookName}</p>
-              {bookClose.en && <p onMouseUp={() => onSelectGeneric(`book-closing-EN`)} onTouchEnd={() => onSelectGeneric(`book-closing-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(bookClose.en, `book-closing-EN`)}</p>}
-              {bookClose.lu && <p onMouseUp={() => onSelectGeneric(`book-closing-LU`)} onTouchEnd={() => onSelectGeneric(`book-closing-LU`)} className={`leading-relaxed whitespace-pre-wrap select-text cursor-text ${bookClose.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`} style={{ fontSize: bodySize }}>{renderMarkedByKey(bookClose.lu, `book-closing-LU`)}</p>}
+              {bookClose.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{bookClose.en}</p>}
+              {bookClose.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${bookClose.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{bookClose.lu}</p>}
             </div>
           )}
         </div>
@@ -510,19 +411,11 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">📕 Chapter {chapterNum}</p>
                 {!intro.en && !intro.lu ? <p className="text-sm text-slate-500 italic">No chapter introduction available.</p> : (
                   <>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p onMouseUp={() => onSelectGeneric(`intro-ch-EN`)} onTouchEnd={() => onSelectGeneric(`intro-ch-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.en, `intro-ch-EN`)}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p onMouseUp={() => onSelectGeneric(`intro-ch-LU`)} onTouchEnd={() => onSelectGeneric(`intro-ch-LU`)} className={`leading-relaxed whitespace-pre-wrap select-text cursor-text ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`} style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.lu, `intro-ch-LU`)}</p>}
-                    {sidebarLang === 'EN' && !intro.en && intro.lu && <p onMouseUp={() => onSelectGeneric(`intro-ch-LU`)} onTouchEnd={() => onSelectGeneric(`intro-ch-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.lu, `intro-ch-LU`)}</p>}
-                    {sidebarLang === 'LU' && !intro.lu && intro.en && <p onMouseUp={() => onSelectGeneric(`intro-ch-EN`)} onTouchEnd={() => onSelectGeneric(`intro-ch-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.en, `intro-ch-EN`)}</p>}
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.en}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{intro.lu}</p>}
+                    {sidebarLang === 'EN' && !intro.en && intro.lu && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.lu}</p>}
+                    {sidebarLang === 'LU' && !intro.lu && intro.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.en}</p>}
                   </>
-                )}
-                {/* V7: Book Introduction — same sidebar, selectable */}
-                {(bookIntroVal.en || bookIntroVal.lu) && (
-                  <div className="mt-5 pt-4 border-t border-slate-200">
-                    <p className="font-bold text-[15px] mb-2">📘 Book Introduction — {bookName}</p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && bookIntroVal.en && <p onMouseUp={() => onSelectGeneric(`book-intro-EN`)} onTouchEnd={() => onSelectGeneric(`book-intro-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(bookIntroVal.en, `book-intro-EN`)}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && bookIntroVal.lu && <p onMouseUp={() => onSelectGeneric(`book-intro-LU`)} onTouchEnd={() => onSelectGeneric(`book-intro-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text mt-3" style={{ fontSize: bodySize }}>{renderMarkedByKey(bookIntroVal.lu, `book-intro-LU`)}</p>}
-                  </div>
                 )}
               </div>
             )}
@@ -534,7 +427,7 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
                 {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                   <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span onMouseUp={() => onSelectGeneric(`crossref-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`crossref-${selectedVerse}-EN`)} className={`${crossBody} select-text cursor-text`}> — {renderMarkedByKey(cr.text_english, `crossref-${selectedVerse}-EN`)}</span>}</li>
+                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className={crossBody}> — {cr.text_english}</span>}</li>
                   ))}</ul>
                 )}
                 <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -550,10 +443,10 @@ function ChapterContent() {
                     <p className="font-bold text-[16px] mb-3">🙏 {bookName} {chapterNum}:{selectedVerse}</p>
                     {!selectedPrayer.en && !selectedPrayer.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
-                        {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
-                        {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className={`leading-relaxed whitespace-pre-wrap select-text cursor-text ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`} style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
-                        {sidebarLang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
-                        {sidebarLang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
+                        {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.en}</p>}
+                        {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{selectedPrayer.lu}</p>}
+                        {sidebarLang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.lu}</p>}
+                        {sidebarLang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.en}</p>}
                       </>
                     )}
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -563,16 +456,8 @@ function ChapterContent() {
                 {(closing.en || closing.lu) && (
                   <div className="mt-5 pt-4 border-t border-slate-200">
                     <p className="font-bold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en && <p onMouseUp={() => onSelectGeneric(`closing-ch-EN`)} onTouchEnd={() => onSelectGeneric(`closing-ch-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(closing.en, `closing-ch-EN`)}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && closing.lu && <p onMouseUp={() => onSelectGeneric(`closing-ch-LU`)} onTouchEnd={() => onSelectGeneric(`closing-ch-LU`)} className={`leading-relaxed whitespace-pre-wrap select-text cursor-text ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`} style={{ fontSize: bodySize }}>{renderMarkedByKey(closing.lu, `closing-ch-LU`)}</p>}
-                  </div>
-                )}
-                {/* V7: Book Closing Prayer — in sidebar too, selectable */}
-                {(bookClose.en || bookClose.lu) && (
-                  <div className="mt-5 pt-4 border-t border-slate-200">
-                    <p className="font-bold text-[15px] mb-2">🙏 Book Closing Prayer — {bookName}</p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && bookClose.en && <p onMouseUp={() => onSelectGeneric(`book-closing-EN`)} onTouchEnd={() => onSelectGeneric(`book-closing-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(bookClose.en, `book-closing-EN`)}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && bookClose.lu && <p onMouseUp={() => onSelectGeneric(`book-closing-LU`)} onTouchEnd={() => onSelectGeneric(`book-closing-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text mt-3" style={{ fontSize: bodySize }}>{renderMarkedByKey(bookClose.lu, `book-closing-LU`)}</p>}
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{closing.en}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
                   </div>
                 )}
               </div>
@@ -628,8 +513,8 @@ function ChapterContent() {
             {rightTab === 'intro' && (
               <div>
                 <p className="font-bold mb-2">Chapter {chapterNum} — Intro</p>
-                {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p onMouseUp={() => onSelectGeneric(`intro-ch-EN`)} onTouchEnd={() => onSelectGeneric(`intro-ch-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.en, `intro-ch-EN`)}</p>}
-                {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p onMouseUp={() => onSelectGeneric(`intro-ch-LU`)} onTouchEnd={() => onSelectGeneric(`intro-ch-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text mt-3" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.lu, `intro-ch-LU`)}</p>}
+                {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.en}</p>}
+                {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p className="leading-relaxed whitespace-pre-wrap mt-3" style={{ fontSize: bodySize }}>{intro.lu}</p>}
                 {!intro.en && !intro.lu && <p className="text-sm text-slate-500 italic">No chapter introduction available.</p>}
               </div>
             )}
@@ -639,29 +524,14 @@ function ChapterContent() {
                 {!selectedVerse ? <p className="text-sm">Tap ♡ Prayer under any verse to pray it here.</p> : (
                   <div>
                     <p className="font-bold mb-2">{bookName} {chapterNum}:{selectedVerse}</p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text mt-3" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.en}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p className="leading-relaxed whitespace-pre-wrap mt-3" style={{ fontSize: bodySize }}>{selectedPrayer.lu}</p>}
                     {!selectedPrayer.en && !selectedPrayer.lu && <p className="text-sm italic text-slate-500">No prayer for this verse yet.</p>}
                   </div>
                 )}
               </div>
             )}
           </div>
-        </div>
-      )}
-
-
-      {/* V8: Highlight / Underline toolbar — FIXED AT BOTTOM so the Android Copy/Select-all popup never covers it. Private: marks stay on this device only. */}
-      {pendingMark && (
-        <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
-          <span className="hidden sm:inline text-[11px] text-slate-300 pl-1 pr-1 whitespace-nowrap">Mark:</span>
-          <button onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onClick={() => applyMark('underline', 'decoration-orange-500 text-inherit')} title="Underline orange" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-orange-500">U</button>
-          <button onClick={() => applyMark('underline', 'decoration-blue-500 text-inherit')} title="Underline blue" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-blue-500">U</button>
-          <button onClick={() => { try { navigator.clipboard?.writeText(pendingMark.text); } catch {} setPendingMark(null); }} title="Copy selection" className="w-8 h-8 rounded-full bg-white/15 text-[13px] flex items-center justify-center">⧉</button>
-          <button onClick={() => setPendingMark(null)} title="Close" className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">✕</button>
         </div>
       )}
 
