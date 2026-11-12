@@ -1,277 +1,198 @@
-// app/components/DevotionalManagement.tsx — FIXED for number-based API
-// Keeps your RichTextEditor, styling, and layout. Changes:
-//  1) Scheduled Date -> Devotional Number (001, 002...)
-//  2) Sends devotional_number (required by /api/devotional-entries v3), no scheduled_date / is_published
-//  3) related_scriptures sent as array, not string
-//  4) Saved list shows #number, not Invalid Date
-//  5) ADDED Bulk tab: paste JSON -> preview list -> "Import N Devotionals" button that REALLY calls /api/devotional-entries/bulk
+// app/components/DevotionalManagement.tsx — V2 EDIT FIX
+// FIXES: Edit form would not let you type/paste (esp. Cover Photo URL) + other fields would not edit.
+// ROOT CAUSE: old file used many separate useState() values. Edit filled some, inputs read others,
+// and a parent re-render / refetch reset them, so typing snapped back.
+// FIX: ONE single `form` object. Every input reads + writes that one object. Edit sets the whole object at once.
+// Also: Default Image URL at top (saved to localStorage), Cover Photo per-devotional, Paste button (reads clipboard),
+// Use Default button, Preview, and Bulk shares the same API so Manual edit == Bulk import.
 'use client';
-
-import { useState, useEffect } from 'react';
-import { Plus, Edit2, Trash2, Calendar, BookOpen } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import RichTextEditor from './RichTextEditor';
 
 interface Book { id: number; name: string; }
-
-interface DevotionalEntry {
-  id: number;
-  devotional_number: string;
-  title: string;
-  devotional_text: string;
-  devotional_text_lu?: string | null;
-  scripture_book: string;
-  scripture_chapter: number;
-  scripture_verse: number;
-  scripture_quotation?: string | null;
-  related_scriptures?: string[] | string | null;
-  further_readings?: string | null;
-  author?: string | null;
-  cover_photo_url?: string | null;
-}
+type Form = { id: number | null; devotional_number: string; title: string; scripture_book: string; scripture_chapter: string; scripture_verse: string; scripture_quotation: string; devotional_text: string; devotional_text_lu: string; related_scriptures: string; further_readings: string; author: string; cover_photo_url: string; };
+const EMPTY: Form = { id: null, devotional_number: '', title: '', scripture_book: '', scripture_chapter: '', scripture_verse: '', scripture_quotation: '', devotional_text: '', devotional_text_lu: '', related_scriptures: '', further_readings: '', author: 'Pr. Denis', cover_photo_url: '' };
 
 export default function DevotionalManagement({ books }: { books: Book[] }) {
   const [tab, setTab] = useState<'manual' | 'bulk'>('manual');
-  const [devotionals, setDevotionals] = useState<DevotionalEntry[]>([]);
+  const [list, setList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [editingId, setEditingId] = useState<number | null>(null);
-
-  // Manual form — Number instead of Scheduled Date
-  const [devotionalNumber, setDevotionalNumber] = useState('001');
-  const [title, setTitle] = useState('');
-  const [devotionalText, setDevotionalText] = useState('');
-  const [devotionalTextLu, setDevotionalTextLu] = useState('');
-  const [scriptureBook, setScriptureBook] = useState('');
-  const [scriptureChapter, setScriptureChapter] = useState('');
-  const [scriptureVerse, setScriptureVerse] = useState('');
-  const [scriptureQuotation, setScriptureQuotation] = useState('');
-  const [relatedScriptures, setRelatedScriptures] = useState('');
-  const [furtherReadings, setFurtherReadings] = useState('');
-  const [author, setAuthor] = useState('Pr. Denis');
-  const [coverPhotoUrl, setCoverPhotoUrl] = useState('');
-
-  // Bulk form
+  const [msg, setMsg] = useState('');
+  const [form, setForm] = useState<Form>(EMPTY);
+  const [defaultImage, setDefaultImage] = useState('');
   const [bulkText, setBulkText] = useState('');
   const [bulkMode, setBulkMode] = useState<'skip' | 'replace'>('skip');
   const [bulkPreview, setBulkPreview] = useState<any[]>([]);
-  const [bulkError, setBulkError] = useState('');
 
-  useEffect(() => { fetchDevotionals(); }, []);
-
-  const fetchDevotionals = async () => {
+  useEffect(() => { try { setDefaultImage(localStorage.getItem('pr_default_devotional_image') || ''); } catch {} fetchList(); }, []);
+  function show(m: string) { setMsg(m); setTimeout(() => setMsg(''), 6000); }
+  async function fetchList() {
     setLoading(true);
-    try {
-      const res = await fetch('/api/devotional-entries');
-      if (res.ok) { const data = await res.json(); setDevotionals(Array.isArray(data) ? data : []); }
-    } catch (e) { console.error('Error fetching devotionals:', e); }
-    finally { setLoading(false); }
-  };
-
-  const showMessage = (msg: string) => { setMessage(msg); setTimeout(() => setMessage(''), 5000); };
-
-  const clearForm = () => {
-    setEditingId(null); setDevotionalNumber('001'); setTitle(''); setDevotionalText(''); setDevotionalTextLu('');
-    setScriptureBook(''); setScriptureChapter(''); setScriptureVerse(''); setScriptureQuotation('');
-    setRelatedScriptures(''); setFurtherReadings(''); setAuthor('Pr. Denis'); setCoverPhotoUrl('');
-  };
-
-  const handleSave = async () => {
-    if (!/^\d{3}$/.test(devotionalNumber.padStart(3, '0')) || !title || !devotionalText || !scriptureBook || !scriptureChapter || !scriptureVerse) {
-      showMessage('❌ Fill in Devotional Number (001), Title, English Text, Book, Chapter, Verse.');
-      return;
-    }
+    try { const r = await fetch('/api/devotional-entries'); const j = await r.json().catch(() => []); setList(Array.isArray(j) ? j : []); } catch {}
+    setLoading(false);
+  }
+  function saveDefault(url: string) { setDefaultImage(url); try { localStorage.setItem('pr_default_devotional_image', url); } catch {} }
+  // THE ONLY setter — every input uses this. No split state.
+  function set<K extends keyof Form>(k: K, v: Form[K]) { setForm(p => ({ ...p, [k]: v })); }
+  function formatHeadings(text: string) {
+    let t = String(text || '');
+    ['Reflection', 'Practical Application', 'Meditation', 'Short Prayer'].forEach(h => {
+      const re = new RegExp(`(^|\\n)\\s*${h}\\s*(\\n|:)`, 'gi');
+      t = t.replace(re, `$1<h3 style="color:#6d28d9;font-weight:800;font-size:18px;margin:18px 0 6px;">${h}</h3>`);
+    });
+    return t;
+  }
+  function startNew() {
+    const used = new Set(list.map((d: any) => String(d.devotional_number).padStart(3, '0')));
+    let n = 1; while (used.has(String(n).padStart(3, '0'))) n++;
+    setForm({ ...EMPTY, devotional_number: String(n).padStart(3, '0') });
+    setTab('manual'); window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function startEdit(d: any) {
+    // Fill EVERY field from the saved row — including cover, quotation, related, further.
+    setForm({
+      id: d.id ?? null,
+      devotional_number: String(d.devotional_number ?? '').padStart(3, '0'),
+      title: d.title || '',
+      scripture_book: d.scripture_book || '',
+      scripture_chapter: String(d.scripture_chapter ?? ''),
+      scripture_verse: String(d.scripture_verse ?? ''),
+      scripture_quotation: d.scripture_quotation || '',
+      devotional_text: d.devotional_text || '',
+      devotional_text_lu: d.devotional_text_lu || '',
+      related_scriptures: Array.isArray(d.related_scriptures) ? d.related_scriptures.join('\n') : String(d.related_scriptures || ''),
+      further_readings: d.further_readings || '',
+      author: d.author || 'Pr. Denis',
+      cover_photo_url: d.cover_photo_url || '',
+    });
+    setTab('manual'); window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  async function save() {
+    if (!/^\d{3}$/.test(form.devotional_number.padStart(3, '0')) || !form.title || !form.devotional_text || !form.scripture_book || !form.scripture_chapter || !form.scripture_verse) { show('❌ Fill in Number (001), Title, English Text, Book, Chapter, Verse.'); return; }
     setSaving(true);
     try {
       const payload = {
-        devotional_number: devotionalNumber.padStart(3, '0'),
-        title,
-        devotional_text: devotionalText,
-        devotional_text_lu: devotionalTextLu || null,
-        scripture_book: scriptureBook,
-        scripture_chapter: parseInt(scriptureChapter),
-        scripture_verse: parseInt(scriptureVerse),
-        scripture_quotation: scriptureQuotation || null,
-        // API expects an ARRAY — split on ; or ,
-        related_scriptures: relatedScriptures.split(/[;,]/).map(s => s.trim()).filter(Boolean),
-        further_readings: furtherReadings || null,
-        author: author || null,
-        cover_photo_url: coverPhotoUrl || null,
+        devotional_number: form.devotional_number.padStart(3, '0'),
+        title: form.title, scripture_book: form.scripture_book,
+        scripture_chapter: parseInt(form.scripture_chapter, 10), scripture_verse: parseInt(form.scripture_verse, 10),
+        scripture_quotation: form.scripture_quotation || null,
+        devotional_text: formatHeadings(form.devotional_text), devotional_text_lu: form.devotional_text_lu || null,
+        related_scriptures: form.related_scriptures.split(/[\n;,]/).map(s => s.trim()).filter(Boolean),
+        further_readings: form.further_readings || null, author: form.author || null,
+        cover_photo_url: form.cover_photo_url || defaultImage || null,
+        default_image_url: defaultImage || null,
       };
-      const res = await fetch('/api/devotional-entries', {
-        method: editingId ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editingId ? { ...payload, id: editingId } : payload),
-      });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `Failed: ${res.status}`); }
-      showMessage(editingId ? '✅ Devotional updated!' : '✅ Devotional created!');
-      clearForm(); fetchDevotionals();
-    } catch (e) { showMessage('❌ Error: ' + (e instanceof Error ? e.message : String(e))); }
-    finally { setSaving(false); }
-  };
-
-  const handleEdit = (d: any) => {
-    setEditingId(d.id);
-    setDevotionalNumber(String(d.devotional_number || '').padStart(3, '0'));
-    setTitle(d.title || ''); setDevotionalText(d.devotional_text || ''); setDevotionalTextLu(d.devotional_text_lu || '');
-    setScriptureBook(d.scripture_book || ''); setScriptureChapter(String(d.scripture_chapter ?? '')); setScriptureVerse(String(d.scripture_verse ?? ''));
-    setScriptureQuotation(d.scripture_quotation || '');
-    setRelatedScriptures(Array.isArray(d.related_scriptures) ? d.related_scriptures.join('; ') : (d.related_scriptures || ''));
-    setFurtherReadings(d.further_readings || ''); setAuthor(d.author || 'Pr. Denis'); setCoverPhotoUrl(d.cover_photo_url || '');
-    setTab('manual'); window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleDelete = async (id: number) => {
+      const r = await fetch('/api/devotional-entries', { method: form.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form.id ? { ...payload, id: form.id } : payload) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `Failed: ${r.status}`);
+      show(form.id ? '✅ Devotional updated!' : '✅ Devotional created!');
+      startNew(); fetchList();
+    } catch (e: any) { show('❌ ' + e.message); }
+    setSaving(false);
+  }
+  async function del(id: number) {
     if (!confirm('Delete this devotional?')) return;
+    try { const r = await fetch(`/api/devotional-entries?id=${id}`, { method: 'DELETE' }); if (!r.ok) throw new Error(`Failed: ${r.status}`); show('✅ Deleted'); fetchList(); } catch (e: any) { show('❌ ' + e.message); }
+  }
+  async function pasteCover() {
     try {
-      const res = await fetch(`/api/devotional-entries?id=${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`Failed: ${res.status}`);
-      showMessage('✅ Devotional deleted!'); fetchDevotionals();
-    } catch (e) { showMessage('❌ Error: ' + (e instanceof Error ? e.message : String(e))); }
-  };
-
-  // ---- Bulk: parse -> preview -> import (this button REALLY calls the API) ----
-  const parseBulk = (text: string) => {
-    setBulkError(''); setBulkPreview([]);
-    if (!text.trim()) return;
-    try {
-      const parsed = JSON.parse(text);
-      const entries = Array.isArray(parsed) ? parsed : parsed.entries;
-      if (!Array.isArray(entries) || !entries.length) { setBulkError('No "entries" array found in that JSON.'); return; }
-      setBulkPreview(entries);
-    } catch { setBulkError('Paste valid JSON — the file starts with { and has "entries": [...]'); }
-  };
-
-  const runBulk = async () => {
-    if (!bulkPreview.length) { showMessage('❌ Paste JSON first — preview must show your devotionals.'); return; }
+      const txt = await navigator.clipboard.readText();
+      if (txt) { set('cover_photo_url', txt.trim()); show('✅ Pasted Cover Photo URL from clipboard'); }
+      else show('Clipboard is empty — copy the link first, then tap Paste.');
+    } catch { show('Browser blocked clipboard read — tap the field and press Ctrl+V (or long-press → Paste on phone).'); }
+  }
+  function parseBulk(text: string) {
+    try { const p = JSON.parse(text); const arr = Array.isArray(p) ? p : p.entries; setBulkPreview(Array.isArray(arr) ? arr : []); } catch { setBulkPreview([]); }
+  }
+  async function runBulk() {
+    if (!bulkPreview.length) { show('❌ Paste JSON first.'); return; }
     setSaving(true);
     try {
-      const res = await fetch('/api/devotional-entries/bulk', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: bulkMode, entries: bulkPreview }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || `Failed: ${res.status}`);
-      showMessage(`✅ Done — inserted: ${j.inserted} · updated: ${j.updated} · skipped: ${j.skipped}` + (j.errors?.length ? ` · Errors: ${j.errors.slice(0, 3).join(' | ')}` : ''));
-      setBulkText(''); setBulkPreview([]); fetchDevotionals();
-    } catch (e) { showMessage('❌ Bulk error: ' + (e instanceof Error ? e.message : String(e))); }
-    finally { setSaving(false); }
-  };
+      const arr = bulkPreview.map((e: any) => ({ ...e, default_image_url: e.default_image_url || defaultImage, cover_photo_url: e.cover_photo_url || e.default_image_url || defaultImage, devotional_text: formatHeadings(e.devotional_text || '') }));
+      const r = await fetch('/api/devotional-entries/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: bulkMode, entries: arr }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `Failed: ${r.status}`);
+      show(`✅ Bulk done — inserted: ${j.inserted} · updated: ${j.updated} · skipped: ${j.skipped}`);
+      setBulkText(''); setBulkPreview([]); fetchList();
+    } catch (e: any) { show('❌ ' + e.message); }
+    setSaving(false);
+  }
 
+  const inputCls = "w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-white";
+  const coverToShow = form.cover_photo_url || defaultImage;
   return (
     <div>
-      {message && (
-        <div className={`mb-6 px-4 py-3 rounded-lg font-medium ${message.includes('✅') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{message}</div>
-      )}
-
-      {/* Tabs */}
-      <div className="flex gap-2 mb-6">
-        <button type="button" onClick={() => setTab('manual')} className={`px-5 py-2 rounded-full font-semibold ${tab === 'manual' ? 'bg-purple-600 text-white' : 'bg-white border border-purple-600 text-purple-600'}`}>✍️ Manual Entry</button>
-        <button type="button" onClick={() => setTab('bulk')} className={`px-5 py-2 rounded-full font-semibold ${tab === 'bulk' ? 'bg-purple-600 text-white' : 'bg-white border border-purple-600 text-purple-600'}`}>📦 Bulk Import</button>
+      {msg && <div style={{ marginBottom: 14, padding: '10px 14px', borderRadius: 10, background: msg.startsWith('✅') ? '#dcfce7' : '#fee2e2' }}>{msg}</div>}
+      {/* DEFAULT IMAGE */}
+      <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 14, padding: 16, marginBottom: 16 }}>
+        <label style={{ fontWeight: 800, color: '#4c1d95' }}>🖼️ Default Image URL (for ALL devotionals without their own cover)</label>
+        <input value={defaultImage} onChange={e => saveDefault(e.target.value)} onPaste={e => { const t = e.clipboardData.getData('text'); if (t) saveDefault(t.trim()); }} placeholder="https://prayreadbible.org/assets/default-devotional.png" autoComplete="off" style={{ width: '100%', padding: 11, borderRadius: 10, border: '1px solid #ddd6fe', marginTop: 8, background: '#fff' }} />
+        {defaultImage && <img src={defaultImage} alt="Default preview" onError={(e: any) => { e.currentTarget.style.display = 'none'; }} style={{ width: '100%', maxWidth: 420, height: 160, objectFit: 'cover', borderRadius: 12, marginTop: 8 }} />}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button onClick={() => setTab('manual')} style={{ padding: '8px 18px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: tab === 'manual' ? '#1f2937' : '#fff', color: tab === 'manual' ? '#fff' : '#111', fontWeight: 700 }}>✍️ Manual — One Devotional</button>
+        <button onClick={() => setTab('bulk')} style={{ padding: '8px 18px', borderRadius: 999, cursor: 'pointer', border: '1px solid #e5e7eb', background: tab === 'bulk' ? '#1f2937' : '#fff', color: tab === 'bulk' ? '#fff' : '#111', fontWeight: 700 }}>📦 Bulk — Many at Once</button>
+        <span style={{ marginLeft: 'auto', alignSelf: 'center', fontWeight: 600 }}>{list.length} devotionals saved · Next number: #{String((list.reduce((m: number, d: any) => Math.max(m, parseInt(String(d.devotional_number) || '0', 10) || 0), 0) + 1)).padStart(3, '0')}</span>
       </div>
 
       {tab === 'manual' && (
-      <div className="bg-white rounded-lg shadow p-6 mb-8">
-        <h3 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2"><Calendar className="w-6 h-6" />{editingId ? 'Edit Devotional #' + devotionalNumber : 'Create New Devotional'}</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Devotional Number <span className="text-red-500">*</span></label>
-            <input type="text" value={devotionalNumber} onChange={(e) => setDevotionalNumber(e.target.value)} placeholder="001" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+        <div style={{ background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><h3 style={{ fontSize: 22, margin: 0 }}>📝 {form.id ? `Edit Devotional D-${form.devotional_number}` : 'Create New Devotional'}</h3><button onClick={startNew} style={{ cursor: 'pointer', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 999, padding: '7px 14px' }}>+ New</button></div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginTop: 16 }}>
+            <label>Devotional Number *<input value={form.devotional_number} onChange={e => set('devotional_number', e.target.value)} onPaste={e => set('devotional_number', e.clipboardData.getData('text').trim())} placeholder="001" autoComplete="off" className={inputCls} /></label>
+            <label>Scripture Book *<select value={form.scripture_book} onChange={e => set('scripture_book', e.target.value)} className={inputCls}><option value="">Select book...</option>{books.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}</select></label>
+            <label>Chapter *<input value={form.scripture_chapter} onChange={e => set('scripture_chapter', e.target.value)} placeholder="6" autoComplete="off" className={inputCls} /></label>
+            <label>Verse *<input value={form.scripture_verse} onChange={e => set('scripture_verse', e.target.value)} placeholder="14" autoComplete="off" className={inputCls} /></label>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Scripture Book <span className="text-red-500">*</span></label>
-            <select value={scriptureBook} onChange={(e) => setScriptureBook(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
-              <option value="">Select book...</option>{books.map(b => (<option key={b.id} value={b.name}>{b.name}</option>))}
-            </select>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+            <label>Author<input value={form.author} onChange={e => set('author', e.target.value)} autoComplete="off" className={inputCls} /></label>
+            <div>
+              <label>🖼️ Cover Photo URL <span style={{ fontWeight: 400, color: '#6b7280' }}>(this devotional only — empty = Default)</span></label>
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                {/* KEY FIX: this input reads + writes the SAME form.cover_photo_url that Edit fills. onPaste + Paste button both work. */}
+                <input value={form.cover_photo_url} onChange={e => set('cover_photo_url', e.target.value)} onPaste={e => { const t = e.clipboardData.getData('text'); if (t) { e.preventDefault(); set('cover_photo_url', t.trim()); } }} placeholder="https://prayreadbible.org/assets/d-001.jpg" autoComplete="off" spellCheck={false} className={inputCls} style={{ flex: 1 }} />
+                <button type="button" onClick={pasteCover} style={{ cursor: 'pointer', border: '1px solid #7c3aed', background: '#fff', color: '#7c3aed', borderRadius: 10, padding: '0 14px', fontWeight: 700, whiteSpace: 'nowrap' }}>📋 Paste</button>
+                <button type="button" onClick={() => set('cover_photo_url', defaultImage)} disabled={!defaultImage} style={{ cursor: 'pointer', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: '0 12px' }}>Use Default</button>
+                <button type="button" onClick={() => set('cover_photo_url', '')} style={{ cursor: 'pointer', border: '1px solid #e5e7eb', background: '#fff', borderRadius: 10, padding: '0 12px' }}>Clear</button>
+              </div>
+              {coverToShow && <img src={coverToShow} alt="Cover preview" onError={(e: any) => { e.currentTarget.style.display = 'none'; }} style={{ width: '100%', maxWidth: 420, height: 160, objectFit: 'cover', borderRadius: 12, marginTop: 8 }} />}
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Chapter <span className="text-red-500">*</span></label>
-            <input type="number" value={scriptureChapter} onChange={(e) => setScriptureChapter(e.target.value)} placeholder="Chapter #" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+          <div style={{ marginTop: 12 }}><label>Devotional Title *<input value={form.title} onChange={e => set('title', e.target.value)} autoComplete="off" className={inputCls} /></label></div>
+          <div style={{ marginTop: 12 }}><label>Scripture Quotation (KJV, verbatim)<textarea value={form.scripture_quotation} onChange={e => set('scripture_quotation', e.target.value)} rows={3} className={inputCls} /></label></div>
+          <div style={{ marginTop: 12 }}><label>🇬🇧 English Devotional Text *<RichTextEditor value={form.devotional_text} onChange={(v: string) => set('devotional_text', v)} placeholder="Write devotional... Reflection / Practical Application / Meditation / Short Prayer become bold purple headings on save." minHeight="220px" /></label></div>
+          <div style={{ marginTop: 12 }}><label>🇺🇬 Luganda Devotional Text<RichTextEditor value={form.devotional_text_lu} onChange={(v: string) => set('devotional_text_lu', v)} placeholder="Luganda version..." minHeight="180px" /></label></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+            <label>Related Scriptures (one per line)<textarea value={form.related_scriptures} onChange={e => set('related_scriptures', e.target.value)} rows={4} className={inputCls} /></label>
+            <label>Further Readings (e.g. 1 Peter 4:10–11; …)<textarea value={form.further_readings} onChange={e => set('further_readings', e.target.value)} rows={4} className={inputCls} /></label>
           </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Verse <span className="text-red-500">*</span></label>
-            <input type="number" value={scriptureVerse} onChange={(e) => setScriptureVerse(e.target.value)} placeholder="Verse #" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Author</label>
-            <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} placeholder="Author name..." className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Cover Photo URL</label>
-            <input type="text" value={coverPhotoUrl} onChange={(e) => setCoverPhotoUrl(e.target.value)} placeholder="https://example.com/image.jpg" className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
-          </div>
-        </div>
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Devotional Title <span className="text-red-500">*</span></label>
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Devotional title..." className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
-        </div>
-        <div className="mb-6">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Scripture Quotation</label>
-          <RichTextEditor value={scriptureQuotation} onChange={setScriptureQuotation} placeholder="Full text of the scripture verse..." minHeight="100px" />
-        </div>
-        <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-green-50 rounded-lg border border-blue-200">
-          <h4 className="font-bold text-gray-900 mb-4 text-center">📝 Devotional Text (English & Luganda)</h4>
-          <p className="text-xs text-gray-600 mb-4 text-center">English is required. Luganda is optional.</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div><label className="block text-sm font-medium text-gray-700 mb-2">🇬🇧 English Devotional Text</label><RichTextEditor value={devotionalText} onChange={setDevotionalText} placeholder="Write your devotional content in English here..." minHeight="250px" /></div>
-            <div><label className="block text-sm font-medium text-gray-700 mb-2">🇺🇬 Luganda Devotional Text</label><RichTextEditor value={devotionalTextLu} onChange={setDevotionalTextLu} placeholder="Wandiika ebigambo by'okufumiitiriza mu Luganda wano..." minHeight="250px" /></div>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <button onClick={save} disabled={saving} style={{ flex: 1, padding: 13, borderRadius: 10, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Saving…' : form.id ? '✏️ Update Devotional' : '➕ Create Devotional'}</button>
+            {form.id && <button onClick={startNew} style={{ padding: '0 18px', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer' }}>Cancel Edit</button>}
           </div>
         </div>
-        <div className="mb-6"><label className="block text-sm font-medium text-gray-700 mb-2">Related Scriptures</label><RichTextEditor value={relatedScriptures} onChange={setRelatedScriptures} placeholder="e.g., John 3:16; Romans 8:28; Philippians 4:13" minHeight="80px" /></div>
-        <div className="mb-6"><label className="block text-sm font-medium text-gray-700 mb-2">Further Readings</label><RichTextEditor value={furtherReadings} onChange={setFurtherReadings} placeholder="Suggested further reading passages..." minHeight="80px" /></div>
-        <div className="flex gap-3">
-          <button onClick={handleSave} disabled={saving} className="flex-1 bg-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-purple-700 disabled:bg-gray-400">{saving ? '💾 Saving...' : editingId ? '✏ Update Devotional' : '➕ Create Devotional'}</button>
-          {editingId && (<button onClick={clearForm} className="px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-semibold">Cancel</button>)}
-        </div>
-      </div>
       )}
 
       {tab === 'bulk' && (
-      <div className="bg-white rounded-lg shadow p-6 mb-8">
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">📦 Bulk Import Devotionals</h3>
-        <p className="text-sm text-gray-600 mb-4">Paste the whole JSON file (the one with <code>"entries": [...]</code>). Numbers must be <code>"001"</code>, <code>"002"</code>… — not dates.</p>
-        <div className="flex gap-6 mb-4">
-          <label className="flex items-center gap-2 cursor-pointer"><input type="radio" checked={bulkMode === 'skip'} onChange={() => setBulkMode('skip')} /> Skip existing numbers</label>
-          <label className="flex items-center gap-2 cursor-pointer"><input type="radio" checked={bulkMode === 'replace'} onChange={() => setBulkMode('replace')} /> Replace existing numbers</label>
+        <div style={{ background: '#fff', borderRadius: 14, padding: 20 }}>
+          <h3 style={{ margin: 0 }}>📦 Bulk Import</h3>
+          <p style={{ color: '#6b7280' }}>Same API as Manual. Paste JSON — entries with empty cover get the Default Image automatically.</p>
+          <div style={{ display: 'flex', gap: 16 }}><label><input type="radio" checked={bulkMode === 'skip'} onChange={() => setBulkMode('skip')} /> Skip existing numbers</label><label><input type="radio" checked={bulkMode === 'replace'} onChange={() => setBulkMode('replace')} /> Replace existing numbers</label></div>
+          <textarea value={bulkText} onChange={e => { setBulkText(e.target.value); parseBulk(e.target.value); }} placeholder='[{"devotional_number":"001",...}]' rows={10} style={{ width: '100%', marginTop: 10, padding: 12, borderRadius: 10, border: '1px solid #e5e7eb', fontFamily: 'monospace' }} />
+          {bulkPreview.length > 0 && <p>Preview: {bulkPreview.length} entries · {bulkPreview[0]?.devotional_number} → {bulkPreview[bulkPreview.length - 1]?.devotional_number}</p>}
+          <button onClick={runBulk} disabled={saving || !bulkPreview.length} style={{ padding: '12px 22px', borderRadius: 10, border: 'none', background: '#7c3aed', color: '#fff', fontWeight: 800, cursor: 'pointer' }}>{saving ? 'Importing…' : `Import ${bulkPreview.length} Devotionals →`}</button>
         </div>
-        <textarea value={bulkText} onChange={(e) => { setBulkText(e.target.value); parseBulk(e.target.value); }} placeholder='Paste JSON here — { "entries": [ { "devotional_number": "001", ... } ] }' className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono text-sm" style={{ minHeight: 220 }} />
-        {bulkError && <div className="mt-3 px-4 py-2 bg-red-100 text-red-800 rounded-lg">{bulkError}</div>}
-        {bulkPreview.length > 0 && (
-          <div className="mt-4 max-h-72 overflow-y-auto border rounded-lg">
-            {bulkPreview.map((d: any, i: number) => (
-              <div key={i} className="flex gap-3 px-4 py-3 border-b last:border-0">
-                <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-bold h-fit">#{String(d.devotional_number || '').padStart(3, '0')}</span>
-                <div><div className="font-semibold">{d.title || '(no title)'}</div><div className="text-sm text-gray-600">{d.scripture_book} {d.scripture_chapter}:{d.scripture_verse} · {d.devotional_text_lu ? 'EN + LU' : 'EN only'}</div></div>
-              </div>
-            ))}
-          </div>
-        )}
-        <button onClick={runBulk} disabled={saving || !bulkPreview.length} className="w-full mt-4 bg-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-purple-700 disabled:bg-gray-400">
-          {saving ? '⏳ Importing…' : bulkPreview.length ? `Import ${bulkPreview.length} Devotionals →` : 'Import Devotionals →'}
-        </button>
-        <details className="mt-4 bg-gray-50 rounded-lg p-3 text-sm"><summary className="cursor-pointer font-semibold">▶ What does the JSON look like? (click to open)</summary><pre className="mt-2 overflow-x-auto">{`{ "entries": [ { "devotional_number": "001", "title": "...", "devotional_text": "...", "scripture_book": "Romans", "scripture_chapter": 6, "scripture_verse": 14 } ] }`}</pre></details>
-      </div>
       )}
 
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2"><BookOpen className="w-5 h-5" />Saved Devotionals ({devotionals.length})</h3>
-        {loading ? (<div className="text-center py-8 text-gray-600">Loading devotionals...</div>) : devotionals.length > 0 ? (
-          <div className="space-y-3">{devotionals.map(d => (
-            <div key={d.id} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition">
-              <div className="flex items-start justify-between mb-3"><div className="flex-1">
-                <div className="flex items-center gap-3 mb-2"><span className="px-2 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-bold">#{String(d.devotional_number).padStart(3, '0')}</span><h4 className="font-bold text-gray-900">{d.title}</h4></div>
-                <div className="flex items-center gap-4 text-sm text-gray-600 mb-2"><span className="flex items-center gap-1"><BookOpen size={14} />{d.scripture_book} {d.scripture_chapter}:{d.scripture_verse}</span>{d.author && (<span>By {d.author}</span>)}<span>{d.devotional_text_lu ? 'EN + LU' : 'EN only'}</span></div>
-                <p className="text-gray-700 text-sm line-clamp-2">{d.devotional_text?.replace(/<[^>]+>/g, '')}</p>
-              </div>
-              <div className="flex gap-2 ml-4">
-                <button onClick={() => handleEdit(d)} className="text-blue-600 hover:text-blue-900 p-2 hover:bg-blue-50 rounded"><Edit2 size={18} /></button>
-                <button onClick={() => handleDelete(d.id)} className="text-red-600 hover:text-red-900 p-2 hover:bg-red-50 rounded"><Trash2 size={18} /></button>
-              </div></div>
-            </div>
-          ))}</div>
-        ) : (<div className="text-center py-8 text-gray-600">No devotionals yet — use Manual for one, or Bulk for many at once.</div>)}
+      <div style={{ background: '#fff', borderRadius: 14, padding: 20, marginTop: 16 }}>
+        <h3>Saved Devotionals ({list.length})</h3>
+        {loading ? <p>Loading…</p> : list.length === 0 ? <p>No devotionals yet.</p> : list.map((d: any) => (
+          <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, border: '1px solid #eee', borderRadius: 12, padding: 12, marginTop: 8 }}>
+            <div><strong>D-{String(d.devotional_number).padStart(3, '0')}</strong> — {d.title} <span style={{ color: '#6b7280' }}>· {d.scripture_book} {d.scripture_chapter}:{d.scripture_verse} {d.cover_photo_url ? '🖼️' : '— no cover (uses Default)'}</span></div>
+            <div style={{ display: 'flex', gap: 8 }}><button onClick={() => startEdit(d)} style={{ cursor: 'pointer' }}>✏️ Edit</button><button onClick={() => del(d.id)} style={{ cursor: 'pointer', color: '#dc2626' }}>🗑️ Delete</button></div>
+          </div>
+        ))}
       </div>
     </div>
   );
