@@ -43,14 +43,50 @@ function Cover({ e, height = 150 }: { e: Entry; height?: number }) {
 const BOOKS = ['Genesis','Exodus','Leviticus','Numbers','Deuteronomy','Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings','1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther','Job','Psalms','Proverbs','Ecclesiastes','Song of Songs','Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel','Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi','Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
 function parseRefs(text: string): string[] {
   if (!text) return [];
+  // Normalise en-dash / em-dash to hyphen so "1 Peter 4:10–11" parses as one range, not "1 Peter 4:10" + stray "11"
+  const norm = String(text).replace(/[–—]/g, '-');
   const out: string[] = [];
   const sorted = [...BOOKS].sort((a, b) => b.length - a.length);
-  const re = new RegExp(`\\b(${sorted.map(b => b.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).join('|')})\\s+(\\d+)(?::(\\d+)(?:\\s*-\\s*\\d+)?)?`, 'g');
+  const re = new RegExp(`\\b(${sorted.map(b => b.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).join('|')})\\s+(\\d+)(?::(\\d+)(?:\\s*-\\s*(\\d+))?)?`, 'g');
   let m: any;
-  while ((m = re.exec(text)) !== null) { const ref = m[3] ? `${m[1]} ${m[2]}:${m[3]}` : `${m[1]} ${m[2]}`; if (!out.includes(ref)) out.push(ref); }
-  // Also split on ; or , when the text is a plain list like "John 3:16; Romans 8:28"
-  if (out.length === 0) { text.split(/[;,]/).map(s => s.trim()).filter(Boolean).forEach(s => out.push(s)); }
+  while ((m = re.exec(norm)) !== null) {
+    const ref = m[3] ? `${m[1]} ${m[2]}:${m[3]}${m[4] ? '-' + m[4] : ''}` : `${m[1]} ${m[2]}`;
+    if (!out.includes(ref)) out.push(ref);
+  }
+  // NO fallback that pushes raw pieces — that is what created bare "2", "16", "9" pills.
+  // If no book name was found, return [] (the Related section below handles plain lines).
   return out;
+}
+// NEW: Normalise Related Scriptures to { ref, explanation } for display.
+// Accepts: "Colossians 3:17 — Encourages..." (string) OR {book,chapter,verse,text} OR {reference,text}
+function parseRelated(val: any): { ref: string; explanation: string }[] {
+  if (!val) return [];
+  let arr: any[] = [];
+  if (Array.isArray(val)) arr = val;
+  else if (typeof val === 'string') {
+    const s = val.trim();
+    if (!s || s.includes('[object Object]')) return [];
+    // String may be JSON array or newline-separated lines
+    try { const p = JSON.parse(s); if (Array.isArray(p)) arr = p; else arr = s.split(/\n/).filter(Boolean); } catch { arr = s.split(/\n/).filter(Boolean); }
+  } else if (typeof val === 'object') arr = [val];
+  else return [];
+  return arr.map((r: any) => {
+    if (!r) return null;
+    if (typeof r === 'string') {
+      if (r.includes('[object Object]')) return null;
+      const parts = r.split(/\s*[—–-]\s*/);
+      // First part is the ref if it looks like "Colossians 3:17", rest is explanation
+      const maybeRef = parts[0].trim();
+      const refs = parseRefs(maybeRef);
+      if (refs.length) return { ref: refs[0], explanation: parts.slice(1).join(' — ').trim() };
+      return { ref: maybeRef, explanation: '' };
+    }
+    const ref = String(r.reference || r.verse_ref || r.ref || ((r.book ? `${r.book} ${r.chapter ?? ''}${r.verse ? ':' + r.verse : ''}` : '') || '')).trim();
+    const expl = String(r.text || r.explanation || r.note || r.description || '').trim();
+    if (!ref && !expl) return null;
+    const refs = ref ? parseRefs(ref) : [];
+    return { ref: refs[0] || ref, explanation: expl };
+  }).filter(Boolean) as { ref: string; explanation: string }[];
 }
 // FIXED: Bible reader is /bible-reader/{bookNumber}/{chapter}#verse-{verse}
 // OLD route /bible?book=... does NOT exist -> 404, do NOT use it. Book name -> number 1-66.
@@ -141,11 +177,12 @@ export default function DevotionalPlansPage() {
   }
   function shareText(e: Entry) {
     const further = parseRefs(String(e.further_readings || '')).join(', ');
+    const relatedLines = parseRelated(e.related_scriptures).map((it: any) => `${it.ref}${it.explanation ? ' — ' + it.explanation : ''}`).join('\n');
     const full = fullText(e);
     // NO raw image link in the text — WhatsApp shows it as a broken link line.
     // The image comes from the link preview (OG image = app logo / default image in layout).
     // One link only, at the end.
-    return `🙏 ${e.title} — ${e.scripture_book} ${e.scripture_chapter}:${e.scripture_verse}\n\n${full}${further ? `\n\n📖 Further readings: ${further}` : ''}\n\n👉 Read more devotionals here: ${shareUrl(e)}`;
+    return `🙏 ${e.title} — ${e.scripture_book} ${e.scripture_chapter}:${e.scripture_verse}\n\n${full}${relatedLines ? `\n\n📖 Related Scriptures:\n${relatedLines}` : ''}${further ? `\n\n📖 Further readings: ${further}` : ''}\n\n👉 Read more devotionals here: ${shareUrl(e)}`;
   }
   function shareOn(e: Entry, network: string) {
     const url = encodeURIComponent(shareUrl(e)); const text = encodeURIComponent(shareText(e));
@@ -170,15 +207,9 @@ export default function DevotionalPlansPage() {
   }
 
   const furtherRefs = open ? parseRefs(stripHtml(String(open.further_readings || ''))) : [];
-  function refToString(r: any): string {
-    if (!r) return '';
-    if (typeof r === 'string') return r;
-    // DB sometimes stores {reference:'John 3:16', text:'...'} or {verse:'...', book:'...'}
-    if (typeof r === 'object') return String(r.reference || r.verse_ref || r.verse || r.text || '').split('—')[0].trim();
-    return String(r);
-  }
-  const relatedRefs = open ? (Array.isArray(open.related_scriptures) ? open.related_scriptures.map(refToString).flatMap((s: string) => parseRefs(s)).filter(Boolean) : parseRefs(stripHtml(String(open.related_scriptures || '')))) : [];
-  const allRefs = [...new Set([...furtherRefs, ...relatedRefs])];
+  // Related is SEPARATE from Further — it has its own section with explanations.
+  const relatedItems = open ? parseRelated(open.related_scriptures) : [];
+  const allRefs = [...new Set([...furtherRefs])];
 
   return (
     <div style={{ background: '#fffdf5', minHeight: '100vh' }}>
@@ -279,6 +310,19 @@ export default function DevotionalPlansPage() {
               {open.devotional_text_lu && <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><button onClick={() => setLang('en')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'en' ? '#7c3aed' : '#fff', color: lang === 'en' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇬🇧 English</button><button onClick={() => setLang('lu')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'lu' ? '#7c3aed' : '#fff', color: lang === 'lu' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇺🇬 Luganda</button></div>}
               <div style={{ fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: String(lang === 'lu' && open.devotional_text_lu ? open.devotional_text_lu : open.devotional_text) }} />
 
+              {relatedItems.length > 0 && (
+                <div style={{ marginTop: 20, background: '#fff', border: '1px solid #c7d2fe', borderRadius: 12, padding: '14px 16px' }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: '#4338ca', marginBottom: 10 }}>📖 RELATED SCRIPTURES — TAP A VERSE TO READ IT</div>
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {relatedItems.map((it: { ref: string; explanation: string }, i: number) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                        <button onClick={() => openVerse(it.ref)} style={{ cursor: 'pointer', border: '1px solid #6366f1', background: '#eef2ff', color: '#4338ca', borderRadius: 999, padding: '6px 12px', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>{it.ref} →</button>
+                        {it.explanation && <span style={{ color: '#374151', fontSize: 14, lineHeight: 1.5 }}>{it.explanation}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {allRefs.length > 0 && (
                 <div style={{ marginTop: 20, background: '#fff', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px' }}>
                   <div style={{ fontWeight: 800, fontSize: 13, color: '#92400e', marginBottom: 8 }}>📖 FURTHER READINGS — TAP A VERSE TO READ IT</div>
