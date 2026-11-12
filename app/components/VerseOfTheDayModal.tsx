@@ -1,612 +1,122 @@
-'use client';
-
-import { Lora } from 'next/font/google';
+"use client";
 import { useEffect, useState } from 'react';
-import { X, Share2, Heart, BookOpen, Copy, Check, Sparkles } from 'lucide-react';
-import { stripHtml } from '@/app/utils/stripHtml';
+import Link from 'next/link';
 
-const lora = Lora({
-  subsets: ['latin'],
-  weight: ['400', '500', '600'],
-  display: 'swap',
-});
+// app/components/VerseOfTheDayPopup.tsx — BEAUTIFUL ART POPUP
+// Ivory + navy + gold (your theme), full of art, mobile-stacked.
+// Usage (e.g. in app/page.tsx or layout):
+//   import VerseOfTheDayPopup from '@/app/components/VerseOfTheDayPopup';
+//   <VerseOfTheDayPopup />
+// Shows once per day per browser (localStorage key includes the date).
+// Props: autoOpen (default true) — pass false and control it yourself with `open` + `onClose`.
 
-interface VerseData {
-  book?: string | null;
-  chapter?: number | null;
-  verse?: number | null;
-  text_english?: string | null;
-  text_luganda?: string | null;
-}
+type Verse = {
+  id?: number; book_id?: number; book_number?: number; chapter: number; verse: number;
+  text_english: string; text_luganda?: string; name_english: string; name_luganda?: string;
+};
 
-// ── Elegant palette ──────────────────────────────────────────────
-const NAVY = '#10162e';
-const NAVY_SOFT = '#1b2447';
-const GOLD = '#c9a227';
-const GOLD_DARK = '#a88420';
-const IVORY = '#fdfbf4';
-const PARCHMENT = '#f6efdd';
-const INK = '#221c12';
-const MUTED = '#6f6a5c';
-
-function ErrorFallback() {
-  const [isOpen, setIsOpen] = useState(true);
-
-  if (!isOpen) return null;
-
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        background: 'rgba(8, 12, 30, 0.65)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-      }}
-      onClick={() => setIsOpen(false)}
-    >
-      <div
-        style={{
-          background: `linear-gradient(160deg, ${IVORY} 0%, ${PARCHMENT} 100%)`,
-          border: `1px solid ${GOLD}`,
-          borderRadius: '28px',
-          maxWidth: '480px',
-          width: '100%',
-          padding: '40px 32px',
-          boxShadow: '0 30px 70px rgba(0, 0, 0, 0.45)',
-          position: 'relative',
-          textAlign: 'center',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={() => setIsOpen(false)}
-          aria-label="Close"
-          style={{
-            position: 'absolute',
-            top: '16px',
-            right: '16px',
-            width: '36px',
-            height: '36px',
-            borderRadius: '50%',
-            background: 'rgba(16, 22, 46, 0.06)',
-            border: `1px solid rgba(201, 162, 39, 0.4)`,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <X size={18} color={NAVY} />
-        </button>
-        <div style={{ fontSize: '26px', marginBottom: '8px' }}>✦</div>
-        <h3 style={{ color: NAVY, fontSize: '21px', fontWeight: '700', marginBottom: '10px' }}>
-          Verse Not Available
-        </h3>
-        <p style={{ color: MUTED, fontSize: '14px', lineHeight: '1.7' }}>
-          We couldn&apos;t load today&apos;s verse. Please check back later — His Word is worth the wait.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-export default function VerseOfTheDayModal() {
-  const [isOpen, setIsOpen] = useState(false);
-  const [verse, setVerse] = useState<VerseData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const [isBookmarked, setIsBookmarked] = useState(false);
-  const [bookmarking, setBookmarking] = useState(false);
-  const [showShareMenu, setShowShareMenu] = useState(false);
+export default function VerseOfTheDayPopup({ autoOpen = true, open: controlledOpen, onClose }: { autoOpen?: boolean; open?: boolean; onClose?: () => void }) {
+  const [verse, setVerse] = useState<Verse | null>(null);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const [lang, setLang] = useState<'english' | 'luganda' | 'both'>('both');
   const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const todayLabel = new Date().toLocaleDateString('en-GB', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const close = () => { if (onClose) onClose(); else setInternalOpen(false); };
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      setLoading(false);
-      return;
-    }
-
-    try {
-      const lastShown = localStorage?.getItem?.('votd-last-shown');
-      const today = new Date().toDateString();
-
-      if (lastShown !== today) {
-        fetch('/api/verse-of-the-day')
-          .then((res) => {
-            if (!res?.ok) throw new Error('Failed to fetch');
-            return res.json();
-          })
-          .then((data) => {
-            if (data?.verse && typeof data.verse === 'object') {
-              if (data.verse.book && data.verse.chapter !== null && data.verse.chapter !== undefined &&
-                  data.verse.verse !== null && data.verse.verse !== undefined) {
-                setVerse(data.verse);
-                setIsOpen(true);
-                localStorage?.setItem?.('votd-last-shown', today);
-              } else {
-                setError(true);
-              }
-            } else {
-              setError(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/verse-of-the-day', { cache: 'no-store' });
+        const data = await res.json();
+        const v: Verse | null = data?.verse || data || null;
+        if (!cancelled && v) {
+          setVerse(v);
+          if (autoOpen && controlledOpen === undefined) {
+            // Show once per day: key includes the date from the API
+            const key = `votd-seen-${data?.date || new Date().toISOString().slice(0, 10)}`;
+            if (!localStorage.getItem(key)) {
+              localStorage.setItem(key, '1');
+              setInternalOpen(true);
             }
-          })
-          .catch(() => {
-            setError(true);
-          })
-          .finally(() => {
-            setLoading(false);
-          });
-      } else {
-        setLoading(false);
-      }
-    } catch {
-      setLoading(false);
-      setError(true);
-    }
-  }, []);
-
-  // Check if verse is bookmarked
-  useEffect(() => {
-    if (isOpen && verse && verse.book && verse.chapter !== null && verse.verse !== null) {
-      const checkBookmark = async () => {
-        try {
-          const response = await fetch(`/api/verse-bookmarks?book=${encodeURIComponent(verse.book || '')}&chapter=${verse.chapter ?? 0}&verse=${verse.verse ?? 0}`);
-          if (response.ok) {
-            const data = await response.json();
-            setIsBookmarked(data.bookmarked || false);
           }
-        } catch (error) {
-          console.error('Failed to check bookmark:', error);
         }
-      };
-      checkBookmark();
-    }
-  }, [isOpen, verse]);
+      } catch { /* keep popup hidden if API fails — page must never crash */ }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [autoOpen, controlledOpen]);
 
-  // Handle bookmark toggle
-  const handleBookmarkToggle = async () => {
-    if (!verse || !verse.book || verse.chapter === null || verse.verse === null) return;
+  if (loading || !verse || !open) return null;
 
-    setBookmarking(true);
-    try {
-      if (isBookmarked) {
-        await fetch(`/api/verse-bookmarks?book=${encodeURIComponent(verse.book || '')}&chapter=${verse.chapter ?? 0}&verse=${verse.verse ?? 0}`, {
-          method: 'DELETE',
-        });
-        setIsBookmarked(false);
-      } else {
-        await fetch('/api/verse-bookmarks', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            book: verse.book,
-            chapter: verse.chapter,
-            verse: verse.verse,
-            text: verse.text_english,
-          }),
-        });
-        setIsBookmarked(true);
-      }
-    } catch (error) {
-      console.error('Failed to toggle bookmark:', error);
-    } finally {
-      setBookmarking(false);
+  const ref = `${verse.name_english} ${verse.chapter}:${verse.verse}`;
+  const bookNum = verse.book_number ?? verse.book_id ?? 1;
+  const readerUrl = `/bible-reader/${bookNum}/${verse.chapter}#verse-${verse.verse}`;
+  const shareText = `✨ Verse of the Day — ${ref}\n\n"${verse.text_english}"\n\n👉 Read more: https://prayreadbible.org${readerUrl}`;
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(shareText); } catch {
+      const ta = document.createElement('textarea'); ta.value = shareText; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
     }
+    setCopied(true); setTimeout(() => setCopied(false), 2000);
   };
-
-  // Handle social sharing
-  const handleShare = (platform: string) => {
-    if (!verse || typeof window === 'undefined') return;
-
-    const cleanVerseText = stripHtml(verse.text_english || '');
-    const shareText = `"${cleanVerseText}" - ${verse.book} ${verse.chapter}:${verse.verse}`;
-    const encodedText = encodeURIComponent(shareText);
-    const appUrl = window.location.origin;
-    const verseUrl = `${appUrl}/bible/${verse.book}/${verse.chapter}/${verse.verse}`;
-    const encodedUrl = encodeURIComponent(verseUrl);
-
-    const shareLinks: Record<string, string | null> = {
-      whatsapp: `https://wa.me/?text=${encodedText}`,
-      telegram: `https://t.me/share/url?url=${encodedUrl}&text=${encodedText}`,
-      facebook: `https://www.facebook.com/sharer/sharer.php?u=${encodedUrl}`,
-      linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${encodedUrl}`,
-      x: `https://twitter.com/intent/tweet?text=${encodedText}&url=${encodedUrl}`,
-      instagram: null, // Instagram requires app or manual copy
-    };
-
-    if (platform === 'copy') {
-      navigator.clipboard.writeText(shareText).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      });
-    } else if (platform === 'instagram') {
-      navigator.clipboard.writeText(shareText).then(() => {
-        alert('Verse copied to clipboard! Open Instagram and paste it.');
-      });
-    } else if (shareLinks[platform]) {
-      window.open(shareLinks[platform] as string, '_blank', 'width=600,height=400');
-    }
-
-    setShowShareMenu(false);
-  };
-
-  if (loading || !isOpen) return null;
-  if (error) return <ErrorFallback />;
-
-  if (!verse || !verse.book || verse.chapter === null || verse.chapter === undefined ||
-      verse.verse === null || verse.verse === undefined) {
-    return <ErrorFallback />;
-  }
-
-  const shareItems = [
-    { name: 'WhatsApp', dot: '#25d366', platform: 'whatsapp' },
-    { name: 'Telegram', dot: '#229ed9', platform: 'telegram' },
-    { name: 'Facebook', dot: '#1877f2', platform: 'facebook' },
-    { name: 'X (Twitter)', dot: '#000000', platform: 'x' },
-    { name: 'LinkedIn', dot: '#0a66c2', platform: 'linkedin' },
-    { name: 'Instagram', dot: '#d62976', platform: 'instagram' },
-    { name: copied ? 'Copied!' : 'Copy verse', dot: GOLD, platform: 'copy' },
-  ];
+  const share = (url: string) => window.open(url, '_blank', 'noopener,width=640,height=560');
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        background: 'rgba(8, 12, 30, 0.65)',
-        backdropFilter: 'blur(12px)',
-        WebkitBackdropFilter: 'blur(12px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-        overflowY: 'auto',
-      }}
-      onClick={() => setIsOpen(false)}
-    >
-      <style>{`
-        @keyframes votd-rise {
-          from { opacity: 0; transform: translateY(18px) scale(0.97); }
-          to { opacity: 1; transform: translateY(0) scale(1); }
-        }
-        @keyframes votd-glow {
-          0%, 100% { opacity: 0.55; }
-          50% { opacity: 1; }
-        }
-      `}</style>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 90, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, background: 'rgba(15,23,42,0.72)', backdropFilter: 'blur(6px)' }} onClick={close}>
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'relative', width: '100%', maxWidth: 560, borderRadius: 28, overflow: 'hidden', background: '#FFFEF7', boxShadow: '0 30px 80px rgba(0,0,0,0.45)', border: '1px solid #E7C873' }}>
+        {/* ART HEADER — navy + gold, no photo needed, pure art */}
+        <div style={{ position: 'relative', background: 'linear-gradient(135deg,#0F2043 0%,#1E3A6E 45%,#8A6D1B 100%)', padding: '28px 28px 22px', color: '#FFFEF7', overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', right: -30, top: -30, width: 170, height: 170, borderRadius: '50%', border: '22px solid rgba(231,200,115,0.18)' }} />
+          <div style={{ position: 'absolute', right: 40, top: 24, width: 90, height: 90, borderRadius: '50%', border: '2px solid rgba(231,200,115,0.35)' }} />
+          <div style={{ position: 'absolute', left: 26, bottom: 10, fontSize: 64, opacity: 0.12, fontFamily: 'serif' }}>✦</div>
+          <p style={{ margin: 0, fontSize: 11, letterSpacing: 4, color: '#E7C873', fontWeight: 800 }}>✦ PRAY-READ BIBLE ✦</p>
+          <h2 style={{ margin: '10px 0 0', fontFamily: 'Georgia, serif', fontSize: 30, lineHeight: 1.1, fontWeight: 700 }}>Verse of the Day</h2>
+          <p style={{ margin: '8px 0 0', fontSize: 13, color: '#CBD5E1' }}>A word to pray, read, and carry through your day.</p>
+          <button onClick={close} aria-label="Close" style={{ position: 'absolute', top: 14, right: 14, width: 34, height: 34, borderRadius: '50%', border: '1px solid rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 18, cursor: 'pointer' }}>×</button>
+        </div>
 
-      <div
-        style={{
-          background: `linear-gradient(165deg, ${IVORY} 0%, ${PARCHMENT} 100%)`,
-          border: `1px solid rgba(201, 162, 39, 0.65)`,
-          outline: `1px solid rgba(201, 162, 39, 0.25)`,
-          outlineOffset: '6px',
-          borderRadius: '28px',
-          maxWidth: '620px',
-          width: '100%',
-          maxHeight: '90vh',
-          overflowY: 'auto',
-          boxShadow: '0 30px 70px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.4) inset',
-          position: 'relative',
-          animation: 'votd-rise 0.45s ease both',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Top gold band */}
-        <div
-          style={{
-            height: '6px',
-            borderRadius: '28px 28px 0 0',
-            background: `linear-gradient(90deg, ${NAVY} 0%, ${GOLD} 35%, #f3d67b 50%, ${GOLD} 65%, ${NAVY} 100%)`,
-          }}
-        />
+        {/* REFERENCE RIBBON */}
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: -16, position: 'relative', zIndex: 1 }}>
+          <span style={{ background: 'linear-gradient(90deg,#B9972F,#E7C873)', color: '#0F2043', fontWeight: 900, fontSize: 15, padding: '9px 22px', borderRadius: 999, boxShadow: '0 8px 20px rgba(0,0,0,0.18)', border: '2px solid #FFFEF7' }}>📖 {ref}</span>
+        </div>
 
-        {/* Close button */}
-        <button
-          onClick={() => setIsOpen(false)}
-          aria-label="Close"
-          style={{
-            position: 'absolute',
-            top: '20px',
-            right: '20px',
-            width: '36px',
-            height: '36px',
-            borderRadius: '50%',
-            background: 'rgba(16, 22, 46, 0.06)',
-            border: `1px solid rgba(201, 162, 39, 0.45)`,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s',
-            zIndex: 2,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(16, 22, 46, 0.1)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(16, 22, 46, 0.06)'; }}
-        >
-          <X size={18} color={NAVY} />
-        </button>
-
-        <div style={{ padding: '36px 36px 30px', textAlign: 'center' }}>
-          {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '10px' }}>
-            <Sparkles size={16} color={GOLD_DARK} style={{ animation: 'votd-glow 2.4s ease-in-out infinite' }} />
-            <span
-              style={{
-                fontSize: '12px',
-                fontWeight: '700',
-                letterSpacing: '4px',
-                textTransform: 'uppercase',
-                color: GOLD_DARK,
-              }}
-            >
-              Verse of the Day
-            </span>
-            <Sparkles size={16} color={GOLD_DARK} style={{ animation: 'votd-glow 2.4s ease-in-out infinite' }} />
-          </div>
-
-          <p style={{ fontSize: '13px', color: MUTED, letterSpacing: '0.4px', marginBottom: '22px' }}>
-            {todayLabel}
-          </p>
-
-          {/* Ornamental divider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
-            <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
-            <div style={{ width: '8px', height: '8px', transform: 'rotate(45deg)', background: GOLD, flexShrink: 0 }} />
-            <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
-          </div>
-
-          {/* Reference pill */}
-          <div style={{ marginBottom: '22px' }}>
-            <span
-              style={{
-                display: 'inline-block',
-                padding: '8px 22px',
-                borderRadius: '999px',
-                background: NAVY,
-                color: '#f3d67b',
-                fontSize: '14px',
-                fontWeight: '700',
-                letterSpacing: '1.5px',
-                textTransform: 'uppercase',
-                boxShadow: '0 6px 18px rgba(16, 22, 46, 0.3)',
-              }}
-            >
-              {verse.book} {verse.chapter}:{verse.verse}
-            </span>
-          </div>
-
-          {/* Verse text */}
-          <div style={{ position: 'relative', marginBottom: '8px' }}>
-            <div
-              style={{
-                fontSize: '64px',
-                lineHeight: '1',
-                color: 'rgba(201, 162, 39, 0.35)',
-                fontFamily: 'Georgia, serif',
-                height: '36px',
-              }}
-            >
-              &ldquo;
+        {/* VERSE BODY */}
+        <div style={{ padding: '20px 28px 8px' }}>
+          <div style={{ textAlign: 'center', fontFamily: 'Georgia, serif', fontSize: 52, lineHeight: 0.4, color: '#E7C873' }}>“</div>
+          {(lang === 'english' || lang === 'both') && (
+            <p style={{ margin: '6px 0 0', fontFamily: 'Georgia, serif', fontSize: 21, lineHeight: 1.65, color: '#1E293B', textAlign: 'center' }}>{verse.text_english}</p>
+          )}
+          {(lang === 'luganda' || lang === 'both') && verse.text_luganda && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px dashed #E7C873' }}>
+              <p style={{ margin: '0 0 6px', textAlign: 'center', fontSize: 11, letterSpacing: 3, color: '#8A6D1B', fontWeight: 800 }}>LUGANDA</p>
+              <p style={{ margin: 0, fontFamily: 'Georgia, serif', fontSize: 18, lineHeight: 1.65, color: '#475569', textAlign: 'center', fontStyle: 'italic' }}>{verse.text_luganda}</p>
             </div>
-            {verse.text_english && (
-              <p
-                className={lora.className}
-                style={{
-                  fontSize: '21px',
-                  lineHeight: '1.85',
-                  color: INK,
-                  fontWeight: '500',
-                  margin: '0 0 20px',
-                }}
-              >
-                {stripHtml(verse.text_english)}
-              </p>
-            )}
-            {verse.text_luganda && (
-              <div
-                style={{
-                  borderTop: `1px dashed rgba(201, 162, 39, 0.5)`,
-                  paddingTop: '18px',
-                  marginTop: '4px',
-                }}
-              >
-                <span
-                  style={{
-                    display: 'inline-block',
-                    fontSize: '10px',
-                    fontWeight: '700',
-                    letterSpacing: '3px',
-                    textTransform: 'uppercase',
-                    color: GOLD_DARK,
-                    border: `1px solid rgba(201, 162, 39, 0.5)`,
-                    borderRadius: '999px',
-                    padding: '4px 12px',
-                    marginBottom: '12px',
-                  }}
-                >
-                  Luganda
-                </span>
-                <p
-                  className={lora.className}
-                  style={{
-                    fontSize: '17px',
-                    lineHeight: '1.8',
-                    color: MUTED,
-                    fontStyle: 'italic',
-                    fontWeight: '400',
-                    margin: 0,
-                  }}
-                >
-                  {stripHtml(verse.text_luganda)}
-                </p>
-              </div>
-            )}
+          )}
+          {/* Language toggle */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 16 }}>
+            {([['english', 'English'], ['luganda', 'Luganda'], ['both', 'Both']] as const).map(([k, label]) => (
+              <button key={k} onClick={() => setLang(k)} style={{ padding: '7px 14px', borderRadius: 999, fontSize: 13, fontWeight: 700, cursor: 'pointer', border: lang === k ? '2px solid #0F2043' : '1px solid #E2E8F0', background: lang === k ? '#0F2043' : '#fff', color: lang === k ? '#fff' : '#475569' }}>{label}</button>
+            ))}
           </div>
+        </div>
 
-          {/* Bottom divider */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '26px 0 24px' }}>
-            <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, transparent, ${GOLD})` }} />
-            <div style={{ fontSize: '13px', color: GOLD_DARK }}>✦</div>
-            <div style={{ flex: 1, height: '1px', background: `linear-gradient(90deg, ${GOLD}, transparent)` }} />
+        {/* DIVIDER ORNAMENT */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 28px 0' }}>
+          <div style={{ flex: 1, height: 1, background: '#E7C873' }} /><span style={{ color: '#B9972F', fontSize: 16 }}>✦ ✦ ✦</span><div style={{ flex: 1, height: 1, background: '#E7C873' }} />
+        </div>
+
+        {/* ACTIONS — stacked on mobile */}
+        <div style={{ padding: '16px 28px 24px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Link href={readerUrl} onClick={close} style={{ display: 'block', textAlign: 'center', background: '#0F2043', color: '#fff', padding: '13px', borderRadius: 14, fontWeight: 800, textDecoration: 'none' }}>📖 Open in Bible Reader → {ref}</Link>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <button onClick={() => share(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent('https://prayreadbible.org' + readerUrl)}&quote=${encodeURIComponent(shareText)}`)} style={{ padding: '9px 14px', borderRadius: 999, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Facebook</button>
+            <button onClick={() => share(`https://wa.me/?text=${encodeURIComponent(shareText)}`)} style={{ padding: '9px 14px', borderRadius: 999, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>WhatsApp</button>
+            <button onClick={() => share(`https://t.me/share/url?url=${encodeURIComponent('https://prayreadbible.org' + readerUrl)}&text=${encodeURIComponent(shareText)}`)} style={{ padding: '9px 14px', borderRadius: 999, border: '1px solid #E2E8F0', background: '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>Telegram</button>
+            <button onClick={copy} style={{ padding: '9px 14px', borderRadius: 999, border: '1px solid #0F2043', background: copied ? '#DCFCE7' : '#0F2043', color: copied ? '#166534' : '#fff', cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>{copied ? '✓ Copied!' : '🔗 Copy'}</button>
           </div>
-
-          {/* Action Buttons */}
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
-            {/* Bookmark */}
-            <button
-              onClick={handleBookmarkToggle}
-              disabled={bookmarking}
-              style={{
-                padding: '11px 18px',
-                background: isBookmarked ? `linear-gradient(135deg, ${GOLD} 0%, ${GOLD_DARK} 100%)` : 'transparent',
-                color: isBookmarked ? '#fff' : NAVY,
-                border: `1px solid ${isBookmarked ? GOLD_DARK : 'rgba(16, 22, 46, 0.25)'}`,
-                borderRadius: '999px',
-                fontSize: '13px',
-                fontWeight: '700',
-                cursor: bookmarking ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '7px',
-                transition: 'all 0.2s',
-                opacity: bookmarking ? 0.6 : 1,
-              }}
-              onMouseEnter={(e) => { if (!bookmarking) e.currentTarget.style.transform = 'translateY(-1px)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
-            >
-              <Heart size={15} fill={isBookmarked ? '#fff' : 'none'} />
-              {isBookmarked ? 'Bookmarked' : 'Bookmark'}
-            </button>
-
-            {/* Share */}
-            <div style={{ position: 'relative' }}>
-              <button
-                onClick={() => setShowShareMenu(!showShareMenu)}
-                style={{
-                  padding: '11px 18px',
-                  background: 'transparent',
-                  color: NAVY,
-                  border: '1px solid rgba(16, 22, 46, 0.25)',
-                  borderRadius: '999px',
-                  fontSize: '13px',
-                  fontWeight: '700',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '7px',
-                  transition: 'all 0.2s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-1px)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
-              >
-                <Share2 size={15} />
-                Share
-              </button>
-
-              {showShareMenu && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    bottom: '100%',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    marginBottom: '10px',
-                    background: '#fffdf7',
-                    border: `1px solid rgba(201, 162, 39, 0.5)`,
-                    borderRadius: '16px',
-                    boxShadow: '0 16px 40px rgba(16, 22, 46, 0.22)',
-                    zIndex: 10000,
-                    minWidth: '190px',
-                    overflow: 'hidden',
-                    padding: '6px',
-                  }}
-                >
-                  {shareItems.map((item) => (
-                    <button
-                      key={item.platform}
-                      onClick={() => handleShare(item.platform)}
-                      style={{
-                        width: '100%',
-                        padding: '11px 12px',
-                        background: 'transparent',
-                        border: 'none',
-                        borderRadius: '10px',
-                        textAlign: 'left',
-                        cursor: 'pointer',
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        color: INK,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        transition: 'background 0.2s',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(201, 162, 39, 0.12)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                    >
-                      {item.platform === 'copy' ? (
-                        copied ? <Check size={14} color={GOLD_DARK} /> : <Copy size={14} color={GOLD_DARK} />
-                      ) : (
-                        <span style={{ width: '9px', height: '9px', borderRadius: '50%', background: item.dot, flexShrink: 0 }} />
-                      )}
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Start Reading */}
-            <button
-              onClick={() => setIsOpen(false)}
-              style={{
-                padding: '12px 26px',
-                background: `linear-gradient(135deg, ${NAVY} 0%, ${NAVY_SOFT} 55%, ${GOLD_DARK} 130%)`,
-                color: '#f3d67b',
-                border: `1px solid ${GOLD}`,
-                borderRadius: '999px',
-                fontSize: '13px',
-                fontWeight: '700',
-                letterSpacing: '0.5px',
-                cursor: 'pointer',
-                boxShadow: '0 8px 20px rgba(16, 22, 46, 0.35)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                transition: 'all 0.2s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 12px 26px rgba(16, 22, 46, 0.4)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 8px 20px rgba(16, 22, 46, 0.35)';
-              }}
-            >
-              <BookOpen size={15} />
-              Start Reading
-            </button>
-          </div>
-
-          <p style={{ fontSize: '11px', color: MUTED, marginTop: '20px', letterSpacing: '0.6px' }}>
-            A fresh verse appears once a day — come back tomorrow for the next one.
-          </p>
+          <button onClick={close} style={{ background: 'none', border: 'none', color: '#94A3B8', fontSize: 13, cursor: 'pointer', padding: 4 }}>Continue to the Bible →</button>
         </div>
       </div>
     </div>
