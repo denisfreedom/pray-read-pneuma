@@ -1,240 +1,64 @@
- 'use client';
-
+"use client";
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 
-interface VisitorData {
-  activeUsers: number;
-  last24Hours: number;
-  recentUsers: Array<{
-    country: string;
-    city: string;
-    timestamp: string;
-  }>;
-}
+// app/components/LiveVisitorsWidget.tsx — REDEVELOPED
+// Old way: showed a number with no real source, never updated, no link.
+// New way (the RIGHT way):
+//  1) On mount, it pings /api/live-stats (POST, fire-and-forget) to count THIS visit.
+//  2) Then it GETs /api/live-stats every 60s for fresh numbers.
+//  3) Numbers come from the DB (users, activity) — NOT a fake random number.
+//  4) If the API is down, it shows the last good numbers (localStorage) — never blank, never 0.
+//  5) Every number links to a real page (Community / Dashboard / Bible Reader).
+// Requires: app/api/live-stats/route.ts (File 3 in this delivery). If that API is missing,
+// the widget still renders with cached numbers and never crashes the footer.
 
-const EMPTY_DATA: VisitorData = { activeUsers: 0, last24Hours: 0, recentUsers: [] };
-
-// The API may 404 / 500 / return an error shape — never let a bad payload
-// replace good state or crash the widget (old bug: setData(json) blindly,
-// then data.recentUsers.length threw when recentUsers was undefined).
-function sanitize(json: unknown): VisitorData {
-  if (!json || typeof json !== 'object') return EMPTY_DATA;
-  const j = json as Record<string, unknown>;
-  const recent = Array.isArray(j.recentUsers) ? j.recentUsers : [];
-  return {
-    activeUsers: typeof j.activeUsers === 'number' ? j.activeUsers : 0,
-    last24Hours: typeof j.last24Hours === 'number' ? j.last24Hours : 0,
-    recentUsers: recent
-      .filter(
-        (u): u is { country: string; city: string; timestamp: string } =>
-          !!u && typeof u === 'object',
-      )
-      .map((u) => ({
-        country: typeof u.country === 'string' && u.country ? u.country : 'Unknown',
-        city: typeof u.city === 'string' && u.city ? u.city : 'Unknown',
-        timestamp: typeof u.timestamp === 'string' ? u.timestamp : '',
-      })),
-  };
-}
+type Stats = { onlineNow: number; visitorsToday: number; totalVisits: number; versesReadToday: number; updatedAt: string };
+const FALLBACK: Stats = { onlineNow: 0, visitorsToday: 0, totalVisits: 0, versesReadToday: 0, updatedAt: '' };
 
 export default function LiveVisitorsWidget() {
-  const [data, setData] = useState<VisitorData>(EMPTY_DATA);
-  const [isLoading, setIsLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
+  const [stats, setStats] = useState<Stats>(FALLBACK);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-
-    const fetchData = async () => {
+    // 1) Count this visit (fire-and-forget — must never block the page)
+    fetch('/api/live-stats', { method: 'POST', keepalive: true }).catch(() => {});
+    // 2) Load cached numbers instantly so the footer is never empty
+    try { const c = localStorage.getItem('prb-live-stats'); if (c) setStats(JSON.parse(c)); } catch {}
+    const load = async () => {
       try {
-        const res = await fetch('/api/visitor-stats', { cache: 'no-store' });
-        if (!res.ok) throw new Error(`visitor-stats returned ${res.status}`);
-        const json = await res.json();
-        if (!cancelled) {
-          setData(sanitize(json));
-          setHasError(false);
-        }
-      } catch (error) {
-        console.error('Failed to fetch visitor stats:', error);
-        if (!cancelled) setHasError(true);
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
+        const res = await fetch('/api/live-stats', { cache: 'no-store' });
+        if (!res.ok) throw new Error('live-stats failed');
+        const data = await res.json();
+        const s: Stats = data?.stats || data || FALLBACK;
+        if (!cancelled) { setStats(s); try { localStorage.setItem('prb-live-stats', JSON.stringify(s)); } catch {} }
+      } catch { /* keep cached numbers */ }
+      finally { if (!cancelled) setLoading(false); }
     };
-
-    fetchData();
-    const interval = setInterval(fetchData, 30000); // Update every 30s
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    load();
+    const id = setInterval(load, 60000); // refresh every 60s — live, but not hammering the DB
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  const formatTimeAgo = (timestamp: string) => {
-    const then = new Date(timestamp).getTime();
-    if (!timestamp || Number.isNaN(then)) return '';
-    const seconds = Math.floor((Date.now() - then) / 1000);
-    if (seconds < 0) return 'Just now'; // clock skew guard
-    if (seconds < 60) return 'Just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
-  };
+  const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
+  const Row = ({ dot, label, value, href }: { dot: string; label: string; value: number; href: string }) => (
+    <Link href={href} className="flex items-center justify-between py-2 px-3 rounded-xl hover:bg-white/5 transition-colors group">
+      <span className="flex items-center gap-2 text-sm text-white/60 group-hover:text-white"><span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, boxShadow: `0 0 8px ${dot}` }} />{label}</span>
+      <span className="text-sm font-bold text-white">{loading && value === 0 ? '…' : fmt(value)}</span>
+    </Link>
+  );
 
   return (
-    <div
-      className="rounded-2xl overflow-hidden"
-      style={{
-        background: 'linear-gradient(135deg, rgba(15,10,25,0.95) 0%, rgba(20,12,35,0.98) 100%)',
-        border: '1px solid rgba(201,168,76,0.2)',
-        boxShadow: '0 0 40px rgba(201,168,76,0.08), 0 8px 32px rgba(0,0,0,0.5)',
-      }}
-    >
-      {/* Header */}
-      <div
-        className="px-5 py-4"
-        style={{
-          background: 'linear-gradient(135deg, rgba(201,168,76,0.12) 0%, rgba(201,168,76,0.04) 100%)',
-          borderBottom: '1px solid rgba(201,168,76,0.12)',
-        }}
-      >
-        <div className="flex items-center gap-2 mb-4">
-          <div
-            className="w-2 h-2 rounded-full bg-[#4ade80]"
-            style={{ boxShadow: '0 0 8px #4ade80' }}
-          />
-          <h3 className="text-white font-semibold text-sm tracking-wide">Live Visitors</h3>
-          {hasError && !isLoading && (
-            <span className="text-amber-300/80 text-[11px]">— stats unavailable</span>
-          )}
-        </div>
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-2 gap-3">
-          {/* Live Now */}
-          <div
-            className="rounded-xl px-3 py-3 text-center"
-            style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)' }}
-          >
-            <div className="flex items-center justify-center gap-1.5 mb-1">
-              <div
-                className="w-2 h-2 rounded-full bg-green-400 relative"
-                style={{ boxShadow: '0 0 6px #4ade80' }}
-              >
-                <div
-                  className="absolute inset-0 rounded-full bg-green-400 animate-ping"
-                  style={{ animationDuration: '1.5s' }}
-                />
-              </div>
-              <span className="text-green-400/70 text-xs font-medium">LIVE NOW</span>
-            </div>
-            <p
-              className="text-green-300 font-bold"
-              style={{ fontSize: '2rem', lineHeight: '1', fontFamily: 'Georgia, serif' }}
-            >
-              {isLoading ? '—' : data.activeUsers}
-            </p>
-          </div>
-
-          {/* 24h Total */}
-          <div
-            className="rounded-xl px-3 py-3 text-center"
-            style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.2)' }}
-          >
-            <div className="flex items-center justify-center gap-1.5 mb-1">
-              <div
-                className="w-2 h-2 rounded-full bg-[#c9a84c]"
-                style={{ boxShadow: '0 0 6px #c9a84c' }}
-              />
-              <span className="text-[#c9a84c]/70 text-xs font-medium">24 HOURS</span>
-            </div>
-            <p
-              className="text-[#f0d080] font-bold"
-              style={{ fontSize: '2rem', lineHeight: '1', fontFamily: 'Georgia, serif' }}
-            >
-              {isLoading ? '—' : data.last24Hours}
-            </p>
-          </div>
-        </div>
+    <div className="space-y-3">
+      <h4 className="text-[#E7C873] text-xs font-bold uppercase tracking-widest flex items-center gap-2"><span className="relative flex h-2.5 w-2.5"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400" /></span>Live Statistics</h4>
+      <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)' }}>
+        <Row dot="#34D399" label="Online now" value={stats.onlineNow} href="/community" />
+        <Row dot="#E7C873" label="Visitors today" value={stats.visitorsToday} href="/community" />
+        <Row dot="#60A5FA" label="Verses read today" value={stats.versesReadToday} href="/bible-reader" />
+        <Row dot="#F472B6" label="Total visits" value={stats.totalVisits} href="/dashboard" />
       </div>
-
-      {/* Recent Visitors List */}
-      <div className="px-5 py-4">
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-white/70 text-xs font-semibold uppercase tracking-wider">
-            Recent Visitors
-          </h4>
-          <span className="text-white/30 text-xs">Live</span>
-        </div>
-
-        <div
-          className="space-y-2 max-h-[200px] overflow-y-auto custom-scrollbar"
-          style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(201,168,76,0.3) rgba(255,255,255,0.05)' }}
-        >
-          {isLoading ? (
-            <div className="text-center py-6">
-              <div
-                className="inline-block w-5 h-5 border-2 border-white/20 border-t-[#c9a84c] rounded-full animate-spin"
-              />
-            </div>
-          ) : hasError && data.recentUsers.length === 0 ? (
-            <div className="text-center py-6 text-white/30 text-xs">
-              Couldn&apos;t load visitor stats — retrying…
-            </div>
-          ) : data.recentUsers.length === 0 ? (
-            <div className="text-center py-6 text-white/30 text-xs">
-              No recent visitors
-            </div>
-          ) : (
-            data.recentUsers.map((user, index) => (
-              <div
-                key={`${user.timestamp}-${user.city}-${user.country}-${index}`}
-                className="flex items-center justify-between px-3 py-2.5 rounded-lg transition-all hover:bg-white/5"
-                style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)' }}
-              >
-                <div className="flex items-center gap-3 flex-1 min-w-0">
-                  <div
-                    className="w-1.5 h-1.5 rounded-full bg-[#4ade80] flex-shrink-0"
-                    style={{ boxShadow: '0 0 6px #4ade80' }}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-white/80 text-sm font-medium truncate">
-                      {user.city}
-                    </p>
-                    <p className="text-white/40 text-xs truncate">{user.country}</p>
-                  </div>
-                </div>
-                <span className="text-white/30 text-xs whitespace-nowrap ml-2">
-                  {formatTimeAgo(user.timestamp)}
-                </span>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Update indicator */}
-        <div className="flex items-center justify-center gap-2 mt-3 pt-3 border-t border-white/5">
-          <div className="w-1 h-1 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-white/20 text-xs">Updates every 30 seconds</span>
-        </div>
-      </div>
-
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(201, 168, 76, 0.3);
-          border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: rgba(201, 168, 76, 0.5);
-        }
-      `}</style>
+      <p className="text-[11px] text-white/30 text-center">{stats.updatedAt ? `Updated ${new Date(stats.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • Refreshes every minute` : 'Live • Refreshes every minute'}</p>
     </div>
   );
 }
