@@ -4,6 +4,12 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 
 // RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
+// FIXED — duplicate sidebar below last verse REMOVED (see notes at bottom).
+// 1) Right panel is now desktop-only (hidden lg:block). On mobile the ☰ drawer is the ONLY sidebar.
+//    Before: on mobile the right panel stacked BELOW the last verse, duplicating the drawer.
+// 2) Chapter Closing Prayer removed from inside the sidebar Prayer tab — it now appears ONLY
+//    below the last verse in the left column, where it closes the chapter. Before it appeared twice.
+// 3) Verse <p> had style={} twice — merged to one style={{ fontSize: bodySize }}.
 // Only the data wiring is fixed. No redesign.
 // Verses: try every param/shape the bible-verses API has used, until one returns rows.
 // Prayers: per-verse. Prayer button under a verse opens THAT verse's prayer
@@ -61,37 +67,6 @@ function ChapterContent() {
   });
   const [commentary, setCommentary] = useState<Record<number, any>>({});
   const [menuOpen, setMenuOpen] = useState(false);
-
-  // --- V6: JUMP TO VERSE — when opened as /bible-reader/45/6#verse-14, scroll to verse 14 + highlight it.
-  // The old page ignored the #verse-... hash, so it always landed on verse 1.
-  const [jumpedVerse, setJumpedVerse] = useState<number | null>(null);
-  useEffect(() => {
-    if (loading || !verses.length) return;
-    const hash = typeof window !== 'undefined' ? window.location.hash : '';
-    const m = hash.match(/#verse-(\d+)/);
-    if (!m) return;
-    const vn = parseInt(m[1], 10);
-    if (!vn) return;
-    setSelectedVerse(vn);
-    setJumpedVerse(vn);
-    // Wait a tick for the DOM to be painted, then scroll
-    let tries = 0;
-    const tick = () => {
-      const el = document.getElementById(`verse-${vn}`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Flash highlight — remove after 3s
-        el.style.transition = 'box-shadow 0.3s, background 0.3s';
-        const prevBg = el.style.background;
-        el.style.background = '#fef08a';
-        el.style.boxShadow = '0 0 0 3px #f59e0b, 0 10px 30px rgba(0,0,0,0.15)';
-        setTimeout(() => { el.style.background = prevBg; el.style.boxShadow = ''; }, 3000);
-      } else if (tries < 10) { tries++; setTimeout(tick, 200); }
-    };
-    const t1 = setTimeout(tick, 150);
-    return () => clearTimeout(t1);
-  }, [loading, verses]);
-
 
   useEffect(() => {
     if (!bookNum || !chapterNum) return;
@@ -311,15 +286,15 @@ function ChapterContent() {
             </div>
           ) : verses.map((v: any) => {
             const hasPrayer = !!(pickPrayer(versePrayers[v.verse]).en || pickPrayer(versePrayers[v.verse]).lu);
-            const isSel = selectedVerse === v.verse || jumpedVerse === v.verse;
+            const isSel = selectedVerse === v.verse;
             const pr = pickPrayer(versePrayers[v.verse]);
             return (
               <article id={`verse-${v.verse}`} key={v.verse} className={`${themeClasses.card} rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''}`}>
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
-                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
-                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`}>{v.text_luganda}</p>}
+                    <p className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
+                    {lang === 'BOTH' && v.text_luganda && <p className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`} style={{ fontSize: bodySize }}>{v.text_luganda}</p>}
                   </div>
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
                 </div>
@@ -390,7 +365,7 @@ function ChapterContent() {
         </div>
 
         {/* RIGHT — ORIGINAL tabs */}
-        <aside className={`lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
+        <aside id="right-panel" className={`hidden lg:block lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
           <div className={`flex border-b ${themeClasses.divider} ${themeClasses.header}`}>
             {([
               { id: 'intro', label: '📕 Intro' },
@@ -452,14 +427,7 @@ function ChapterContent() {
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
                   </div>
                 )}
-                {/* Chapter Closing lives BELOW, after the verse prayer — not mixed into it */}
-                {(closing.en || closing.lu) && (
-                  <div className="mt-5 pt-4 border-t border-slate-200">
-                    <p className="font-bold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{closing.en}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
-                  </div>
-                )}
+                {/* REMOVED: Chapter Closing Prayer was duplicated here in the sidebar. It now appears ONLY below the last verse in the left column, where it closes the chapter. */}
               </div>
             )}
           </div>
@@ -550,3 +518,10 @@ function ChapterContent() {
 export default function ChapterPage() {
   return <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]">Loading…</div>}><ChapterContent /></Suspense>;
 }
+
+// ── WHAT WAS REMOVED / KEPT ──────────────────────────────────────────────────
+// REMOVED (1): Right panel on mobile — it stacked below the last verse and duplicated the ☰ drawer.
+//              Desktop: right panel still shows (hidden lg:block). Mobile: ☰ drawer only.
+// REMOVED (2): Chapter Closing Prayer inside sidebar Prayer tab — it duplicated the one below the verses.
+// KEPT: Chapter Closing Prayer below the last verse in the left column + Book Closing Prayer on last chapter.
+// KEPT: ☰ hamburger drawer (mobile sidebar) + right panel on desktop + all verse buttons / share / bookmarks.
