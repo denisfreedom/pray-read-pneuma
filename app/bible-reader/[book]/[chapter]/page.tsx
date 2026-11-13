@@ -288,7 +288,10 @@ function ChapterContent() {
     const chapter = parseInt(m[2]);
     const verses: number[] = [];
     m[3].split(',').forEach(seg => { const mm = seg.trim().match(/^(\d+)(?:-(\d+))?$/); if (mm) { const a = parseInt(mm[1]), b = mm[2] ? parseInt(mm[2]) : a; for (let v = a; v <= b; v++) verses.push(v); } });
-    return { bookName, chapter, verses };
+    // FIX: remember that this ref was clicked in Luganda ("Yokaana" not "John") and keep
+    // the Luganda name for the popup title, so the popup can show Luganda verses.
+    const wasLuganda = !!(LU_BOOK_MAP[rawName] || LU_BOOK_MAP[baseName]);
+    return { bookName, displayName: rawName, isLuganda: wasLuganda, chapter, verses };
   };
   const openScriptureRef = async (ref: string) => {
     const p = parseRef(ref); if (!p) return;
@@ -299,7 +302,7 @@ function ChapterContent() {
     const b = allBooks.find((x: any) => [(x.name || ''), (x.book_name || ''), (x.name_english || ''), (x.name_luganda || '')].map((s: string) => s.toLowerCase()).includes(want)) || null;
     const targetBookNum = b ? (b.book_number ?? b.id ?? 0) : 0;
     const targetBookId = b?.id ?? targetBookNum;
-    setRefPopup({ ref, bookName: p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: true, text: '' });
+    setRefPopup({ ref, bookName: p.displayName || p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: true, text: '' });
     try {
       let rows: any[] = [];
       const urls = [
@@ -317,11 +320,13 @@ function ChapterContent() {
           if (Array.isArray(arr) && arr.length) { rows = arr; break; }
         } catch {}
       }
-      const norm = rows.map((v: any) => ({ verse: v.verse ?? v.verse_number ?? v.number, text: v.text_english || v.english || v.text_en || v.text || v.verse_text || '' }));
+      // FIX: a Luganda ref ("Yokaana 17:20-23") must pop up LUGANDA verses, not English.
+      // English refs keep showing English verses, exactly as before.
+      const norm = rows.map((v: any) => ({ verse: v.verse ?? v.verse_number ?? v.number, text: p.isLuganda ? (v.text_luganda || v.luganda || v.text_lu || v.text_english || v.english || v.text_en || v.text || v.verse_text || '') : (v.text_english || v.english || v.text_en || v.text || v.verse_text || '') }));
       const picked = norm.filter((v: any) => p.verses.includes(Number(v.verse))).sort((a: any, b2: any) => a.verse - b2.verse);
       const text = picked.length ? picked.map((v: any) => `${v.verse}. ${v.text}`).join('\n\n') : '';
-      setRefPopup({ ref, bookName: p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text, error: picked.length ? undefined : 'Verse text not found.' });
-    } catch { setRefPopup({ ref, bookName: p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text: '', error: 'Could not load verse text.' }); }
+      setRefPopup({ ref, bookName: p.displayName || p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text, error: picked.length ? undefined : 'Verse text not found.' });
+    } catch { setRefPopup({ ref, bookName: p.displayName || p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text: '', error: 'Could not load verse text.' }); }
   };
   const handleCommentaryClick = (e: React.MouseEvent) => {
     // FIX: sidebar commentary "selection not shown" — after a drag-select, the browser fires
