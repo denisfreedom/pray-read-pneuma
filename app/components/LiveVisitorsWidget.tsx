@@ -2,19 +2,32 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-// app/components/LiveVisitorsWidget.tsx — REDEVELOPED
-// Old way: showed a number with no real source, never updated, no link.
-// New way (the RIGHT way):
-//  1) On mount, it pings /api/live-stats (POST, fire-and-forget) to count THIS visit.
-//  2) Then it GETs /api/live-stats every 60s for fresh numbers.
-//  3) Numbers come from the DB (users, activity) — NOT a fake random number.
-//  4) If the API is down, it shows the last good numbers (localStorage) — never blank, never 0.
-//  5) Every number links to a real page (Community / Dashboard / Bible Reader).
-// Requires: app/api/live-stats/route.ts (File 3 in this delivery). If that API is missing,
-// the widget still renders with cached numbers and never crashes the footer.
+// app/components/LiveVisitorsWidget.tsx — REDEVELOPED (the part that makes the API count)
+// WHY THE OLD ONE SHOWED 0 EVERYWHERE:
+//   The widget only ever READ numbers. If the API route was missing, or the
+//   table was empty, it showed 0 — and nothing ever fixed it.
+// THIS VERSION:
+//   1) On mount it POSTs this visit with a stable per-browser visitor key
+//      (session-guarded, so React StrictMode double-mounts don't double-count).
+//   2) It polls GET every 60s for fresh numbers.
+//   3) It shows cached numbers instantly + "…" while loading — never a hard 0 flash.
+//   4) It listens for a `prb:verse-read` event (the reader page can dispatch it)
+//      and POSTs it as an explicit verse-read event.
+// If the API is down, it keeps the last good numbers (localStorage) — never blank.
 
 type Stats = { onlineNow: number; visitorsToday: number; totalVisits: number; versesReadToday: number; updatedAt: string };
 const FALLBACK: Stats = { onlineNow: 0, visitorsToday: 0, totalVisits: 0, versesReadToday: 0, updatedAt: '' };
+
+function getVisitorKey(): string {
+  try {
+    let k = localStorage.getItem('prb-visitor-key');
+    if (!k) {
+      k = (typeof crypto !== 'undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : `v-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem('prb-visitor-key', k);
+    }
+    return k;
+  } catch { return `v-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`; }
+}
 
 export default function LiveVisitorsWidget() {
   const [stats, setStats] = useState<Stats>(FALLBACK);
@@ -22,10 +35,23 @@ export default function LiveVisitorsWidget() {
 
   useEffect(() => {
     let cancelled = false;
-    // 1) Count this visit (fire-and-forget — must never block the page)
-    fetch('/api/live-stats', { method: 'POST', keepalive: true }).catch(() => {});
-    // 2) Load cached numbers instantly so the footer is never empty
+    const visitorKey = getVisitorKey();
+
+    // 1) Count this visit — once per tab session (StrictMode double-mount guard)
+    try {
+      if (!sessionStorage.getItem('prb-visit-counted')) {
+        sessionStorage.setItem('prb-visit-counted', '1');
+        fetch('/api/live-stats', {
+          method: 'POST', keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: window.location.pathname, visitorKey }),
+        }).catch(() => {});
+      }
+    } catch {}
+
+    // 2) Instant cached numbers so the footer is never empty
     try { const c = localStorage.getItem('prb-live-stats'); if (c) setStats(JSON.parse(c)); } catch {}
+
     const load = async () => {
       try {
         const res = await fetch('/api/live-stats', { cache: 'no-store' });
@@ -38,7 +64,17 @@ export default function LiveVisitorsWidget() {
     };
     load();
     const id = setInterval(load, 60000); // refresh every 60s — live, but not hammering the DB
-    return () => { cancelled = true; clearInterval(id); };
+
+    // 3) Explicit verse-read events (reader page: window.dispatchEvent(new CustomEvent('prb:verse-read')))
+    const onVerseRead = () => {
+      fetch('/api/live-stats', {
+        method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: window.location.pathname, visitorKey, event: 'verse_read' }),
+      }).catch(() => {});
+    };
+    window.addEventListener('prb:verse-read', onVerseRead);
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('prb:verse-read', onVerseRead); };
   }, []);
 
   const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n));
