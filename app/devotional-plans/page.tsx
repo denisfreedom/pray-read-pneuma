@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import AppFooter from '@/app/components/AppFooter';
 
-// app/devotional-plans/page.tsx — V9: V2 + STICKY HEADER + FOOTER
+// app/devotional-plans/page.tsx — V10: V9 + LUGANDA FORMATTER
 // WHAT WAS WRONG: the page had NO header. Once you landed on Devotionals you
 // could not get back to Home, Bible Reader, Verse-Songs, Q&A, Community or
 // Dashboard except with the browser Back button.
@@ -16,6 +16,17 @@ import AppFooter from '@/app/components/AppFooter';
 //      shows all tabs in one row.
 //   3) The AppFooter at the bottom, like the other pages (it was missing too).
 //   4) A real "Daily Devotionals" heading in the hero (it only had a paragraph).
+// V10 ADDS:
+//   5) LUGANDA FORMATTER — the Luganda devotionals are stored as one long run
+//      of text (title + Scripture heading + verse + Okufumiitiriza + reflection
+//      + Okukozesa mu Bulamu, all jammed together, no breaks), so the popup
+//      showed one unreadable wall. The formatter finds the Luganda section
+//      headings and rebuilds the text into the same ordered structure as the
+//      English version: Title → Scripture heading + quoted verse → Reflection
+//      (Okufumiitiriza) → Practical Application (Okukozesa mu Bulamu) → Prayer.
+//      It also drops the stray "emanna.com" credit that leaked into both
+//      languages, and the English <h3> headings now render as bold purple
+//      subheadings too.
 // EVERYTHING ELSE IS UNCHANGED FROM V2:
 //   D-001 numbering · auto gradient covers · clickable scriptures -> floating
 //   verse window -> Open in Bible Reader · share row FIRST in the popup
@@ -153,6 +164,85 @@ function imageUrl(e: Entry) {
   try { return `${window.location.origin}/assets/default-devotional.png`; } catch { return '/assets/default-devotional.png'; }
 }
 
+function escapeHtml(s: string) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── LUGANDA SECTION HEADINGS ──
+// Matched case-sensitively, and only at a sentence boundary (start of text or
+// right after ". " / "! " / "? "), so the same words inside a sentence are
+// never mistaken for a heading.
+const LU_HEADING_RES: RegExp[] = [
+  /Okusoma Ekyawandiikibwa(?:\s*[—–-]\s*[^"“”\n]{0,80})?/,
+  /Okufumiitiriza/,
+  /Okukozesa mu Bulamu/,
+  /Okulowooza ku Kigambo|Okufumiitiriza ku Kigambo/,
+  /Okusaba Okumpi|Okusaba/,
+];
+
+function formatLugandaBody(raw: string): string {
+  // Plain text: strip any tags, drop the leaked source credit, collapse spaces.
+  let text = stripHtml(raw).replace(/emanna\.com/gi, '').replace(/\s+/g, ' ').trim();
+  if (!text) return '';
+  // Find every section heading (with its position), keeping only boundary matches.
+  type Hit = { start: number; end: number; text: string };
+  const hits: Hit[] = [];
+  for (const re of LU_HEADING_RES) {
+    const g = new RegExp(re.source, 'g');
+    let m: any;
+    while ((m = g.exec(text)) !== null) {
+      const before = text.slice(0, m.index);
+      const atBoundary = m.index === 0 || /[.!?]\s*$/.test(before);
+      if (atBoundary) hits.push({ start: m.index, end: m.index + m[0].length, text: m[0].trim() });
+      if (m[0].length === 0) g.lastIndex++;
+    }
+  }
+  // Sort by position; drop any heading that overlaps an earlier one.
+  hits.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+  const clean: Hit[] = [];
+  for (const h of hits) {
+    if (clean.length && h.start < clean[clean.length - 1].end) continue;
+    clean.push(h);
+  }
+  if (!clean.length) return `<p>${escapeHtml(text)}</p>`;
+  let out = '';
+  // Text before the first heading: usually the Luganda title ("Omutima Ogunywezebwa").
+  // The popup header already shows the title, so a short title-like line becomes
+  // a small heading; anything longer becomes an intro paragraph.
+  const pre = text.slice(0, clean[0].start).trim().replace(/^[—–-]\s*/, '');
+  if (pre) {
+    out += pre.length < 90 && !/\.\s\S/.test(pre)
+      ? `<h3 class="dev-h3">${escapeHtml(pre)}</h3>`
+      : `<p>${escapeHtml(pre)}</p>`;
+  }
+  for (let i = 0; i < clean.length; i++) {
+    const h = clean[i];
+    const body = text.slice(h.end, i + 1 < clean.length ? clean[i + 1].start : undefined).trim().replace(/^[—–-:\s]*/, '');
+    out += `<h3 class="dev-h3">${escapeHtml(h.text)}</h3>`;
+    if (!body) continue;
+    // Scripture section: pull the quoted verse out into a proper quote block.
+    const qm = body.match(/["“”]([^"“”]+)["“”]/);
+    if (qm) {
+      const beforeQ = body.slice(0, qm.index).trim();
+      const afterQ = body.slice(qm.index + qm[0].length).trim();
+      out += `<blockquote class="dev-quote">“${escapeHtml(qm[1].trim())}”</blockquote>`;
+      if (beforeQ) out += `<p>${escapeHtml(beforeQ)}</p>`;
+      if (afterQ) out += `<p>${escapeHtml(afterQ)}</p>`;
+    } else {
+      out += `<p>${escapeHtml(body)}</p>`;
+    }
+  }
+  return out;
+}
+
+// One entry point for the popup body: Luganda goes through the formatter,
+// English keeps its own HTML (its <h3> headings are styled by .dev-body CSS).
+function formatDevotionalBody(raw: any, lang: 'en' | 'lu'): string {
+  const html = String(raw || '').replace(/emanna\.com/gi, '');
+  if (lang === 'lu') return formatLugandaBody(html);
+  return html;
+}
+
 export default function DevotionalPlansPage() {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -252,6 +342,10 @@ export default function DevotionalPlansPage() {
         .dev-tab-row { scrollbar-width: none; -ms-overflow-style: none; }
         .dev-tab-row::-webkit-scrollbar { display: none; }
         .dev-tab { white-space: nowrap; text-decoration: none; }
+        .dev-body h3, .dev-body .dev-h3 { font-size: 17px; font-weight: 800; color: #4c1d95; margin: 22px 0 8px; line-height: 1.4; }
+        .dev-body h3:first-child, .dev-body .dev-h3:first-child { margin-top: 4px; }
+        .dev-body p { margin: 0 0 12px; }
+        .dev-body .dev-quote { margin: 10px 0 14px; padding: 12px 16px; background: #fff; border-left: 5px solid #7c3aed; border-radius: 0 10px 10px 0; font-style: italic; color: #312e81; line-height: 1.7; }
       `}</style>
 
       {/* ── STICKY HEADER — NEW: gets you back to every other tab ── */}
@@ -370,7 +464,7 @@ export default function DevotionalPlansPage() {
 
               {open.scripture_quotation && <div style={{ background: '#fff', border: '1px solid #ede9fe', borderLeft: '5px solid #7c3aed', padding: '14px 16px', borderRadius: 10, marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 800, color: '#7c3aed', marginBottom: 4 }}>SCRIPTURE</div><div dangerouslySetInnerHTML={{ __html: String(open.scripture_quotation) }} /></div>}
               {open.devotional_text_lu && <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><button onClick={() => setLang('en')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'en' ? '#7c3aed' : '#fff', color: lang === 'en' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇬🇧 English</button><button onClick={() => setLang('lu')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'lu' ? '#7c3aed' : '#fff', color: lang === 'lu' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇺🇬 Luganda</button></div>}
-              <div style={{ fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: String(lang === 'lu' && open.devotional_text_lu ? open.devotional_text_lu : open.devotional_text) }} />
+              <div className="dev-body" style={{ fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: formatDevotionalBody(lang === 'lu' && open.devotional_text_lu ? open.devotional_text_lu : open.devotional_text, lang) }} />
 
               {relatedItems.length > 0 && (
                 <div style={{ marginTop: 20, background: '#fff', border: '1px solid #c7d2fe', borderRadius: 12, padding: '14px 16px' }}>
