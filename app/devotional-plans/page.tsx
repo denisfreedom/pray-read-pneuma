@@ -1,15 +1,41 @@
-// app/devotional-plans/page.tsx — V2: auto images, D-001, beautiful popup, clickable verses, share
-// - Number format: D-001 (not #001) everywhere.
-// - Auto thumbnail: if cover_photo_url is empty, a gradient cover is generated from
-//   the devotional number (deterministic, same every time). If cover_photo_url exists, it is used.
-// - Clickable scriptures: main scripture + every Further Reading / Related verse opens a
-//   floating verse window (fetches text from bible-api.com). From there: Open in Bible Reader.
-// - Share row FIRST in the popup: Facebook, WhatsApp, Telegram, Instagram, LinkedIn, Copy Link.
-//   Share text = title + scripture + link + further readings.
 'use client';
 import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import AppFooter from '@/app/components/AppFooter';
+
+// app/devotional-plans/page.tsx — V9: V2 + STICKY HEADER + FOOTER
+// WHAT WAS WRONG: the page had NO header. Once you landed on Devotionals you
+// could not get back to Home, Bible Reader, Verse-Songs, Q&A, Community or
+// Dashboard except with the browser Back button.
+// THIS VERSION ADDS:
+//   1) A sticky top header (stays visible while you scroll) with the Pray-Read
+//      logo + "Pray-Read Bible" — tap the logo to go Home.
+//   2) A scrollable tab bar under the header with every section:
+//      Home · Bible Reader · Devotionals (active) · Verse-Songs · Q&A ·
+//      Community · Dashboard. On mobile it scrolls sideways; on desktop it
+//      shows all tabs in one row.
+//   3) The AppFooter at the bottom, like the other pages (it was missing too).
+//   4) A real "Daily Devotionals" heading in the hero (it only had a paragraph).
+// EVERYTHING ELSE IS UNCHANGED FROM V2:
+//   D-001 numbering · auto gradient covers · clickable scriptures -> floating
+//   verse window -> Open in Bible Reader · share row FIRST in the popup
+//   (Facebook, WhatsApp, Telegram, Instagram, LinkedIn, Copy Link).
 
 type Entry = any;
+
+const LOGO = '/assets/PrayRead-logo.png';
+const LOGO_FALLBACK = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
+
+// The app's main tabs — the same destinations the other pages link to.
+const TABS = [
+  { label: '🏠 Home', href: '/' },
+  { label: '📖 Bible Reader', href: '/bible-reader' },
+  { label: '🙏 Devotionals', href: '/devotional-plans', active: true },
+  { label: '🎵 Verse-Songs', href: '/verse-songs' },
+  { label: '💬 Q&A', href: '/qa' },
+  { label: '👥 Community', href: '/community' },
+  { label: '📊 Dashboard', href: '/dashboard' },
+];
 
 const PALETTES = [
   ['#6d28d9', '#db2777', '#f59e0b'], ['#0e7490', '#059669', '#facc15'], ['#9f1239', '#ea580c', '#facc15'],
@@ -47,7 +73,7 @@ function parseRefs(text: string): string[] {
   const norm = String(text).replace(/[–—]/g, '-');
   const out: string[] = [];
   const sorted = [...BOOKS].sort((a, b) => b.length - a.length);
-  const re = new RegExp(`\\b(${sorted.map(b => b.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).join('|')})\\s+(\\d+)(?::(\\d+)(?:\\s*-\\s*(\\d+))?)?`, 'g');
+  const re = new RegExp(`\\b(${sorted.map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\s+(\\d+)(?::(\\d+)(?:\\s*-\\s*(\\d+))?)?`, 'g');
   let m: any;
   while ((m = re.exec(norm)) !== null) {
     const ref = m[3] ? `${m[1]} ${m[2]}:${m[3]}${m[4] ? '-' + m[4] : ''}` : `${m[1]} ${m[2]}`;
@@ -139,6 +165,7 @@ export default function DevotionalPlansPage() {
   const [verseText, setVerseText] = useState('');
   const [verseLoading, setVerseLoading] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [logoSrc, setLogoSrc] = useState(LOGO);
 
   useEffect(() => {
     try { setDone(JSON.parse(localStorage.getItem('pr_done_devotionals') || '[]')); } catch {}
@@ -222,8 +249,40 @@ export default function DevotionalPlansPage() {
           .dev-list-body h3 { font-size: 20px !important; line-height: 1.3 !important; }
           .dev-grid { grid-template-columns: 1fr 1fr !important; gap: 10px !important; }
         }
+        .dev-tab-row { scrollbar-width: none; -ms-overflow-style: none; }
+        .dev-tab-row::-webkit-scrollbar { display: none; }
+        .dev-tab { white-space: nowrap; text-decoration: none; }
       `}</style>
-      <div style={{ background: 'linear-gradient(100deg,#6d28d9,#a21caf 55%,#f43f5e)', padding: '48px 20px 56px', textAlign: 'center', color: '#fff' }}>
+
+      {/* ── STICKY HEADER — NEW: gets you back to every other tab ── */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(15,32,67,0.97)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(231,200,115,0.35)', boxShadow: '0 4px 20px rgba(0,0,0,0.25)' }}>
+        <div style={{ maxWidth: 980, margin: '0 auto', padding: '10px 16px 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }} aria-label="Go to Home">
+            <span style={{ width: 38, height: 38, borderRadius: 12, overflow: 'hidden', background: '#fff', border: '1px solid #E7C873', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={logoSrc} alt="Pray-Read Bible" width={38} height={38} style={{ objectFit: 'contain' }} onError={() => { if (logoSrc !== LOGO_FALLBACK) setLogoSrc(LOGO_FALLBACK); }} />
+            </span>
+            <span style={{ color: '#fff', fontWeight: 800, fontSize: 16, lineHeight: 1.1 }}>Pray-Read <span style={{ color: '#E7C873' }}>Bible</span></span>
+          </Link>
+          <span style={{ marginLeft: 'auto' }}>
+            <Link href="/dashboard" style={{ display: 'inline-block', padding: '8px 16px', borderRadius: 999, background: 'linear-gradient(90deg,#f59e0b,#f43f5e)', color: '#fff', fontWeight: 800, fontSize: 13, textDecoration: 'none' }}>📊 Dashboard</Link>
+          </span>
+        </div>
+        {/* Tab bar — scrolls sideways on mobile, shows all tabs on desktop */}
+        <nav className="dev-tab-row" style={{ maxWidth: 980, margin: '0 auto', padding: '2px 16px 10px', display: 'flex', gap: 6, overflowX: 'auto' }} aria-label="Main sections">
+          {TABS.map((t) => (
+            <Link key={t.href} href={t.href} className="dev-tab" aria-current={t.active ? 'page' : undefined} style={{
+              padding: '7px 14px', borderRadius: 999, fontSize: 13, fontWeight: t.active ? 800 : 600,
+              background: t.active ? '#E7C873' : 'rgba(255,255,255,0.10)',
+              color: t.active ? '#0F2043' : '#fff',
+              border: t.active ? '1px solid #E7C873' : '1px solid rgba(255,255,255,0.25)',
+            }}>{t.label}</Link>
+          ))}
+        </nav>
+      </header>
+
+      <div style={{ background: 'linear-gradient(100deg,#6d28d9,#a21caf 55%,#f43f5e)', padding: '40px 20px 56px', textAlign: 'center', color: '#fff' }}>
+        <h1 style={{ fontSize: 30, margin: '0 0 8px', lineHeight: 1.2 }}>Daily Devotionals</h1>
         <p style={{ maxWidth: 640, margin: '0 auto', fontSize: 20, lineHeight: 1.5 }}>Short, rich devotionals to deepen your faith — in English and Luganda, with Scripture, further readings, and a streak to keep you going.</p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 22, flexWrap: 'wrap' }}>
           <button onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })} style={{ border: 'none', cursor: 'pointer', padding: '14px 26px', borderRadius: 999, fontWeight: 800, fontSize: 16, background: 'linear-gradient(90deg,#facc15,#f43f5e)', color: '#fff' }}>Explore Devotionals →</button>
@@ -267,11 +326,14 @@ export default function DevotionalPlansPage() {
         )}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))', gap: 16, marginTop: 32 }}>
-          {[{ i: '📖', t: 'Read', d: 'Scripture first — every devotional starts with the Word.' }, { i: '❤️', t: 'Reflect', d: 'A short, honest message for real life.' }, { i: '🔥', t: 'Keep going', d: 'Mark it complete and build your streak.' }].map(c => (
+          {[{ i: '📖', t: 'Read', d: 'Scripture first — every devotional starts with the Word.' }, { i: '❤', t: 'Reflect', d: 'A short, honest message for real life.' }, { i: '🔥', t: 'Keep going', d: 'Mark it complete and build your streak.' }].map(c => (
             <div key={c.t} style={{ background: '#fff', border: '1px solid #eee', borderRadius: 16, padding: 22 }}><div style={{ fontSize: 26 }}>{c.i}</div><h3 style={{ margin: '10px 0 4px' }}>{c.t}</h3><p style={{ color: '#6b7280', margin: 0 }}>{c.d}</p></div>
           ))}
         </div>
       </div>
+
+      {/* Footer — was missing too */}
+      <AppFooter />
 
       {/* Beautiful popup */}
       {open && (() => { const [c1, c2, c3] = paletteFor(open); return (
@@ -298,7 +360,7 @@ export default function DevotionalPlansPage() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button onClick={() => shareOn(open, 'facebook')} title="Share on Facebook" aria-label="Share on Facebook" style={{ cursor: 'pointer', border: 'none', background: '#1877f2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>f</button>
                   <button onClick={() => shareOn(open, 'whatsapp')} title="Share on WhatsApp" aria-label="Share on WhatsApp" style={{ cursor: 'pointer', border: 'none', background: '#25d366', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>💬</button>
-                  <button onClick={() => shareOn(open, 'telegram')} title="Share on Telegram" aria-label="Share on Telegram" style={{ cursor: 'pointer', border: 'none', background: '#229ed9', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✈️</button>
+                  <button onClick={() => shareOn(open, 'telegram')} title="Share on Telegram" aria-label="Share on Telegram" style={{ cursor: 'pointer', border: 'none', background: '#229ed9', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✈</button>
                   <button onClick={() => shareOn(open, 'instagram')} title="Share on Instagram" aria-label="Share on Instagram" style={{ cursor: 'pointer', border: 'none', background: 'linear-gradient(45deg,#f58529,#dd2a7b,#8134af)', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📸</button>
                   <button onClick={() => shareOn(open, 'linkedin')} title="Share on LinkedIn" aria-label="Share on LinkedIn" style={{ cursor: 'pointer', border: 'none', background: '#0a66c2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>in</button>
                   <button onClick={() => copyLink(open)} title="Copy share link" aria-label="Copy share link" style={{ cursor: 'pointer', border: '1px solid #7c3aed', background: '#fff', color: '#7c3aed', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{copied ? '✓' : '🔗'}</button>
