@@ -76,7 +76,47 @@ function ChapterContent() {
     if (lang === 'EN') return commHtml(c, false);
     if (lang === 'LU') return commHtml(c, true);
     const en = commHtml(c, false), lu = commHtml(c, true);
-    return en && lu ? en + '<hr style="margin:12px 0;opacity:.3"/>' + lu : (en || lu);
+    const raw = en && lu ? en + '<hr style="margin:12px 0;opacity:.3"/>' + lu : (en || lu);
+    return linkifyRefs(raw);
+  };
+  // ── FIX: clickable Scripture refs inside commentary ──────────────────────────
+  const [allBooks, setAllBooks] = useState<any[]>([]);
+  const [refPopup, setRefPopup] = useState<null | { ref: string; bookName: string; bookNum: number; chapter: number; verses: number[]; loading: boolean; text: string; error?: string }>(null);
+  const BOOK_NAMES = ['Genesis','Exodus','Leviticus','Numbers','Deuteronomy','Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings','1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther','Job','Psalms','Psalm','Proverbs','Ecclesiastes','Song of Solomon','Song of Songs','Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel','Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi','Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
+  const REF_RE = new RegExp('\\b((?:[123]\\s)?(?:' + BOOK_NAMES.map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + '))\\s+(\\d+):(\\d+(?:-\\d+)?(?:,\\s*\\d+(?:-\\d+)?)*)', 'gi');
+  const linkifyRefs = (html: string): string => {
+    if (!html) return '';
+    return html.split(/(<[^>]+>)/g).map(part => {
+      if (!part || part.startsWith('<')) return part;
+      return part.replace(REF_RE, (m) => `<span class="scripture-ref" data-ref="${m}" style="color:#1d4ed8;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:600">${m}</span>`);
+    }).join('');
+  };
+  const parseRef = (ref: string) => {
+    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z ]+?)\s+(\d+):(.+)$/);
+    if (!m) return null;
+    const bookName = m[1].trim().replace(/\s+/g, ' ');
+    const chapter = parseInt(m[2]);
+    const verses: number[] = [];
+    m[3].split(',').forEach(seg => { const mm = seg.trim().match(/^(\d+)(?:-(\d+))?$/); if (mm) { const a = parseInt(mm[1]), b = mm[2] ? parseInt(mm[2]) : a; for (let v = a; v <= b; v++) verses.push(v); } });
+    return { bookName, chapter, verses };
+  };
+  const openScriptureRef = async (ref: string) => {
+    const p = parseRef(ref); if (!p) return;
+    const b = allBooks.find((x: any) => (x.name || x.book_name || '').toLowerCase() === p.bookName.toLowerCase() || (x.name_english || '').toLowerCase() === p.bookName.toLowerCase()) || null;
+    const bookNum = b ? (b.book_number ?? b.id ?? 0) : 0;
+    setRefPopup({ ref, bookName: p.bookName, bookNum, chapter: p.chapter, verses: p.verses, loading: true, text: '' });
+    try {
+      const r = await fetch(`/api/bible-verses?book_number=${bookNum}&chapter=${p.chapter}`);
+      const d = await r.json().catch(() => null);
+      const arr = Array.isArray(d) ? d : (d?.verses || d?.data || []);
+      const picked = arr.filter((v: any) => p.verses.includes(Number(v.verse ?? v.verse_number))).sort((a: any, b2: any) => (a.verse ?? a.verse_number) - (b2.verse ?? b2.verse_number));
+      const text = picked.length ? picked.map((v: any) => `${v.verse ?? v.verse_number}. ${v.text ?? v.text_english ?? v.verse_text ?? ''}`).join('\n\n') : '';
+      setRefPopup({ ref, bookName: p.bookName, bookNum, chapter: p.chapter, verses: p.verses, loading: false, text, error: picked.length ? undefined : 'Verse text not found.' });
+    } catch { setRefPopup({ ref, bookName: p.bookName, bookNum, chapter: p.chapter, verses: p.verses, loading: false, text: '', error: 'Could not load verse text.' }); }
+  };
+  const handleCommentaryClick = (e: React.MouseEvent) => {
+    const el = (e.target as HTMLElement).closest?.('.scripture-ref') as HTMLElement | null;
+    if (el?.dataset?.ref) { e.preventDefault(); e.stopPropagation(); openScriptureRef(el.dataset.ref); }
   };
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -94,6 +134,7 @@ function ChapterContent() {
         } catch {}
         const b = books.find((x: any) => x.book_number === bookNum || x.id === bookNum || x.book_id === bookNum) || null;
         setBook(b);
+        setAllBooks(books);
         const bookId = b?.id ?? bookNum;
         // FIX: sidebar Commentary tab needs chapter commentary — fetch it once on load.
         // Never blocks the verses if it fails.
@@ -356,7 +397,7 @@ function ChapterContent() {
                   <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
                     <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
                     {commentary[v.verse] && commHtmlForLang(commentary[v.verse], lang) ? (
-                      <div className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[v.verse], lang) }} />
+                      <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[v.verse], lang) }} />
                     ) : commentary[v.verse] ? (
                       <p className="text-sm text-slate-600 leading-relaxed">Commentary saved but empty for this verse.</p>
                     ) : (
@@ -422,13 +463,13 @@ function ChapterContent() {
                 {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Verse {selectedVerse}</p>
-                    <div className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang) }} />
+                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang) }} />
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
                   </>
                 ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Chapter {chapterNum}</p>
-                    <div className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang) }} />
+                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang) }} />
                     <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
                   </>
                 ) : (
@@ -504,6 +545,25 @@ function ChapterContent() {
       )}
 
 
+      {/* ── Scripture-ref POPUP ── */}
+      {refPopup && (
+        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center" onClick={() => setRefPopup(null)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative bg-white w-full sm:max-w-[520px] max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-3">
+              <div><p className="font-bold text-lg">{refPopup.ref}</p><p className="text-sm text-slate-500">{refPopup.bookName} {refPopup.chapter}:{refPopup.verses.join(', ')}</p></div>
+              <button onClick={() => setRefPopup(null)} className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">✕</button>
+            </div>
+            {refPopup.loading ? <p className="text-sm text-slate-500">Loading verse…</p>
+              : refPopup.error ? <p className="text-sm text-red-600">{refPopup.error}</p>
+              : <p className="leading-relaxed whitespace-pre-wrap">{refPopup.text}</p>}
+            {!refPopup.loading && refPopup.bookNum > 0 && (
+              <button onClick={() => { setRefPopup(null); window.location.href = `/bible-reader/${refPopup.bookNum}/${refPopup.chapter}#verse-${refPopup.verses[0]}`; }} className="w-full mt-4 py-3 rounded-xl bg-blue-600 text-white font-semibold">Go to {refPopup.ref} →</button>
+            )}
+            <button onClick={() => setRefPopup(null)} className="w-full mt-2 py-2.5 rounded-xl bg-slate-100 font-semibold">Keep reading here</button>
+          </div>
+        </div>
+      )}
       {/* Hamburger SIDE DRAWER — slides in from the right, holds Intro / Commentary / Prayer + nav */}
       {menuOpen && (
         <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setMenuOpen(false)}>
@@ -521,7 +581,7 @@ function ChapterContent() {
             </div>
             <div className="flex border-b border-slate-200 mb-3">
               {(['intro','commentary','prayer'] as const).map(t => (
-                <button key={t} onClick={() => { setRightTab(t); setMenuOpen(false); document.getElementById('right-panel')?.scrollIntoView({ behavior: 'smooth' }); }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
+                <button key={t} onClick={() => { setRightTab(t); /* FIX: was setMenuOpen(false) — tapping Commentary/Prayer closed the drawer, and on mobile the desktop sidebar is hidden, so it looked like the sidebar vanished. Keep the drawer open. */ }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
               ))}
             </div>
             {rightTab === 'intro' && (
@@ -532,7 +592,26 @@ function ChapterContent() {
                 {!intro.en && !intro.lu && <p className="text-sm text-slate-500 italic">No chapter introduction available.</p>}
               </div>
             )}
-            {rightTab === 'commentary' && <p className="text-sm text-slate-500">Select a verse and tap Commentary to read it here.</p>}
+            {rightTab === 'commentary' && (
+              <div onClick={handleCommentaryClick}>
+                <p className="font-bold mb-2">Commentary</p>
+                {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
+                  <>
+                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Verse {selectedVerse}</p>
+                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang) }} />
+                    <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
+                  </>
+                ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
+                  <>
+                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Chapter {chapterNum}</p>
+                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang) }} />
+                    <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500 italic">No chapter commentary saved yet. Select a verse and tap Commentary to see its commentary.</p>
+                )}
+              </div>
+            )}
             {rightTab === 'prayer' && (
               <div>
                 {!selectedVerse ? <p className="text-sm">Tap ♡ Prayer under any verse to pray it here.</p> : (
