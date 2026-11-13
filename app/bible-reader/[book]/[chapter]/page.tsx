@@ -160,35 +160,78 @@ function ChapterContent() {
     let k = 0;
     const renderWith = (str: string, ms: Mark[]): React.ReactNode[] => {
       if (!ms.length) return [str];
-      const [first, ...rest] = ms; const idx = str.indexOf(first.text);
-      if (idx === -1) return renderWith(str, rest);
+      const [first, ...rest] = ms; const found = findLoose(str, first.text);
+      if (!found) return renderWith(str, rest);
+      const idx = found.index, len = found.length;
       return [...(str.slice(0, idx) ? renderWith(str.slice(0, idx), rest) : []),
-        <span key={first.id + '-' + k++} className={first.style === 'highlight' ? `px-0.5 rounded ${first.color}` : `underline decoration-2 underline-offset-4 ${first.color}`}>{str.slice(idx, idx + first.text.length)}</span>,
-        ...(str.slice(idx + first.text.length) ? renderWith(str.slice(idx + first.text.length), rest) : [])];
+        <span key={first.id + '-' + k++} className={first.style === 'highlight' ? `px-0.5 rounded ${first.color}` : `underline decoration-2 underline-offset-4 ${first.color}`}>{str.slice(idx, idx + len)}</span>,
+        ...(str.slice(idx + len) ? renderWith(str.slice(idx + len), rest) : [])];
     };
     return <>{renderWith(text, [...list].sort((a, b) => b.text.length - a.text.length))}</>;
   };
   const renderMarked = (text: string, verse: number, langKey: string) => renderMarkedByKey(text, markKey(verse, langKey));
   // HTML sections (commentary, rich text): apply marks to TEXT between tags only, never inside tags.
   // Also skips text inside a .scripture-ref span so a mark can never break a clickable verse ref.
+  // Whitespace-tolerant find: returns the match in HAYSTACK coordinates, or null.
+  // A drag-select often carries a stray trailing space, or a \n where the source has
+  // \n\n (or vice versa). Exact match first; then collapse whitespace runs in both
+  // and map the match back to haystack offsets.
+  const findLoose = (hay: string, needle: string): { index: number; length: number } | null => {
+    if (!hay || !needle) return null;
+    const trimmed = needle.trim();
+    if (!trimmed) return null;
+    const exact = hay.indexOf(trimmed);
+    if (exact !== -1) return { index: exact, length: trimmed.length };
+    const hc: string[] = []; const hm: number[] = [];
+    for (let i = 0; i < hay.length; i++) {
+      const ch = hay[i];
+      if (/\s/.test(ch)) { if (hc.length && hc[hc.length - 1] !== ' ') { hc.push(' '); hm.push(i); } continue; }
+      hc.push(ch); hm.push(i);
+    }
+    while (hc.length && hc[0] === ' ') { hc.shift(); hm.shift(); }
+    while (hc.length && hc[hc.length - 1] === ' ') { hc.pop(); hm.pop(); }
+    const ncs = trimmed.replace(/\s+/g, ' ');
+    const ci = hc.join('').indexOf(ncs);
+    if (ci === -1) return null;
+    const start = hm[ci];
+    const endHay = hm[ci + ncs.length - 1];
+    return { index: start, length: endHay - start + 1 };
+  };
   const applyMarksToHtml = (html: string, key: string): string => {
     const list = marks[key] || [];
     if (!html || !list.length) return html;
-    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const applied = new Set<string>();
-    return html.split(/(<[^>]+>)/g).map(part => {
-      if (!part || part.startsWith('<')) return part;
-      let out = part;
-      [...list].sort((a, b) => b.text.length - a.text.length).forEach(m => {
-        if (!m.text || applied.has(m.id)) return;
-        const idx = out.indexOf(m.text);
-        if (idx === -1) return;
-        const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
-        out = out.slice(0, idx) + `<span class="${cls}">${m.text}</span>` + out.slice(idx + m.text.length);
-        applied.add(m.id);
+    // Tag-aware: a selection is PLAIN text, but the HTML has <strong> / ref <span> /
+    // <p> tags inside it, so the selection never appears as one unbroken string.
+    // Match against the decoded text content (tags stripped), then wrap the
+    // overlapping slice of EACH text run — valid nesting, cross-tag selections paint.
+    const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const decodeEnt = (s: string) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
+    let out = html;
+    [...list].sort((a, b) => b.text.length - a.text.length).forEach(m => {
+      if (!m.text) return;
+      const tokens = out.match(/(<[^>]+>|[^<]+)/g) || [];
+      let plain = '';
+      const ranges: { start: number; end: number; dec: string }[] = [];
+      tokens.forEach(tok => {
+        if (tok.startsWith('<')) { ranges.push({ start: -1, end: -1, dec: '' }); return; }
+        const dec = decodeEnt(tok);
+        ranges.push({ start: plain.length, end: plain.length + dec.length, dec });
+        plain += dec;
       });
-      return out;
-    }).join('');
+      const found = findLoose(plain, m.text);
+      if (!found) return;
+      const start = found.index, end = found.index + found.length;
+      const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
+      out = tokens.map((tok, ti) => {
+        if (tok.startsWith('<')) return tok;
+        const r = ranges[ti];
+        const lo = Math.max(start, r.start), hi = Math.min(end, r.end);
+        if (lo >= hi) return tok;
+        const a = lo - r.start, b = hi - r.start;
+        return escHtml(r.dec.slice(0, a)) + `<span class="${cls}">` + escHtml(r.dec.slice(a, b)) + `</span>` + escHtml(r.dec.slice(b));
+      }).join('');
+    });
+    return out;
   };
 
   // ── FIX: clickable Scripture refs inside commentary ──────────────────────────
@@ -445,7 +488,7 @@ function ChapterContent() {
 
   return (
     <div className={`min-h-screen ${themeClasses.page} select-text`} style={{ WebkitUserSelect: 'text', userSelect: 'text' } as any}>
-      <style>{`::selection{background:#bfdbfe !important;color:#1e3a8a !important} ::-moz-selection{background:#bfdbfe !important;color:#1e3a8a !important}`}</style>
+      <style>{`::selection{background:#2563eb !important;color:#ffffff !important} ::-moz-selection{background:#2563eb !important;color:#ffffff !important}`}</style>
       {/* Header — ORIGINAL */}
       <div className={`${themeClasses.header} border-b sticky top-0 z-30`}>
         <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
@@ -635,8 +678,8 @@ function ChapterContent() {
                       <>
                         {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p data-mark-key={`prayer-${selectedVerse}-EN`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
                         {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p data-mark-key={`prayer-${selectedVerse}-LU`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
-                        {sidebarLang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p data-mark-key={`prayer-${selectedVerse}-LU`} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
-                        {sidebarLang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p data-mark-key={`prayer-${selectedVerse}-EN`} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
+                        {sidebarLang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p data-mark-key={`prayer-${selectedVerse}-LU`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
+                        {sidebarLang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p data-mark-key={`prayer-${selectedVerse}-EN`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
                       </>
                     )}
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -724,13 +767,13 @@ function ChapterContent() {
                 {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Verse {selectedVerse}</p>
-                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang) }} />
+                    <div data-mark-key={`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
                   </>
                 ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Chapter {chapterNum}</p>
-                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang) }} />
+                    <div data-mark-key={`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
                     <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
                   </>
                 ) : (
