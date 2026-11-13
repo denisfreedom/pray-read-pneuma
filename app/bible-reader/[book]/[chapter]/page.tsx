@@ -10,6 +10,7 @@ import { useParams, useRouter } from 'next/navigation';
 // 2) Chapter Closing Prayer removed from inside the sidebar Prayer tab — it now appears ONLY
 //    below the last verse in the left column, where it closes the chapter. Before it appeared twice.
 // 3) Verse <p> had style={} twice — merged to one style={{ fontSize: bodySize }}.
+// 4) Drawer tab bug FIXED: tapping Intro/Commentary/Prayer in the ☰ drawer no longer closes the drawer.
 // Only the data wiring is fixed. No redesign.
 // Verses: try every param/shape the bible-verses API has used, until one returns rows.
 // Prayers: per-verse. Prayer button under a verse opens THAT verse's prayer
@@ -475,7 +476,10 @@ function ChapterContent() {
             </div>
             <div className="flex border-b border-slate-200 mb-3">
               {(['intro','commentary','prayer'] as const).map(t => (
-                <button key={t} onClick={() => { setRightTab(t); setMenuOpen(false); document.getElementById('right-panel')?.scrollIntoView({ behavior: 'smooth' }); }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
+                // FIXED: tab switch must NOT close the drawer. Before: setMenuOpen(false) closed it on
+                // every tap, then scrollIntoView to #right-panel did nothing on mobile (panel is hidden),
+                // so you had to reopen the drawer to see the new tab. Now: just switch tab, stay open.
+                <button key={t} onClick={() => { setRightTab(t); }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
               ))}
             </div>
             {rightTab === 'intro' && (
