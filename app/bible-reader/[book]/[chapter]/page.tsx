@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, Suspense, memo, useRef } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import VerseShare from '@/components/VerseShare';
@@ -31,6 +31,32 @@ function pickClosing(row: any) {
     lu: row.closing_prayer_luganda || row.lu_closing_prayer || row.prayer_luganda || row.lu_prayer || '',
   };
 }
+
+// Memoised commentary renderer — the ONLY fix in this patch.
+// The live selection paint was vanishing in commentary because every selection
+// (pendingMark) re-render touched the dangerouslySetInnerHTML div. Verses survive
+// re-renders (React keeps their text nodes); an innerHTML div does not.
+// This component re-renders ONLY when its html / markKey / fontSize change —
+// so selecting text (pendingMark) can never touch commentary DOM, and the
+// browser's blue selection paint survives. Tapping a colour changes marks,
+// which changes html, which re-renders with the saved mark. Nothing else
+// in the file uses this component.
+const CommentaryHtml = memo(function CommentaryHtml({ html, markKey, fontSize, handlersRef }: {
+  html: string; markKey: string; fontSize: any;
+  handlersRef: React.MutableRefObject<{ onSelect: (key: string) => void; onClick: (e: React.MouseEvent) => void }>;
+}) {
+  return (
+    <div
+      data-mark-key={markKey}
+      onClick={(e) => handlersRef.current.onClick(e)}
+      onMouseUp={() => handlersRef.current.onSelect(markKey)}
+      onTouchEnd={() => handlersRef.current.onSelect(markKey)}
+      className="leading-relaxed select-text cursor-text"
+      style={{ fontSize }}
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}, (prev, next) => prev.html === next.html && prev.markKey === next.markKey && prev.fontSize === next.fontSize);
 
 function ChapterContent() {
   const params = useParams();
@@ -297,6 +323,11 @@ function ChapterContent() {
     const el = (e.target as HTMLElement).closest?.('.scripture-ref') as HTMLElement | null;
     if (el?.dataset?.ref) { e.preventDefault(); e.stopPropagation(); openScriptureRef(el.dataset.ref); }
   };
+  // Latest-ref for the memoised commentary div: it keeps the FIRST handlers it got,
+  // so route clicks/selections through a ref that always points at the latest
+  // closures (otherwise the ref popup would see stale allBooks).
+  const commentaryHandlersRef = useRef({ onSelect: (key: string) => {}, onClick: (e: React.MouseEvent) => {} });
+  useEffect(() => { commentaryHandlersRef.current = { onSelect: onSelectGeneric, onClick: handleCommentaryClick }; });
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -575,7 +606,7 @@ function ChapterContent() {
                   <div data-mark-key={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
                     <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2 flex items-center gap-2">📖 Commentary · Verse {v.verse} <MarkBtn markKey={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} title="Select this commentary & mark it" /></p>
                     {commentary[v.verse] && commHtmlForLang(commentary[v.verse], lang) ? (
-                      <div data-mark-key={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[v.verse], lang, `commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`) }} />
+                      <CommentaryHtml html={commHtmlForLang(commentary[v.verse], lang, `commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
                     ) : commentary[v.verse] ? (
                       <p className="text-sm text-slate-600 leading-relaxed">Commentary saved but empty for this verse.</p>
                     ) : (
@@ -641,13 +672,13 @@ function ChapterContent() {
                 {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Verse {selectedVerse}</p>
-                    <div data-mark-key={`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
+                    <CommentaryHtml html={commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
                   </>
                 ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Chapter {chapterNum}</p>
-                    <div data-mark-key={`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
+                    <CommentaryHtml html={commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
                     <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
                   </>
                 ) : (
@@ -767,13 +798,13 @@ function ChapterContent() {
                 {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Verse {selectedVerse}</p>
-                    <div data-mark-key={`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
+                    <CommentaryHtml html={commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
                   </>
                 ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Chapter {chapterNum}</p>
-                    <div data-mark-key={`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
+                    <CommentaryHtml html={commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
                     <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
                   </>
                 ) : (
