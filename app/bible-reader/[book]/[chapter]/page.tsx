@@ -467,19 +467,31 @@ function ChapterContent() {
     setLoadingCross(false);
   };
 
+  // ── COMMENTARY BUG FIX ─────────────────────────────────────────────────────
+  // BEFORE: this stored arr[0] — the FIRST row the API returned — under whatever
+  // verse you clicked. The API ignores `verse` and returns the WHOLE chapter,
+  // so arr[0] was ALWAYS verse 1's commentary. Every verse showed verse 1's
+  // "ESC Insight" text, in EN and LU, inline and in the sidebar.
+  // AFTER: pick the row whose verse number actually equals verseNum. If no row
+  // matches, store a _none marker so THIS verse shows "no commentary" instead
+  // of verse 1's text, and the sidebar falls through to chapter commentary.
   const openCommentary = async (verseNum: number) => {
     if (selectedVerse === verseNum && activePanel === 'commentary') { setSelectedVerse(null); setActivePanel(null); return; }
     setSelectedVerse(verseNum);
     setActivePanel('commentary');
     setRightTab('commentary');
     if (commentary[verseNum]) return;
-    // Try commentary API if it exists — if not, we show the built-in reading note, never a blank crash
     try {
       const r = await fetch(`/api/commentaries?book_number=${bookNum}&chapter=${chapterNum}&verse=${verseNum}`);
       const d = await r.json().catch(() => null);
-      const arr = Array.isArray(d) ? d : (d ? [d] : []);
-      if (arr.length) setCommentary(prev => ({ ...prev, [verseNum]: arr[0] }));
-    } catch {}
+      const arr = Array.isArray(d) ? d : (d?.commentaries || d?.rows || d?.data || (d ? [d] : []));
+      const rowVerse = (c: any) => Number(c?.verse_number ?? c?.verseNumber ?? c?.verse ?? NaN);
+      const match = arr.find((c: any) => rowVerse(c) === verseNum)
+        || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) ? arr[0] : undefined);
+      setCommentary(prev => ({ ...prev, [verseNum]: match || { _none: true } }));
+    } catch {
+      setCommentary(prev => ({ ...prev, [verseNum]: { _none: true } }));
+    }
   };
 
   const toggleBookmark = (verseNum: number) => {
@@ -530,7 +542,7 @@ function ChapterContent() {
           </div>
           <div className="flex items-center gap-1.5">
             <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="w-9 h-9 rounded-md bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center" title="Language">{lang === 'EN' ? 'GB' : lang}</button>
-            <button onClick={cycleTheme} title={`Theme: ${theme} — tap for White / Light Blue / Dark`} className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">{theme === "dark" ? "🌙" : theme === "white" ? "⚪" : "☀️"}</button>
+            <button onClick={cycleTheme} title={`Theme: ${theme} — tap for White / Light Blue / Dark`} className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">{theme === "dark" ? "🌙" : theme === "white" ? "⚪" : "☀"}</button>
             <button onClick={() => setFontSize(Math.max(14, fontSize - 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">−</button>
             <button onClick={() => setFontSize(Math.min(24, fontSize + 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">+</button>
             <button onClick={() => setMenuOpen(o => !o)} title="Menu" className="w-9 h-9 rounded-md bg-blue-600 text-white text-lg flex items-center justify-center">☰</button>
@@ -605,9 +617,9 @@ function ChapterContent() {
                 {isSel && activePanel === 'commentary' && (
                   <div data-mark-key={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
                     <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2 flex items-center gap-2">📖 Commentary · Verse {v.verse} <MarkBtn markKey={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} title="Select this commentary & mark it" /></p>
-                    {commentary[v.verse] && commHtmlForLang(commentary[v.verse], lang) ? (
+                    {commentary[v.verse] && !commentary[v.verse]._none && commHtmlForLang(commentary[v.verse], lang) ? (
                       <CommentaryHtml html={commHtmlForLang(commentary[v.verse], lang, `commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
-                    ) : commentary[v.verse] ? (
+                    ) : commentary[v.verse] && !commentary[v.verse]._none ? (
                       <p className="text-sm text-slate-600 leading-relaxed">Commentary saved but empty for this verse.</p>
                     ) : (
                       <p className="text-sm text-slate-600 leading-relaxed">No written commentary saved for this verse yet. Pray-read the verse above — the Prayer tab for this verse carries the meditation for it. Commentary is added from Admin → Commentaries.</p>
@@ -691,7 +703,7 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
                 {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                   <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${v.verse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${v.verse}-EN`)}</span>}</li>
+                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${selectedVerse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${selectedVerse}-EN`)}</span>}</li>
                   ))}</ul>
                 )}
                 <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -776,7 +788,7 @@ function ChapterContent() {
             <div className="grid grid-cols-2 gap-2 mb-4">
               <Link href="/dashboard" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">Dashboard</Link>
               <Link href="/bible-reader" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">All Books</Link>
-              <button onClick={cycleTheme} className="px-3 py-2.5 rounded-xl bg-yellow-100 text-slate-800 text-sm font-semibold">☀️ Theme: {theme}</button>
+              <button onClick={cycleTheme} className="px-3 py-2.5 rounded-xl bg-yellow-100 text-slate-800 text-sm font-semibold">☀ Theme: {theme}</button>
               <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-3 py-2.5 rounded-xl bg-amber-100 text-slate-800 text-sm font-semibold">Main Lang: {lang}</button>
             </div>
             <div className="flex border-b border-slate-200 mb-3">
