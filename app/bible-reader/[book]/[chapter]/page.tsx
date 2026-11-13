@@ -137,8 +137,15 @@ function ChapterContent() {
     try {
       const el = document.querySelector(`[data-mark-key="${key}"]`) as HTMLElement | null;
       if (!el) return;
+      // If the user already drag-selected a PORTION inside this section, keep that portion —
+      // do not replace it with the whole section. Only select-all when there is no selection.
+      const sel = window.getSelection();
+      const cur = sel?.toString() || '';
+      const node: any = sel?.anchorNode;
+      const inSection = node && (node.nodeType === 3 ? node.parentElement : node)?.closest?.(`[data-mark-key="${key}"]`);
+      if (cur.trim() && inSection) { setPendingMark({ key, text: cur }); return; }
       const range = document.createRange(); range.selectNodeContents(el);
-      const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range);
+      sel?.removeAllRanges(); sel?.addRange(range);
       const txt = (sel?.toString() || el.textContent || '').trim();
       if (txt) setPendingMark({ key, text: txt });
     } catch {}
@@ -168,13 +175,17 @@ function ChapterContent() {
     const list = marks[key] || [];
     if (!html || !list.length) return html;
     const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const applied = new Set<string>();
     return html.split(/(<[^>]+>)/g).map(part => {
       if (!part || part.startsWith('<')) return part;
       let out = part;
       [...list].sort((a, b) => b.text.length - a.text.length).forEach(m => {
-        if (!m.text || !out.includes(m.text)) return;
+        if (!m.text || applied.has(m.id)) return;
+        const idx = out.indexOf(m.text);
+        if (idx === -1) return;
         const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
-        out = out.split(m.text).join(`<span class="${cls}">${m.text}</span>`);
+        out = out.slice(0, idx) + `<span class="${cls}">${m.text}</span>` + out.slice(idx + m.text.length);
+        applied.add(m.id);
       });
       return out;
     }).join('');
@@ -434,7 +445,7 @@ function ChapterContent() {
 
   return (
     <div className={`min-h-screen ${themeClasses.page} select-text`} style={{ WebkitUserSelect: 'text', userSelect: 'text' } as any}>
-      <style>{`::selection{background:#fde68a !important;color:#111827 !important} ::-moz-selection{background:#fde68a !important;color:#111827 !important}`}</style>
+      <style>{`::selection{background:#bfdbfe !important;color:#1e3a8a !important} ::-moz-selection{background:#bfdbfe !important;color:#1e3a8a !important}`}</style>
       {/* Header — ORIGINAL */}
       <div className={`${themeClasses.header} border-b sticky top-0 z-30`}>
         <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
@@ -649,13 +660,13 @@ function ChapterContent() {
       {pendingMark && (
         <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
           <span className="hidden sm:inline text-[11px] text-slate-300 pl-1 pr-1 whitespace-nowrap">Mark:</span>
-          <button onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onClick={() => applyMark('underline', 'decoration-orange-500 text-inherit')} title="Underline orange" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-orange-500">U</button>
-          <button onClick={() => applyMark('underline', 'decoration-blue-500 text-inherit')} title="Underline blue" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-blue-500">U</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('underline', 'decoration-orange-500 text-inherit')} title="Underline orange" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-orange-500">U</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('underline', 'decoration-blue-500 text-inherit')} title="Underline blue" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-blue-500">U</button>
           <button onClick={() => { clearMarksForKey(pendingMark.key); setPendingMark(null); }} title="Clear all marks in this section" className="px-2 h-8 rounded-full bg-white/15 text-[11px] font-bold flex items-center justify-center whitespace-nowrap">Clear</button>
-          <button onClick={() => { try { navigator.clipboard?.writeText(pendingMark.text); } catch {} setPendingMark(null); }} title="Copy selection" className="w-8 h-8 rounded-full bg-white/15 text-[13px] flex items-center justify-center">⧉</button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => { try { navigator.clipboard?.writeText(pendingMark.text); } catch {} setPendingMark(null); }} title="Copy selection" className="w-8 h-8 rounded-full bg-white/15 text-[13px] flex items-center justify-center">⧉</button>
           <button onClick={() => setPendingMark(null)} title="Close" className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">✕</button>
         </div>
       )}
