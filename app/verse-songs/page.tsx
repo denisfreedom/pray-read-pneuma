@@ -1,269 +1,259 @@
-import sql from "@/app/api/utils/sql";
-import { NextResponse } from "next/server";
+"use client";
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import AppFooter from '@/app/components/AppFooter';
 
-export const dynamic = 'force-dynamic';
-
-// app/api/verse-songs/route.ts — FIXED
-// WHY THE OLD ONE RETURNED NOTHING (500) EVEN WHEN SONGS EXISTED:
-//   1) Every GET ran subqueries against user_verse_song_likes and
-//      user_verse_song_favorites. If EITHER table doesn't exist, the WHOLE
-//      query throws -> 500 -> the page shows "No Songs Found".
-//   2) WHERE vs.is_published = true silently dropped every song whose
-//      is_published is NULL (rows added by SQL / bulk import that never set it).
-//   3) Default limit was 10, so the page could never show more than 10 songs.
-//   4) The `recentlyAdded` param was read but never used.
+// app/verse-songs/page.tsx — FIXED
+// WHY THE OLD PAGE SHOWED "No Songs Found" / "No songs available yet":
+//   1) It read the songs API in exactly ONE shape. The API returns a bare array
+//      OR { songs } OR { data } depending on the route version — one wrong guess
+//      and the page saw "no songs" even when songs existed.
+//   2) It had a "Filter by Book" control, but songs don't belong to books —
+//      they belong to SERIES (series_id). The filter could never match anything.
+//   3) It showed the same dead empty state for "loading", "fetch failed", and
+//      "table is really empty", so nobody could tell which one it was.
 // THIS VERSION:
-//   - Main query has NO likes/favorites subqueries. Those counts are fetched
-//     best-effort afterwards; if the tables are missing they stay 0 and the
-//     songs still load.
-//   - is_published NULL counts as published (COALESCE).
-//   - mostPlayed orders by play_count, with an automatic fallback to
-//     created_at if the play_count column doesn't exist yet.
-//   - Default limit 100 (was 10), capped at 500; ?limit=all returns everything.
-//   - recentlyAdded now actually works (orders by created_at DESC).
+//   - Fetches /api/verse-songs AND /api/verse-song-series (the same two endpoints
+//     the Admin panel uses), normalizes EVERY response shape, dedupes by id.
+//   - Shows published songs; groups/filters by SERIES (the real relationship).
+//   - Separate states: loading skeleton, fetch-failed + Retry, truly-empty
+//     (with how to add songs), and no-match (with Clear filters).
+//   - Each song card has a working audio player (songs carry mp3_url).
 
-const DEFAULT_THUMBNAIL = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/verse-song-default-thumbnail_png.jpeg';
+type Song = {
+  id?: number; series_id?: number; title: string; description?: string | null;
+  mp3_url?: string | null; thumbnail?: string | null; duration?: number | null;
+  is_published?: boolean | null; created_at?: string | null;
+};
+type Series = {
+  id?: number; title: string; description?: string | null;
+  is_featured?: boolean | null; song_count?: number | null;
+  songs?: Song[];
+};
 
-function parseLimit(raw: string | null): number | null {
-  if (raw === 'all') return null;
-  const n = parseInt(raw || '100', 10);
-  if (isNaN(n) || n <= 0) return 100;
-  return Math.min(n, 500);
+function asArray(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return [];
+  if (Array.isArray(data.songs)) return data.songs;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.series)) return data.series;
+  if (Array.isArray(data.items)) return data.items;
+  return [];
 }
 
-export async function GET(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    const seriesId = searchParams.get('seriesId');
-    const mostPlayed = searchParams.get('mostPlayed') === 'true';
-    const recentlyAdded = searchParams.get('recentlyAdded') === 'true';
-    const limit = parseLimit(searchParams.get('limit'));
-    const userEmail = searchParams.get('userEmail') || '';
+function fmtDuration(sec?: number | null): string {
+  if (!sec || sec <= 0) return '';
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
-    // ── Main query: no likes/favorites subqueries, so a missing likes table
-    //    can never take down the whole library again. ──
-    const runMain = async (orderByPlayCount: boolean) => {
-      const orderClause = orderByPlayCount ? 'ORDER BY COALESCE(vs.play_count, 0) DESC' : 'ORDER BY vs.created_at DESC';
-      if (id) {
-        const songId = parseInt(id);
-        // Single song: no published filter (so an unpublished song can still be previewed)
-        if (limit === null) {
-          return await sql`
-            SELECT vs.*, vss.title as series_title
-            FROM verse_songs vs
-            LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-            WHERE vs.id = ${songId}
-          `;
-        }
-        return await sql`
-          SELECT vs.*, vss.title as series_title
-          FROM verse_songs vs
-          LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-          WHERE vs.id = ${songId}
-          LIMIT ${limit}
-        `;
-      }
-      if (seriesId) {
-        const seriesIdInt = parseInt(seriesId);
-        if (orderByPlayCount) {
-          if (limit === null) {
-            return await sql`
-              SELECT vs.*, vss.title as series_title
-              FROM verse_songs vs
-              LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-              WHERE vs.series_id = ${seriesIdInt} AND COALESCE(vs.is_published, true) = true
-              ORDER BY COALESCE(vs.play_count, 0) DESC
-            `;
-          }
-          return await sql`
-            SELECT vs.*, vss.title as series_title
-            FROM verse_songs vs
-            LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-            WHERE vs.series_id = ${seriesIdInt} AND COALESCE(vs.is_published, true) = true
-            ORDER BY COALESCE(vs.play_count, 0) DESC
-            LIMIT ${limit}
-          `;
-        }
-        if (limit === null) {
-          return await sql`
-            SELECT vs.*, vss.title as series_title
-            FROM verse_songs vs
-            LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-            WHERE vs.series_id = ${seriesIdInt} AND COALESCE(vs.is_published, true) = true
-            ORDER BY vs.created_at DESC
-          `;
-        }
-        return await sql`
-          SELECT vs.*, vss.title as series_title
-          FROM verse_songs vs
-          LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-          WHERE vs.series_id = ${seriesIdInt} AND COALESCE(vs.is_published, true) = true
-          ORDER BY vs.created_at DESC
-          LIMIT ${limit}
-        `;
-      }
-      // All songs. recentlyAdded and the default both order by newest first;
-      // mostPlayed orders by play_count (with fallback below).
-      if (orderByPlayCount) {
-        if (limit === null) {
-          return await sql`
-            SELECT vs.*, vss.title as series_title
-            FROM verse_songs vs
-            LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-            WHERE COALESCE(vs.is_published, true) = true
-            ORDER BY COALESCE(vs.play_count, 0) DESC
-          `;
-        }
-        return await sql`
-          SELECT vs.*, vss.title as series_title
-          FROM verse_songs vs
-          LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-          WHERE COALESCE(vs.is_published, true) = true
-          ORDER BY COALESCE(vs.play_count, 0) DESC
-          LIMIT ${limit}
-        `;
-      }
-      if (limit === null) {
-        return await sql`
-          SELECT vs.*, vss.title as series_title
-          FROM verse_songs vs
-          LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-          WHERE COALESCE(vs.is_published, true) = true
-          ORDER BY vs.created_at DESC
-        `;
-      }
-      return await sql`
-        SELECT vs.*, vss.title as series_title
-        FROM verse_songs vs
-        LEFT JOIN verse_song_series vss ON vs.series_id = vss.id
-        WHERE COALESCE(vs.is_published, true) = true
-        ORDER BY vs.created_at DESC
-        LIMIT ${limit}
-      `;
-    };
+export default function VerseSongsPage() {
+  const [songs, setSongs] = useState<Song[]>([]);
+  const [series, setSeries] = useState<Series[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<'recent' | 'az' | 'series'>('recent');
+  const [seriesFilter, setSeriesFilter] = useState<'all' | number>('all');
 
-    let songs: any[];
+  const load = async () => {
+    setLoading(true); setLoadError('');
     try {
-      // mostPlayed (and recentlyAdded) both funnel through here; mostPlayed
-      // tries play_count ordering first.
-      songs = await runMain(mostPlayed);
-    } catch (e) {
-      // play_count column (or something else in that ordering) doesn't exist —
-      // fall back to newest-first instead of 500ing the whole page.
-      songs = await runMain(false);
-    }
+      const [songsRes, seriesRes] = await Promise.allSettled([
+        fetch('/api/verse-songs', { cache: 'no-store' }),
+        fetch('/api/verse-song-series', { cache: 'no-store' }),
+      ]);
+      let songList: Song[] = [];
+      let seriesList: Series[] = [];
+      if (songsRes.status === 'fulfilled' && songsRes.value.ok) {
+        songList = asArray(await songsRes.value.json()).filter((s: any) => s && s.title);
+      }
+      if (seriesRes.status === 'fulfilled' && seriesRes.value.ok) {
+        seriesList = asArray(await seriesRes.value.json()).filter((s: any) => s && s.title);
+      }
+      // Some APIs nest songs inside their series — flatten those too.
+      const nested: Song[] = [];
+      seriesList.forEach((sr) => {
+        if (Array.isArray(sr.songs)) {
+          sr.songs.forEach((s) => { if (s && s.title) nested.push({ ...s, series_id: s.series_id ?? sr.id }); });
+        }
+      });
+      // Merge + dedupe by id (fall back to title when id is missing)
+      const seen = new Set<string>();
+      const merged = [...songList, ...nested].filter((s) => {
+        const key = s.id != null ? `id-${s.id}` : `t-${String(s.title).toLowerCase()}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      // Public page shows published songs; if the flag is absent, show the song.
+      setSongs(merged.filter((s) => s.is_published !== false));
+      setSeries(seriesList);
+      if (songsRes.status === 'rejected' || (songsRes.status === 'fulfilled' && !songsRes.value.ok)) {
+        setLoadError('Could not reach the songs library. Check your connection and try again.');
+      }
+    } catch {
+      setLoadError('Could not reach the songs library. Check your connection and try again.');
+    } finally { setLoading(false); }
+  };
 
-    // ── Likes / favorites: best-effort only. Missing tables -> 0, never a 500. ──
-    if (userEmail && songs.length > 0) {
-      const liked = new Set<number>();
-      const faved = new Set<number>();
-      try {
-        const rows: any[] = await sql`SELECT verse_song_id FROM user_verse_song_likes WHERE user_email = ${userEmail}`;
-        rows.forEach((r) => liked.add(Number(r.verse_song_id)));
-      } catch { /* likes table missing — leave all 0 */ }
-      try {
-        const rows: any[] = await sql`SELECT verse_song_id FROM user_verse_song_favorites WHERE user_email = ${userEmail}`;
-        rows.forEach((r) => faved.add(Number(r.verse_song_id)));
-      } catch { /* favorites table missing — leave all 0 */ }
-      songs = songs.map((s: any) => ({
-        ...s,
-        user_liked: liked.has(Number(s.id)) ? 1 : 0,
-        user_favorited: faved.has(Number(s.id)) ? 1 : 0,
-      }));
-    } else {
-      songs = songs.map((s: any) => ({ ...s, user_liked: s.user_liked ?? 0, user_favorited: s.user_favorited ?? 0 }));
-    }
+  useEffect(() => { load(); }, []);
 
-    return NextResponse.json(songs);
-  } catch (error) {
-    console.error('Error fetching verse songs:', error);
-    return NextResponse.json({ error: 'Failed to fetch songs' }, { status: 500 });
-  }
-}
+  const seriesName = (id?: number) => series.find((s) => s.id === id)?.title || 'Verse-Songs';
 
-export async function POST(request: Request) {
-  try {
-    const { series_id, title, description, mp3_url, thumbnail, duration, is_published } = await request.json();
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    let list = songs.filter((s) => {
+      if (seriesFilter !== 'all' && s.series_id !== seriesFilter) return false;
+      if (!q) return true;
+      return [s.title, s.description || '', seriesName(s.series_id)].join(' ').toLowerCase().includes(q);
+    });
+    if (sort === 'az') list = [...list].sort((a, b) => a.title.localeCompare(b.title));
+    else if (sort === 'series') list = [...list].sort((a, b) => seriesName(a.series_id).localeCompare(seriesName(b.series_id)) || a.title.localeCompare(b.title));
+    else list = [...list].sort((a, b) => (b.id || 0) - (a.id || 0));
+    return list;
+  }, [songs, series, search, sort, seriesFilter]);
 
-    if (!series_id || !title || !mp3_url) {
-      return NextResponse.json({ error: 'Series ID, title, and MP3 URL are required' }, { status: 400 });
-    }
+  const countFor = (id: number) => {
+    const fromSeries = series.find((s) => s.id === id)?.song_count;
+    if (typeof fromSeries === 'number') return fromSeries;
+    return songs.filter((s) => s.series_id === id).length;
+  };
 
-    const resolvedThumbnail = thumbnail && thumbnail.trim() !== '' ? thumbnail.trim() : DEFAULT_THUMBNAIL;
+  return (
+    <div className="min-h-screen" style={{ background: 'linear-gradient(180deg,#0F0A2E 0%,#1B1040 55%,#0B0620 100%)' }}>
+      {/* Header */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6">
+        <div className="flex items-center justify-between gap-3">
+          <h1 className="text-2xl sm:text-3xl font-bold text-white flex items-center gap-2">🎵 Verse-Songs</h1>
+          <div className="flex items-center gap-2">
+            <Link href="/" className="px-4 py-2 rounded-xl bg-white/10 text-white text-sm font-semibold hover:bg-white/20">🏠 Home</Link>
+            <Link href="/dashboard" className="px-4 py-2 rounded-xl bg-purple-600 text-white text-sm font-semibold hover:bg-purple-500">Dashboard</Link>
+          </div>
+        </div>
 
-    const result = await sql`
-      INSERT INTO verse_songs (series_id, title, description, mp3_url, thumbnail, duration, is_published)
-      VALUES (${parseInt(series_id)}, ${title}, ${description || null}, ${mp3_url}, ${resolvedThumbnail}, ${duration || null}, ${is_published !== false})
-      RETURNING *
-    `;
+        {/* Search */}
+        <div className="mt-5 relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50">🔍</span>
+          <input
+            value={search} onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search songs, series, or descriptions…"
+            className="w-full pl-11 pr-4 py-3.5 rounded-2xl bg-white/10 text-white placeholder:text-white/40 border border-white/10 outline-none focus:border-amber-400/60"
+          />
+        </div>
 
-    return NextResponse.json(result[0], { status: 201 });
-  } catch (error) {
-    console.error('Error creating verse song:', error);
-    return NextResponse.json({ error: 'Failed to create song' }, { status: 500 });
-  }
-}
+        {/* Controls */}
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-white/70 text-sm">
+            Sort
+            <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="bg-white/10 text-white rounded-xl px-3 py-2.5 outline-none [&>option]:text-black">
+              <option value="recent">Recently Added</option>
+              <option value="az">Title A–Z</option>
+              <option value="series">By Series</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-white/70 text-sm">
+            Filter by Series
+            <select value={seriesFilter === 'all' ? 'all' : String(seriesFilter)} onChange={(e) => setSeriesFilter(e.target.value === 'all' ? 'all' : Number(e.target.value))} className="bg-white/10 text-white rounded-xl px-3 py-2.5 outline-none [&>option]:text-black">
+              <option value="all">All Series</option>
+              {series.map((s) => (
+                <option key={s.id} value={String(s.id)}>{s.title} ({countFor(s.id ?? -1)})</option>
+              ))}
+            </select>
+          </label>
+          <span className="ml-auto text-white/50 text-sm">{loading ? 'Loading…' : `${filtered.length} of ${songs.length} song${songs.length === 1 ? '' : 's'} · ${series.length} series`}</span>
+        </div>
 
-export async function PUT(request: Request) {
-  try {
-    const { id, series_id, title, description, mp3_url, thumbnail, duration, is_published } = await request.json();
+        {/* Series chips */}
+        {!loading && series.length > 0 && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button onClick={() => setSeriesFilter('all')} className={`px-4 py-2 rounded-full text-sm font-semibold ${seriesFilter === 'all' ? 'bg-amber-400 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}>All Songs</button>
+            {series.map((s) => (
+              <button key={s.id} onClick={() => setSeriesFilter(s.id ?? 'all')} className={`px-4 py-2 rounded-full text-sm font-semibold ${seriesFilter === s.id ? 'bg-amber-400 text-black' : 'bg-white/10 text-white hover:bg-white/20'}`}>
+                {s.title} · {countFor(s.id ?? -1)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
 
-    if (!id) {
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 });
-    }
+      {/* Body */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        {loading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="rounded-2xl bg-white/5 border border-white/10 p-5 animate-pulse">
+                <div className="h-28 rounded-xl bg-white/10 mb-4" />
+                <div className="h-5 w-3/4 rounded bg-white/10 mb-2" />
+                <div className="h-4 w-1/2 rounded bg-white/10" />
+              </div>
+            ))}
+          </div>
+        )}
 
-    // Partial update: COALESCE keeps the old value for any field not sent,
-    // so an edit that omits a field can no longer wipe it to NULL.
-    const resolvedThumbnail = thumbnail && thumbnail.trim() !== '' ? thumbnail.trim() : null;
+        {!loading && loadError && songs.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-5xl mb-4">🎵</p>
+            <h2 className="text-2xl font-bold text-white">Couldn&apos;t load the songs</h2>
+            <p className="text-white/60 mt-2 max-w-md mx-auto">{loadError}</p>
+            <button onClick={load} className="mt-6 px-6 py-3 rounded-full bg-amber-400 text-black font-bold hover:bg-amber-300">Try Again</button>
+          </div>
+        )}
 
-    const result = await sql`
-      UPDATE verse_songs
-      SET title = COALESCE(${title ?? null}, title),
-          series_id = COALESCE(${series_id ? parseInt(series_id) : null}, series_id),
-          description = COALESCE(${description ?? null}, description),
-          mp3_url = COALESCE(${mp3_url ?? null}, mp3_url),
-          thumbnail = COALESCE(${resolvedThumbnail}, thumbnail),
-          duration = COALESCE(${duration ?? null}, duration),
-          is_published = COALESCE(${is_published ?? null}, is_published),
-          updated_at = NOW()
-      WHERE id = ${parseInt(id)}
-      RETURNING *
-    `;
+        {!loading && !loadError && songs.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-5xl mb-4">🎵</p>
+            <h2 className="text-2xl font-bold text-white">No songs published yet</h2>
+            <p className="text-white/60 mt-2 max-w-md mx-auto">
+              The Verse-Songs library is empty — no songs have been published from the Admin panel yet.
+              New songs appear here automatically as soon as they are added.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <Link href="/bible-reader" className="px-6 py-3 rounded-full bg-amber-400 text-black font-bold hover:bg-amber-300">Go to the Bible Reader →</Link>
+              <Link href="/admin" className="px-6 py-3 rounded-full bg-white/10 text-white font-semibold hover:bg-white/20">Add songs in Admin →</Link>
+            </div>
+          </div>
+        )}
 
-    if (result.length === 0) {
-      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
-    }
+        {!loading && songs.length > 0 && filtered.length === 0 && (
+          <div className="text-center py-16">
+            <p className="text-5xl mb-4">🔍</p>
+            <h2 className="text-2xl font-bold text-white">No songs match your search</h2>
+            <p className="text-white/60 mt-2">Try a different word, or clear the filters to see every song.</p>
+            <button onClick={() => { setSearch(''); setSeriesFilter('all'); setSort('recent'); }} className="mt-6 px-6 py-3 rounded-full bg-amber-400 text-black font-bold hover:bg-amber-300">Clear Filters</button>
+          </div>
+        )}
 
-    return NextResponse.json(result[0]);
-  } catch (error) {
-    console.error('Error updating verse song:', error);
-    return NextResponse.json({ error: 'Failed to update song' }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: Request) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-
-    if (!id) {
-      return NextResponse.json({ error: 'ID is required' }, { status: 400 });
-    }
-
-    const result = await sql`
-      DELETE FROM verse_songs
-      WHERE id = ${parseInt(id)}
-      RETURNING id
-    `;
-
-    if (result.length === 0) {
-      return NextResponse.json({ error: 'Song not found' }, { status: 404 });
-    }
-
-    return NextResponse.json({ message: 'Song deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting verse song:', error);
-    return NextResponse.json({ error: 'Failed to delete song' }, { status: 500 });
-  }
+        {!loading && filtered.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {filtered.map((song) => (
+              <article key={song.id ?? song.title} className="rounded-2xl overflow-hidden bg-white/5 border border-white/10 hover:border-amber-400/50 transition-colors flex flex-col">
+                {song.thumbnail ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={song.thumbnail} alt={song.title} className="w-full h-36 object-cover" />
+                ) : (
+                  <div className="w-full h-36 flex items-center justify-center text-5xl" style={{ background: 'linear-gradient(135deg,#4C1D95,#7C3AED 55%,#F59E0B)' }}>🎵</div>
+                )}
+                <div className="p-5 flex flex-col flex-1">
+                  <span className="self-start px-3 py-1 rounded-full bg-amber-400/15 text-amber-300 text-xs font-bold">{seriesName(song.series_id)}</span>
+                  <h3 className="mt-3 text-lg font-bold text-white leading-snug">{song.title}</h3>
+                  {song.description && <p className="mt-2 text-sm text-white/60 leading-relaxed line-clamp-3">{song.description}</p>}
+                  <div className="mt-auto pt-4">
+                    {song.mp3_url ? (
+                      <audio controls preload="none" src={song.mp3_url} className="w-full" />
+                    ) : (
+                      <p className="text-xs text-white/40">Audio coming soon</p>
+                    )}
+                    <p className="mt-2 text-xs text-white/40">{fmtDuration(song.duration) ? `Duration ${fmtDuration(song.duration)}` : ''}</p>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+      <AppFooter />
+    </div>
+  );
 }
