@@ -264,7 +264,11 @@ function ChapterContent() {
   const [allBooks, setAllBooks] = useState<any[]>([]);
   const [refPopup, setRefPopup] = useState<null | { ref: string; bookName: string; bookNum: number; chapter: number; verses: number[]; loading: boolean; text: string; error?: string }>(null);
   const BOOK_NAMES = ['Genesis','Exodus','Leviticus','Numbers','Deuteronomy','Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings','1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther','Job','Psalms','Psalm','Proverbs','Ecclesiastes','Song of Solomon','Song of Songs','Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel','Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi','Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
-  const REF_RE = new RegExp('\\b((?:[123]\\s)?(?:' + BOOK_NAMES.map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + '))\\s+(\\d+):(\\d+(?:-\\d+)?(?:,\\s*\\d+(?:-\\d+)?)*)', 'gi');
+  // FIX (Luganda refs not popping up): the ref matcher only knew ENGLISH book names,
+  // so Luganda refs like "Yokaana 14:6", "Abaefeso 4:15-16", "Abakkolosaayi 3:14"
+  // never became clickable spans. Map every Luganda book name to its English name.
+  const LU_BOOK_MAP: Record<string, string> = { 'Olubereberye': 'Genesis', 'Okuva': 'Exodus', 'Ebyabaleevi': 'Leviticus', 'Okubala': 'Numbers', 'Ekyamateeka': 'Deuteronomy', 'Yoswa': 'Joshua', 'Abalamuzi': 'Judges', 'Ruusa': 'Ruth', 'Samwiri': 'Samuel', 'Bassekabaka': 'Kings', 'Ebyomumirembe': 'Chronicles', 'Ezera': 'Ezra', 'Nekemiya': 'Nehemiah', 'Eseza': 'Esther', 'Yobu': 'Job', 'Zabbuli': 'Psalms', 'Engero': 'Proverbs', 'Omubuulizi': 'Ecclesiastes', 'Oluyimba': 'Song of Solomon', 'Isaaya': 'Isaiah', 'Yeremiya': 'Jeremiah', 'Okukungubaga': 'Lamentations', 'Ebyokukungubaga': 'Lamentations', 'Ezekyeri': 'Ezekiel', 'Danyeri': 'Daniel', 'Koseya': 'Hosea', 'Yoweri': 'Joel', 'Amosi': 'Amos', 'Obadiya': 'Obadiah', 'Yona': 'Jonah', 'Mika': 'Micah', 'Nakumu': 'Nahum', 'Abakuku': 'Habakkuk', 'Zefaniya': 'Zephaniah', 'Kaggayi': 'Haggai', 'Zekkariya': 'Zechariah', 'Malaki': 'Malachi', 'Matayo': 'Matthew', 'Makko': 'Mark', 'Lukka': 'Luke', 'Yokaana': 'John', 'Ebikolwa': 'Acts', 'Abaruumi': 'Romans', 'Abakkolinso': 'Corinthians', 'Abaggalatiya': 'Galatians', 'Abaefeso': 'Ephesians', 'Abafiripi': 'Philippians', 'Abakkolosaayi': 'Colossians', 'Abasessalonika': 'Thessalonians', 'Timosewo': 'Timothy', 'Tito': 'Titus', 'Firemooni': 'Philemon', 'Abaebbulaniya': 'Hebrews', 'Yakobo': 'James', 'Peetero': 'Peter', 'Yuda': 'Jude', 'Okubikkulirwa': 'Revelation' };
+  const REF_RE = new RegExp('\\b((?:[123]\\s)?(?:' + [...BOOK_NAMES, ...Object.keys(LU_BOOK_MAP)].map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + '))\\s+(\\d+):(\\d+(?:-\\d+)?(?:,\\s*\\d+(?:-\\d+)?)*)', 'gi');
   const linkifyRefs = (html: string): string => {
     if (!html) return '';
     return html.split(/(<[^>]+>)/g).map(part => {
@@ -275,7 +279,12 @@ function ChapterContent() {
   const parseRef = (ref: string) => {
     const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z ]+?)\s+(\d+):(.+)$/);
     if (!m) return null;
-    const bookName = m[1].trim().replace(/\s+/g, ' ');
+    const rawName = m[1].trim().replace(/\s+/g, ' ');
+    // FIX: translate Luganda book names ("Yokaana" -> "John", "1 Yokaana" -> "1 John")
+    // so the book lookup in openScriptureRef finds the right book.
+    const numPrefix = rawName.match(/^[123]\s+/)?.[0] || '';
+    const baseName = rawName.replace(/^[123]\s+/, '');
+    const bookName = LU_BOOK_MAP[rawName] || (LU_BOOK_MAP[baseName] ? numPrefix + LU_BOOK_MAP[baseName] : rawName);
     const chapter = parseInt(m[2]);
     const verses: number[] = [];
     m[3].split(',').forEach(seg => { const mm = seg.trim().match(/^(\d+)(?:-(\d+))?$/); if (mm) { const a = parseInt(mm[1]), b = mm[2] ? parseInt(mm[2]) : a; for (let v = a; v <= b; v++) verses.push(v); } });
