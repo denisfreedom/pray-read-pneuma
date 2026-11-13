@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { sql } from '@/lib/sql';
+import sql from '@/app/api/utils/sql';
 
-// POST /api/commentaries/bulk — FIXED V2
+// POST /api/commentaries/bulk — FIXED V3 (import fix)
+// Fixes vs V1/V2:
+//  0) Import: '@/lib/sql' does NOT exist in this repo. Working routes use default import from '@/app/api/utils/sql'. That was the Vercel 'Module not found' error.
 // Fixes vs V1:
 //  1) Removed unused `action` variable — it failed Vercel build with noUnusedLocals.
 //  2) sql() result shape: @vercel/postgres returns { rows: [...] }, neon returns [...] directly.
