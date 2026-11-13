@@ -71,14 +71,84 @@ function ChapterContent() {
     if (wantLu) return c.luganda_commentary_text ?? c.luganda_commentary ?? c.text_luganda ?? c.luganda ?? c.lu ?? '';
     return c.commentary_text ?? c.english_commentary ?? c.text_english ?? c.commentary ?? c.text ?? c.content ?? '';
   };
-  const commHtmlForLang = (c: any, lang: 'EN' | 'LU' | 'BOTH'): string => {
+  const commHtmlForLang = (c: any, lang: 'EN' | 'LU' | 'BOTH', markKey?: string): string => {
     if (!c) return '';
-    if (lang === 'EN') return commHtml(c, false);
-    if (lang === 'LU') return commHtml(c, true);
-    const en = commHtml(c, false), lu = commHtml(c, true);
-    const raw = en && lu ? en + '<hr style="margin:12px 0;opacity:.3"/>' + lu : (en || lu);
-    return linkifyRefs(raw);
+    // FIX (refs not clickable): EN and LU used to return commHtml() RAW — linkifyRefs()
+    // only ran on the BOTH path. This page runs on EN (GB EN), so refs were never blue.
+    // Now EVERY path goes through linkifyRefs(), then through saved highlight marks.
+    let raw = '';
+    if (lang === 'EN') raw = commHtml(c, false);
+    else if (lang === 'LU') raw = commHtml(c, true);
+    else { const en = commHtml(c, false), lu = commHtml(c, true); raw = en && lu ? en + '<hr style="margin:12px 0;opacity:.3"/>' + lu : (en || lu); }
+    let html = linkifyRefs(raw);
+    if (markKey) html = applyMarksToHtml(html, markKey);
+    return html;
   };
+  // ── RESTORED: Highlight / Underline (Mark) — select any text in a verse, prayer passage, or commentary ──
+  // Private to this device/browser only: saved in localStorage, never sent to the server.
+  // How to use: drag to select words (long-press + drag on phone) → the Mark bar appears at the
+  // bottom → tap A (yellow/green/pink highlight) or U (orange/blue underline). Tap a mark's section
+  // again and use Clear to remove. Works in verses, prayer passages, commentary, intro & closing.
+  type Mark = { id: string; text: string; style: 'highlight' | 'underline'; color: string };
+  const [marks, setMarks] = useState<Record<string, Mark[]>>(() => {
+    try { return JSON.parse(localStorage.getItem(`prayread-marks-${bookNum}-${chapterNum}`) || '{}'); } catch { return {}; }
+  });
+  const [pendingMark, setPendingMark] = useState<{ key: string; text: string } | null>(null);
+  const markKey = (verse: number, langKey: string) => `${verse}-${langKey}`;
+  const saveMarks = (next: Record<string, Mark[]>) => { setMarks(next); try { localStorage.setItem(`prayread-marks-${bookNum}-${chapterNum}`, JSON.stringify(next)); } catch {} };
+  const applyMark = (style: 'highlight' | 'underline', color: string) => {
+    if (!pendingMark) return;
+    const existing = marks[pendingMark.key] || [];
+    if (existing.some(m => m.text === pendingMark.text && m.style === style && m.color === color)) { setPendingMark(null); return; }
+    saveMarks({ ...marks, [pendingMark.key]: [...existing, { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: pendingMark.text, style, color }] });
+    setPendingMark(null);
+    try { window.getSelection()?.removeAllRanges(); } catch {}
+  };
+  const clearMarksForKey = (key: string) => { const next = { ...marks }; delete next[key]; saveMarks(next); };
+  const onSelectGeneric = (key: string) => {
+    setTimeout(() => {
+      try {
+        const sel = window.getSelection(); const txt = sel?.toString() || '';
+        if (!txt.trim() || txt.trim().length < 2) { setPendingMark(null); return; }
+        setPendingMark({ key, text: txt });
+      } catch { setPendingMark(null); }
+    }, 10);
+  };
+  const onSelectText = (verse: number, langKey: string) => onSelectGeneric(markKey(verse, langKey));
+  // Plain-text sections (verses, prayers): split by saved marks and wrap matches.
+  const renderMarkedByKey = (text: string, key: string): React.ReactNode => {
+    const list = marks[key] || [];
+    if (!text || !list.length) return <>{text}</>;
+    let k = 0;
+    const renderWith = (str: string, ms: Mark[]): React.ReactNode[] => {
+      if (!ms.length) return [str];
+      const [first, ...rest] = ms; const idx = str.indexOf(first.text);
+      if (idx === -1) return renderWith(str, rest);
+      return [...(str.slice(0, idx) ? renderWith(str.slice(0, idx), rest) : []),
+        <span key={first.id + '-' + k++} className={first.style === 'highlight' ? `px-0.5 rounded ${first.color}` : `underline decoration-2 underline-offset-4 ${first.color}`}>{str.slice(idx, idx + first.text.length)}</span>,
+        ...(str.slice(idx + first.text.length) ? renderWith(str.slice(idx + first.text.length), rest) : [])];
+    };
+    return <>{renderWith(text, [...list].sort((a, b) => b.text.length - a.text.length))}</>;
+  };
+  const renderMarked = (text: string, verse: number, langKey: string) => renderMarkedByKey(text, markKey(verse, langKey));
+  // HTML sections (commentary, rich text): apply marks to TEXT between tags only, never inside tags.
+  // Also skips text inside a .scripture-ref span so a mark can never break a clickable verse ref.
+  const applyMarksToHtml = (html: string, key: string): string => {
+    const list = marks[key] || [];
+    if (!html || !list.length) return html;
+    const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return html.split(/(<[^>]+>)/g).map(part => {
+      if (!part || part.startsWith('<')) return part;
+      let out = part;
+      [...list].sort((a, b) => b.text.length - a.text.length).forEach(m => {
+        if (!m.text || !out.includes(m.text)) return;
+        const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
+        out = out.split(m.text).join(`<span class="${cls}">${m.text}</span>`);
+      });
+      return out;
+    }).join('');
+  };
+
   // ── FIX: clickable Scripture refs inside commentary ──────────────────────────
   const [allBooks, setAllBooks] = useState<any[]>([]);
   const [refPopup, setRefPopup] = useState<null | { ref: string; bookName: string; bookNum: number; chapter: number; verses: number[]; loading: boolean; text: string; error?: string }>(null);
@@ -354,8 +424,8 @@ function ChapterContent() {
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
-                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
-                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`}>{v.text_luganda}</p>}
+                    <p onMouseUp={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} onTouchEnd={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} style={{ fontSize }} className={`leading-relaxed ${themeClasses.text} select-text cursor-text`} style={{ fontSize: bodySize }}>{renderMarked(verseText(v), v.verse, lang === 'LU' ? 'LU' : 'EN')}</p>
+                    {lang === 'BOTH' && v.text_luganda && <p onMouseUp={() => onSelectText(v.verse, 'LU')} onTouchEnd={() => onSelectText(v.verse, 'LU')} style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider} select-text cursor-text`}>{renderMarked(v.text_luganda, v.verse, 'LU')}</p>}
                   </div>
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
                 </div>
@@ -375,8 +445,8 @@ function ChapterContent() {
                     <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2">🙏 Pray-Read · Verse {v.verse}</p>
                     {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
-                        {pr.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{pr.en}</p>}
-                        {pr.lu && <p className={`text-[15px] leading-relaxed whitespace-pre-wrap ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{pr.lu}</p>}
+                        {pr.en && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(pr.en, `prayer-${v.verse}-EN`)}</p>}
+                        {pr.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-LU`)} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{renderMarkedByKey(pr.lu, `prayer-${v.verse}-LU`)}</p>}
                       </>
                     )}
                   </div>
@@ -397,7 +467,7 @@ function ChapterContent() {
                   <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
                     <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
                     {commentary[v.verse] && commHtmlForLang(commentary[v.verse], lang) ? (
-                      <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[v.verse], lang) }} />
+                      <div onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[v.verse], lang, `commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`) }} />
                     ) : commentary[v.verse] ? (
                       <p className="text-sm text-slate-600 leading-relaxed">Commentary saved but empty for this verse.</p>
                     ) : (
@@ -463,13 +533,13 @@ function ChapterContent() {
                 {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Verse {selectedVerse}</p>
-                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang) }} />
+                    <div onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
                   </>
                 ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
                   <>
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Chapter {chapterNum}</p>
-                    <div onClick={handleCommentaryClick} className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang) }} />
+                    <div onClick={handleCommentaryClick} onMouseUp={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} onTouchEnd={() => onSelectGeneric(`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} className="leading-relaxed select-text cursor-text" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`) }} />
                     <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
                   </>
                 ) : (
@@ -544,6 +614,21 @@ function ChapterContent() {
         </div>
       )}
 
+
+      {/* ── RESTORED Mark bar: appears when you select text. A = highlight, U = underline ── */}
+      {pendingMark && (
+        <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
+          <span className="hidden sm:inline text-[11px] text-slate-300 pl-1 pr-1 whitespace-nowrap">Mark:</span>
+          <button onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+          <button onClick={() => applyMark('underline', 'decoration-orange-500 text-inherit')} title="Underline orange" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-orange-500">U</button>
+          <button onClick={() => applyMark('underline', 'decoration-blue-500 text-inherit')} title="Underline blue" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-blue-500">U</button>
+          <button onClick={() => { clearMarksForKey(pendingMark.key); setPendingMark(null); }} title="Clear all marks in this section" className="px-2 h-8 rounded-full bg-white/15 text-[11px] font-bold flex items-center justify-center whitespace-nowrap">Clear</button>
+          <button onClick={() => { try { navigator.clipboard?.writeText(pendingMark.text); } catch {} setPendingMark(null); }} title="Copy selection" className="w-8 h-8 rounded-full bg-white/15 text-[13px] flex items-center justify-center">⧉</button>
+          <button onClick={() => setPendingMark(null)} title="Close" className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">✕</button>
+        </div>
+      )}
 
       {/* ── Scripture-ref POPUP ── */}
       {refPopup && (
