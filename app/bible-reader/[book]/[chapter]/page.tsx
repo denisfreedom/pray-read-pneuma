@@ -2,6 +2,7 @@
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
+import VerseShare from '@/components/VerseShare';
 
 // RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
 // Only the data wiring is fixed. No redesign.
@@ -55,7 +56,6 @@ function ChapterContent() {
   const [copied, setCopied] = useState<number | null>(null);
   // --- V3: themes, share sheet, bookmarks, commentary ---
   const [theme, setTheme] = useState<'white' | 'lightblue' | 'dark'>('lightblue');
-  const [shareVerse, setShareVerse] = useState<any | null>(null);
   const [bookmarks, setBookmarks] = useState<number[]>(() => {
     try { return JSON.parse(localStorage.getItem(`prayread-bookmarks-${bookNum}-${chapterNum}`) || '[]'); } catch { return []; }
   });
@@ -203,19 +203,43 @@ function ChapterContent() {
   };
   const openScriptureRef = async (ref: string) => {
     const p = parseRef(ref); if (!p) return;
-    const b = allBooks.find((x: any) => (x.name || x.book_name || '').toLowerCase() === p.bookName.toLowerCase() || (x.name_english || '').toLowerCase() === p.bookName.toLowerCase()) || null;
-    const bookNum = b ? (b.book_number ?? b.id ?? 0) : 0;
-    setRefPopup({ ref, bookName: p.bookName, bookNum, chapter: p.chapter, verses: p.verses, loading: true, text: '' });
+    // FIX: "Verse text not found" — the popup only tried ONE param style, ONE response shape,
+    // ONE verse field. The chapter load tries FIVE param styles and THREE shapes. Use the same.
+    const ALIAS: Record<string, string> = { 'Psalm': 'Psalms', 'Song of Songs': 'Song of Solomon', 'Song': 'Song of Solomon', 'Phil': 'Philippians', '1 Jn': '1 John', '2 Jn': '2 John', '3 Jn': '3 John' };
+    const want = (ALIAS[p.bookName] || p.bookName).toLowerCase();
+    const b = allBooks.find((x: any) => [(x.name || ''), (x.book_name || ''), (x.name_english || ''), (x.name_luganda || '')].map((s: string) => s.toLowerCase()).includes(want)) || null;
+    const targetBookNum = b ? (b.book_number ?? b.id ?? 0) : 0;
+    const targetBookId = b?.id ?? targetBookNum;
+    setRefPopup({ ref, bookName: p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: true, text: '' });
     try {
-      const r = await fetch(`/api/bible-verses?book_number=${bookNum}&chapter=${p.chapter}`);
-      const d = await r.json().catch(() => null);
-      const arr = Array.isArray(d) ? d : (d?.verses || d?.data || []);
-      const picked = arr.filter((v: any) => p.verses.includes(Number(v.verse ?? v.verse_number))).sort((a: any, b2: any) => (a.verse ?? a.verse_number) - (b2.verse ?? b2.verse_number));
-      const text = picked.length ? picked.map((v: any) => `${v.verse ?? v.verse_number}. ${v.text ?? v.text_english ?? v.verse_text ?? ''}`).join('\n\n') : '';
-      setRefPopup({ ref, bookName: p.bookName, bookNum, chapter: p.chapter, verses: p.verses, loading: false, text, error: picked.length ? undefined : 'Verse text not found.' });
-    } catch { setRefPopup({ ref, bookName: p.bookName, bookNum, chapter: p.chapter, verses: p.verses, loading: false, text: '', error: 'Could not load verse text.' }); }
+      let rows: any[] = [];
+      const urls = [
+        `/api/bible-verses?book_number=${targetBookNum}&chapter=${p.chapter}`,
+        `/api/bible-verses?bookId=${targetBookId}&chapter=${p.chapter}`,
+        `/api/bible-verses?book=${targetBookNum}&chapter=${p.chapter}`,
+        `/api/bible-verses?id=${targetBookId}&chapter=${p.chapter}`,
+        `/api/bible-verses?book_id=${targetBookId}&chapter=${p.chapter}`,
+      ];
+      for (const url of urls) {
+        try {
+          const r = await fetch(url);
+          const d = await r.json().catch(() => null);
+          const arr = Array.isArray(d) ? d : (d?.verses || d?.data || d?.rows || []);
+          if (Array.isArray(arr) && arr.length) { rows = arr; break; }
+        } catch {}
+      }
+      const norm = rows.map((v: any) => ({ verse: v.verse ?? v.verse_number ?? v.number, text: v.text_english || v.english || v.text_en || v.text || v.verse_text || '' }));
+      const picked = norm.filter((v: any) => p.verses.includes(Number(v.verse))).sort((a: any, b2: any) => a.verse - b2.verse);
+      const text = picked.length ? picked.map((v: any) => `${v.verse}. ${v.text}`).join('\n\n') : '';
+      setRefPopup({ ref, bookName: p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text, error: picked.length ? undefined : 'Verse text not found.' });
+    } catch { setRefPopup({ ref, bookName: p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text: '', error: 'Could not load verse text.' }); }
   };
   const handleCommentaryClick = (e: React.MouseEvent) => {
+    // FIX: sidebar commentary "selection not shown" — after a drag-select, the browser fires
+    // click. If the drag started/ended on a blue ref, this opened the verse popup and the
+    // popup stole the painted selection (the capture still worked, so highlight still applied).
+    // A real TAP collapses the selection first, so: non-empty selection = drag-select = ignore.
+    try { if (window.getSelection()?.toString().trim()) return; } catch {}
     const el = (e.target as HTMLElement).closest?.('.scripture-ref') as HTMLElement | null;
     if (el?.dataset?.ref) { e.preventDefault(); e.stopPropagation(); openScriptureRef(el.dataset.ref); }
   };
@@ -394,9 +418,6 @@ function ChapterContent() {
     ? { page: 'bg-white text-slate-900', card: 'bg-white text-slate-900 border-slate-200', header: 'bg-white text-slate-900 border-slate-200', text: 'text-slate-900', muted: 'text-slate-600', submuted: 'text-slate-500', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-slate-100 text-slate-800', divider: 'border-slate-100' }
     : { page: 'bg-[#BDD7F5] text-slate-900', card: 'bg-[#DCEBFF] text-slate-900 border-[#A8C6EE]', header: 'bg-[#C7DEFA] text-slate-900 border-[#A8C6EE]', text: 'text-slate-900', muted: 'text-slate-700', submuted: 'text-slate-600', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-[#C7DEFA] text-slate-800', divider: 'border-[#A8C6EE]' };
 
-  const shareText = (v: any) => `${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`;
-  const shareUrl = (v: any) => typeof window !== 'undefined' ? `${window.location.origin}/bible-reader/${bookNum}/${chapterNum}#verse-${v.verse}` : '';
-  const openShare = (v: any) => setShareVerse(v);
 
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]"><p className="text-slate-500 text-sm">Loading chapter…</p></div>;
@@ -413,6 +434,7 @@ function ChapterContent() {
 
   return (
     <div className={`min-h-screen ${themeClasses.page} select-text`} style={{ WebkitUserSelect: 'text', userSelect: 'text' } as any}>
+      <style>{`::selection{background:#fde68a !important;color:#111827 !important} ::-moz-selection{background:#fde68a !important;color:#111827 !important}`}</style>
       {/* Header — ORIGINAL */}
       <div className={`${themeClasses.header} border-b sticky top-0 z-30`}>
         <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
@@ -465,7 +487,7 @@ function ChapterContent() {
                 {/* V3: Notes + Insight REMOVED — Bookmark now fits on the same line */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button onClick={() => openPrayer(v.verse)} disabled={!hasPrayer} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${hasPrayer ? 'bg-rose-100 text-rose-800 hover:bg-rose-200' : 'bg-slate-50 text-slate-400 cursor-not-allowed'}`}>♡ Prayer</button>
-                  <button onClick={() => openShare(v)} className="px-3 py-1.5 rounded-lg bg-purple-100 text-purple-900 text-[13.5px] font-medium">🔗 Share</button>
+                  <VerseShare book={bookName} bookNum={bookNum} chapter={chapterNum} verse={v.verse} text={v.text_english || verseText(v)} textLu={v.text_luganda || ""} prayerEn={pr.en} prayerLu={pr.lu} crossRefs={isSel && activePanel === 'crossref' ? crossRefs : []} isDark={theme === 'dark'} />
                   <button onClick={() => openCrossRefs(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'crossref' ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>🔗 Cross-Ref</button>
                   <button onClick={() => openCommentary(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'commentary' ? 'bg-blue-200 text-blue-900' : 'bg-slate-100 text-slate-800'}`}>📖 Commentary</button>
                   <button onClick={() => toggleBookmark(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13px] font-medium ${bookmarks.includes(v.verse) ? 'bg-amber-400 text-amber-950' : 'bg-slate-100 text-slate-700'}`}>{bookmarks.includes(v.verse) ? '🔖 Saved ✓' : '🔖 Bookmark'}</button>
@@ -623,30 +645,6 @@ function ChapterContent() {
         </aside>
       </div>
 
-      {/* Share sheet — WhatsApp / Facebook / Telegram / Instagram / X / LinkedIn + Copy */}
-      {shareVerse && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4" onClick={() => setShareVerse(null)}>
-          <div className={`${themeClasses.card} rounded-2xl w-full max-w-sm p-5 shadow-2xl`} onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-1">
-              <p className="font-bold text-[16px]">Share {bookName} {chapterNum}:{shareVerse.verse}</p>
-              <button onClick={() => setShareVerse(null)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">✕</button>
-            </div>
-            <p className="text-[13px] text-slate-500 mb-4 line-clamp-2">“{shareText(shareVerse).slice(0, 120)}…”</p>
-            <div className="grid grid-cols-3 gap-3 text-center">
-              <a href={`https://wa.me/?text=${encodeURIComponent(shareText(shareVerse) + ' ' + shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366]/10 py-3 px-2"><span className="text-2xl block">💬</span><span className="text-[12px] font-semibold">WhatsApp</span></a>
-              <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#1877F2]/10 py-3 px-2"><span className="text-2xl block">📘</span><span className="text-[12px] font-semibold">Facebook</span></a>
-              <a href={`https://t.me/share/url?url=${encodeURIComponent(shareUrl(shareVerse))}&text=${encodeURIComponent(shareText(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#229ED9]/10 py-3 px-2"><span className="text-2xl block">✈️</span><span className="text-[12px] font-semibold">Telegram</span></a>
-              <button onClick={() => { navigator.clipboard?.writeText(shareUrl(shareVerse)); setCopied(shareVerse.verse); }} className="rounded-xl bg-[#E1306C]/10 py-3 px-2"><span className="text-2xl block">📸</span><span className="text-[12px] font-semibold">Instagram<br /><span className="text-[10px] font-normal">Copy link</span></span></button>
-              <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText(shareVerse))}&url=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-900/5 py-3 px-2"><span className="text-2xl block">𝕏</span><span className="text-[12px] font-semibold">X / Twitter</span></a>
-              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0A66C2]/10 py-3 px-2"><span className="text-2xl block">💼</span><span className="text-[12px] font-semibold">LinkedIn</span></a>
-            </div>
-            <button onClick={() => { navigator.clipboard?.writeText(shareText(shareVerse) + ' ' + shareUrl(shareVerse)); setCopied(shareVerse.verse); }} className="w-full mt-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold">{copied === shareVerse.verse ? '✓ Copied!' : '📋 Copy verse + link'}</button>
-            <p className="text-[11px] text-slate-400 text-center mt-2">Instagram has no direct share link — tap it to copy the link, then paste it in Instagram.</p>
-          </div>
-        </div>
-      )}
-
-
       {/* ── RESTORED Mark bar: appears when you select text. A = highlight, U = underline ── */}
       {pendingMark && (
         <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
@@ -734,8 +732,8 @@ function ChapterContent() {
                 {!selectedVerse ? <p className="text-sm">Tap ♡ Prayer under any verse to pray it here.</p> : (
                   <div>
                     <p className="font-bold mb-2 flex items-center gap-2">{bookName} {chapterNum}:{selectedVerse} <MarkBtn markKey={`prayer-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} title="Select this prayer & mark it" /></p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{selectedPrayer.en}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p className="leading-relaxed whitespace-pre-wrap mt-3" style={{ fontSize: bodySize }}>{selectedPrayer.lu}</p>}
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p data-mark-key={`prayer-${selectedVerse}-EN`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p data-mark-key={`prayer-${selectedVerse}-LU`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className="leading-relaxed whitespace-pre-wrap mt-3 select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
                     {!selectedPrayer.en && !selectedPrayer.lu && <p className="text-sm italic text-slate-500">No prayer for this verse yet.</p>}
                   </div>
                 )}
