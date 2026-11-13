@@ -6,7 +6,7 @@ import { X, Link2, Check, Share2 } from 'lucide-react';
 // Shares: VERSE + its PRAYER passage + its CROSS-REFERENCES + deep link back to that exact verse.
 // Real brand icons (inline SVG, no emoji): WhatsApp, Facebook, Telegram, Instagram, X, LinkedIn + Copy Link + Native Share.
 // Usage in chapter reader:
-//   <VerseShare book={bookName} chapter={chapterNum} verse={v.verse} text={verseText(v)}
+//   <VerseShare book={bookName} chapter={chapterNum} verse={v.verse} text={v.text_english} textLu={v.text_luganda}
 //     prayerEn={pr.en} prayerLu={pr.lu} crossRefs={crossRefsForVerse} isDark={theme==='dark'} />
 // If crossRefs are not loaded yet, pass [] — the sheet still opens, and shows "Tap Cross-Ref first" hint.
 // The parent chapter page already loads crossRefs on Cross-Ref tap; for Share we lazy-load them here too if empty.
@@ -26,6 +26,7 @@ interface VerseShareProps {
   chapter: number;
   verse: number;
   text: string;
+  textLu?: string; // Luganda verse text — shared alongside English
   prayerEn?: string;
   prayerLu?: string;
   crossRefs?: CrossRefItem[];
@@ -44,7 +45,7 @@ function BrandIcon({ name, size = 16 }: { name: string; size?: number }) {
   return null;
 }
 
-export default function VerseShare({ book, chapter, verse, text, prayerEn = '', prayerLu = '', crossRefs = [], bookNum, isDark = false }: VerseShareProps) {
+export default function VerseShare({ book, chapter, verse, text, textLu = '', prayerEn = '', prayerLu = '', crossRefs = [], bookNum, isDark = false }: VerseShareProps) {
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [loadedRefs, setLoadedRefs] = useState<CrossRefItem[]>(crossRefs);
@@ -70,6 +71,7 @@ export default function VerseShare({ book, chapter, verse, text, prayerEn = '', 
 
   const fullText = useMemo(() => {
     const parts = [`${ref}`, '', `“${(text || '').trim()}”`];
+    if (textLu?.trim()) parts.push('', `“${textLu.trim()}” (Luganda)`);
     if (prayerText) parts.push('', '🙏 PRAY-READ PRAYER:', prayerText);
     if (refsText) parts.push('', '🔗 CROSS-REFERENCES:', refsText);
     parts.push('', `Read & pray this verse: ${shareUrl}`, '', '— Shared from Pray-Read Bible');
@@ -129,6 +131,7 @@ export default function VerseShare({ book, chapter, verse, text, prayerEn = '', 
             <div className={`rounded-xl border p-3 mb-4 text-[13px] leading-relaxed whitespace-pre-wrap max-h-[220px] overflow-y-auto ${isDark ? 'bg-slate-800 border-slate-700' : 'bg-slate-50 border-slate-200'}`}>
               <p className="font-bold">{ref}</p>
               <p className="italic mt-1">“{text}”</p>
+              {textLu?.trim() ? <p className="italic mt-1">“{textLu}” <span className="not-italic text-[11px] opacity-70">(Luganda)</span></p> : null}
               {prayerText ? <><p className="font-bold mt-3">🙏 PRAY-READ PRAYER:</p><p>{prayerText}</p></> : <p className="italic mt-2 opacity-70">No prayer added for this verse yet.</p>}
               {loadingRefs ? <p className="italic mt-2 opacity-70">Loading cross-references…</p> : refsText ? <><p className="font-bold mt-3">🔗 CROSS-REFERENCES:</p><p>{refsText}</p></> : <p className="italic mt-2 opacity-70">No cross-references for this verse.</p>}
               <p className="mt-3 text-[12px] break-all text-blue-700">{shareUrl}</p>
