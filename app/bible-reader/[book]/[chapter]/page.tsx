@@ -2,17 +2,8 @@
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import VerseShare from '@/components/VerseShare';
 
 // RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
-// FIXED — duplicate sidebar below last verse REMOVED (see notes at bottom).
-// 1) Right panel is now desktop-only (hidden lg:block). On mobile the ☰ drawer is the ONLY sidebar.
-//    Before: on mobile the right panel stacked BELOW the last verse, duplicating the drawer.
-// 2) Chapter Closing Prayer removed from inside the sidebar Prayer tab — it now appears ONLY
-//    below the last verse in the left column, where it closes the chapter. Before it appeared twice.
-// 3) Verse <p> had style={} twice — merged to one style={{ fontSize: bodySize }}.
-// 4) Drawer tab bug FIXED: tapping Intro/Commentary/Prayer in the ☰ drawer no longer closes the drawer.
-// 5) Share REDESIGNED: old emoji share sheet REMOVED. Each verse now uses <VerseShare/> (Verse + Prayer + Cross-Refs + deep link, real brand icons).
 // Only the data wiring is fixed. No redesign.
 // Verses: try every param/shape the bible-verses API has used, until one returns rows.
 // Prayers: per-verse. Prayer button under a verse opens THAT verse's prayer
@@ -64,10 +55,29 @@ function ChapterContent() {
   const [copied, setCopied] = useState<number | null>(null);
   // --- V3: themes, share sheet, bookmarks, commentary ---
   const [theme, setTheme] = useState<'white' | 'lightblue' | 'dark'>('lightblue');
+  const [shareVerse, setShareVerse] = useState<any | null>(null);
   const [bookmarks, setBookmarks] = useState<number[]>(() => {
     try { return JSON.parse(localStorage.getItem(`prayread-bookmarks-${bookNum}-${chapterNum}`) || '[]'); } catch { return []; }
   });
   const [commentary, setCommentary] = useState<Record<number, any>>({});
+  // FIX: sidebar Commentary tab was hard-coded to a placeholder, and the verse panel
+  // fell through to JSON.stringify() because the API returns commentary_text /
+  // luganda_commentary_text, not text_english / commentary / content.
+  const [chapterCommentary, setChapterCommentary] = useState<any>(null);
+  // Pick the right field from ANY commentary shape (verse / chapter / book, any API).
+  // Returns raw HTML (admin saves RichText) — render with dangerouslySetInnerHTML, never as plain text.
+  const commHtml = (c: any, wantLu: boolean): string => {
+    if (!c || typeof c !== 'object') return typeof c === 'string' ? c : '';
+    if (wantLu) return c.luganda_commentary_text ?? c.luganda_commentary ?? c.text_luganda ?? c.luganda ?? c.lu ?? '';
+    return c.commentary_text ?? c.english_commentary ?? c.text_english ?? c.commentary ?? c.text ?? c.content ?? '';
+  };
+  const commHtmlForLang = (c: any, lang: 'EN' | 'LU' | 'BOTH'): string => {
+    if (!c) return '';
+    if (lang === 'EN') return commHtml(c, false);
+    if (lang === 'LU') return commHtml(c, true);
+    const en = commHtml(c, false), lu = commHtml(c, true);
+    return en && lu ? en + '<hr style="margin:12px 0;opacity:.3"/>' + lu : (en || lu);
+  };
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -85,6 +95,14 @@ function ChapterContent() {
         const b = books.find((x: any) => x.book_number === bookNum || x.id === bookNum || x.book_id === bookNum) || null;
         setBook(b);
         const bookId = b?.id ?? bookNum;
+        // FIX: sidebar Commentary tab needs chapter commentary — fetch it once on load.
+        // Never blocks the verses if it fails.
+        try {
+          const rr = await fetch(`/api/chapter-commentaries?bookId=${bookId}&chapter=${chapterNum}`);
+          const dd = await rr.json().catch(() => null);
+          const row = Array.isArray(dd) ? dd[0] : dd;
+          if (row && (commHtml(row, false) || commHtml(row, true))) setChapterCommentary(row);
+        } catch {}
 
         // --- Verses: try EVERY param style + EVERY response shape ---
         // This is the bug that blanked Esther: the old new-page only tried book_number + array.
@@ -221,7 +239,7 @@ function ChapterContent() {
     });
   };
 
-  const linkColor = theme === 'dark' ? 'text-orange-400' : 'text-blue-700'; // V5: blue -> orange in Dark
+  const linkColor = theme === 'dark' ? 'text-orange-400' : '{linkColor}'; // V5: blue -> orange in Dark
   const crossBody = theme === 'dark' ? 'text-slate-100' : 'text-slate-700'; // V5: cross-ref body near-white in Dark
   const bodySize = fontSize; // V5 universal: base size drives verses + prayer + sidebar + cross-ref
   const smallSize = Math.max(12, fontSize - 2);
@@ -234,6 +252,9 @@ function ChapterContent() {
     ? { page: 'bg-white text-slate-900', card: 'bg-white text-slate-900 border-slate-200', header: 'bg-white text-slate-900 border-slate-200', text: 'text-slate-900', muted: 'text-slate-600', submuted: 'text-slate-500', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-slate-100 text-slate-800', divider: 'border-slate-100' }
     : { page: 'bg-[#BDD7F5] text-slate-900', card: 'bg-[#DCEBFF] text-slate-900 border-[#A8C6EE]', header: 'bg-[#C7DEFA] text-slate-900 border-[#A8C6EE]', text: 'text-slate-900', muted: 'text-slate-700', submuted: 'text-slate-600', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-[#C7DEFA] text-slate-800', divider: 'border-[#A8C6EE]' };
 
+  const shareText = (v: any) => `${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`;
+  const shareUrl = (v: any) => typeof window !== 'undefined' ? `${window.location.origin}/bible-reader/${bookNum}/${chapterNum}#verse-${v.verse}` : '';
+  const openShare = (v: any) => setShareVerse(v);
 
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]"><p className="text-slate-500 text-sm">Loading chapter…</p></div>;
@@ -273,7 +294,7 @@ function ChapterContent() {
         <div>
           <span className="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-[13px] font-semibold">{testament}</span>
           <h2 className="text-[44px] leading-[1.1] font-bold text-[#1E3A8A] mt-3">{bookName}</h2>
-          <p className={`text-[19px] font-bold ${linkColor} mt-1`}>Chapter {chapterNum}</p>
+          <p className="text-[19px] font-bold {linkColor} mt-1">Chapter {chapterNum}</p>
           {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
           <hr className="border-blue-200 my-4" />
 
@@ -292,8 +313,8 @@ function ChapterContent() {
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
-                    <p className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
-                    {lang === 'BOTH' && v.text_luganda && <p className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`} style={{ fontSize: bodySize }}>{v.text_luganda}</p>}
+                    <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.text}`} style={{ fontSize: bodySize }}>{verseText(v)}</p>
+                    {lang === 'BOTH' && v.text_luganda && <p style={{ fontSize }} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider}`}>{v.text_luganda}</p>}
                   </div>
                   <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
                 </div>
@@ -301,7 +322,7 @@ function ChapterContent() {
                 {/* V3: Notes + Insight REMOVED — Bookmark now fits on the same line */}
                 <div className="flex flex-wrap items-center gap-2">
                   <button onClick={() => openPrayer(v.verse)} disabled={!hasPrayer} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${hasPrayer ? 'bg-rose-100 text-rose-800 hover:bg-rose-200' : 'bg-slate-50 text-slate-400 cursor-not-allowed'}`}>♡ Prayer</button>
-                  <VerseShare book={bookName} bookNum={bookNum} chapter={chapterNum} verse={v.verse} text={verseText(v)} prayerEn={pr.en} prayerLu={pr.lu} crossRefs={isSel && activePanel === 'crossref' ? crossRefs : []} isDark={theme === 'dark'} />
+                  <button onClick={() => openShare(v)} className="px-3 py-1.5 rounded-lg bg-purple-100 text-purple-900 text-[13.5px] font-medium">🔗 Share</button>
                   <button onClick={() => openCrossRefs(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'crossref' ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>🔗 Cross-Ref</button>
                   <button onClick={() => openCommentary(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'commentary' ? 'bg-blue-200 text-blue-900' : 'bg-slate-100 text-slate-800'}`}>📖 Commentary</button>
                   <button onClick={() => toggleBookmark(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13px] font-medium ${bookmarks.includes(v.verse) ? 'bg-amber-400 text-amber-950' : 'bg-slate-100 text-slate-700'}`}>{bookmarks.includes(v.verse) ? '🔖 Saved ✓' : '🔖 Bookmark'}</button>
@@ -325,7 +346,7 @@ function ChapterContent() {
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2">🔗 Cross References · Verse {v.verse}</p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
-                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className={crossBody}> — {cr.text_english}</span>}</li>
+                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
                       ))}</ul>
                     )}
                   </div>
@@ -333,9 +354,11 @@ function ChapterContent() {
                 {/* Commentary for THIS verse — same one-panel rule */}
                 {isSel && activePanel === 'commentary' && (
                   <div className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
-                    <p className={`text-[11px] font-bold tracking-wide ${linkColor} uppercase mb-2`}>📖 Commentary · Verse {v.verse}</p>
-                    {commentary[v.verse] ? (
-                      <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{commentary[v.verse].text_english || commentary[v.verse].commentary || commentary[v.verse].content || JSON.stringify(commentary[v.verse])}</p>
+                    <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2">📖 Commentary · Verse {v.verse}</p>
+                    {commentary[v.verse] && commHtmlForLang(commentary[v.verse], lang) ? (
+                      <div className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[v.verse], lang) }} />
+                    ) : commentary[v.verse] ? (
+                      <p className="text-sm text-slate-600 leading-relaxed">Commentary saved but empty for this verse.</p>
                     ) : (
                       <p className="text-sm text-slate-600 leading-relaxed">No written commentary saved for this verse yet. Pray-read the verse above — the Prayer tab for this verse carries the meditation for it. Commentary is added from Admin → Commentaries.</p>
                     )}
@@ -364,7 +387,7 @@ function ChapterContent() {
         </div>
 
         {/* RIGHT — ORIGINAL tabs */}
-        <aside id="right-panel" className={`hidden lg:block lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
+        <aside className={`lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
           <div className={`flex border-b ${themeClasses.divider} ${themeClasses.header}`}>
             {([
               { id: 'intro', label: '📕 Intro' },
@@ -394,14 +417,31 @@ function ChapterContent() {
               </div>
             )}
             {rightTab === 'commentary' && (
-              <div><p className="font-bold text-[16px] mb-3">📖 Commentary</p><p className="text-sm text-slate-500 italic">Select a verse and click Commentary to see its commentary.</p></div>
+              <div>
+                <p className="font-bold text-[16px] mb-3">📖 Commentary</p>
+                {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
+                  <>
+                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Verse {selectedVerse}</p>
+                    <div className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(commentary[selectedVerse], sidebarLang) }} />
+                    <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
+                  </>
+                ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
+                  <>
+                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Chapter {chapterNum}</p>
+                    <div className="leading-relaxed" style={{ fontSize: bodySize }} dangerouslySetInnerHTML={{ __html: commHtmlForLang(chapterCommentary, sidebarLang) }} />
+                    <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-slate-500 italic">No chapter commentary saved yet. Select a verse and click Commentary to see its commentary.</p>
+                )}
+              </div>
             )}
             {rightTab === 'prayer' && activePanel === 'crossref' && selectedVerse !== null && (
               <div className="rounded-xl bg-[#FFFEF7] border border-amber-200 shadow-md p-4">
                 <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
                 {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                   <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className={`font-bold ${linkColor} hover:underline`}>{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className={crossBody}> — {cr.text_english}</span>}</li>
+                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span className="text-slate-600"> — {cr.text_english}</span>}</li>
                   ))}</ul>
                 )}
                 <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
@@ -426,12 +466,43 @@ function ChapterContent() {
                     <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
                   </div>
                 )}
-                {/* REMOVED: Chapter Closing Prayer was duplicated here in the sidebar. It now appears ONLY below the last verse in the left column, where it closes the chapter. */}
+                {/* Chapter Closing lives BELOW, after the verse prayer — not mixed into it */}
+                {(closing.en || closing.lu) && (
+                  <div className="mt-5 pt-4 border-t border-slate-200">
+                    <p className="font-bold text-[15px] mb-2">🙏 Chapter {chapterNum} Closing Prayer</p>
+                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{closing.en}</p>}
+                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
+                  </div>
+                )}
               </div>
             )}
           </div>
         </aside>
       </div>
+
+      {/* Share sheet — WhatsApp / Facebook / Telegram / Instagram / X / LinkedIn + Copy */}
+      {shareVerse && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4" onClick={() => setShareVerse(null)}>
+          <div className={`${themeClasses.card} rounded-2xl w-full max-w-sm p-5 shadow-2xl`} onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <p className="font-bold text-[16px]">Share {bookName} {chapterNum}:{shareVerse.verse}</p>
+              <button onClick={() => setShareVerse(null)} className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center">✕</button>
+            </div>
+            <p className="text-[13px] text-slate-500 mb-4 line-clamp-2">“{shareText(shareVerse).slice(0, 120)}…”</p>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <a href={`https://wa.me/?text=${encodeURIComponent(shareText(shareVerse) + ' ' + shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#25D366]/10 py-3 px-2"><span className="text-2xl block">💬</span><span className="text-[12px] font-semibold">WhatsApp</span></a>
+              <a href={`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#1877F2]/10 py-3 px-2"><span className="text-2xl block">📘</span><span className="text-[12px] font-semibold">Facebook</span></a>
+              <a href={`https://t.me/share/url?url=${encodeURIComponent(shareUrl(shareVerse))}&text=${encodeURIComponent(shareText(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#229ED9]/10 py-3 px-2"><span className="text-2xl block">✈️</span><span className="text-[12px] font-semibold">Telegram</span></a>
+              <button onClick={() => { navigator.clipboard?.writeText(shareUrl(shareVerse)); setCopied(shareVerse.verse); }} className="rounded-xl bg-[#E1306C]/10 py-3 px-2"><span className="text-2xl block">📸</span><span className="text-[12px] font-semibold">Instagram<br /><span className="text-[10px] font-normal">Copy link</span></span></button>
+              <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText(shareVerse))}&url=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-slate-900/5 py-3 px-2"><span className="text-2xl block">𝕏</span><span className="text-[12px] font-semibold">X / Twitter</span></a>
+              <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(shareUrl(shareVerse))}`} target="_blank" rel="noreferrer" className="rounded-xl bg-[#0A66C2]/10 py-3 px-2"><span className="text-2xl block">💼</span><span className="text-[12px] font-semibold">LinkedIn</span></a>
+            </div>
+            <button onClick={() => { navigator.clipboard?.writeText(shareText(shareVerse) + ' ' + shareUrl(shareVerse)); setCopied(shareVerse.verse); }} className="w-full mt-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold">{copied === shareVerse.verse ? '✓ Copied!' : '📋 Copy verse + link'}</button>
+            <p className="text-[11px] text-slate-400 text-center mt-2">Instagram has no direct share link — tap it to copy the link, then paste it in Instagram.</p>
+          </div>
+        </div>
+      )}
+
 
       {/* Hamburger SIDE DRAWER — slides in from the right, holds Intro / Commentary / Prayer + nav */}
       {menuOpen && (
@@ -450,10 +521,7 @@ function ChapterContent() {
             </div>
             <div className="flex border-b border-slate-200 mb-3">
               {(['intro','commentary','prayer'] as const).map(t => (
-                // FIXED: tab switch must NOT close the drawer. Before: setMenuOpen(false) closed it on
-                // every tap, then scrollIntoView to #right-panel did nothing on mobile (panel is hidden),
-                // so you had to reopen the drawer to see the new tab. Now: just switch tab, stay open.
-                <button key={t} onClick={() => { setRightTab(t); }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
+                <button key={t} onClick={() => { setRightTab(t); setMenuOpen(false); document.getElementById('right-panel')?.scrollIntoView({ behavior: 'smooth' }); }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
               ))}
             </div>
             {rightTab === 'intro' && (
@@ -496,10 +564,3 @@ function ChapterContent() {
 export default function ChapterPage() {
   return <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]">Loading…</div>}><ChapterContent /></Suspense>;
 }
-
-// ── WHAT WAS REMOVED / KEPT ──────────────────────────────────────────────────
-// REMOVED (1): Right panel on mobile — it stacked below the last verse and duplicated the ☰ drawer.
-//              Desktop: right panel still shows (hidden lg:block). Mobile: ☰ drawer only.
-// REMOVED (2): Chapter Closing Prayer inside sidebar Prayer tab — it duplicated the one below the verses.
-// KEPT: Chapter Closing Prayer below the last verse in the left column + Book Closing Prayer on last chapter.
-// KEPT: ☰ hamburger drawer (mobile sidebar) + right panel on desktop + all verse buttons / share / bookmarks.
