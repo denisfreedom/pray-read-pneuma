@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import AppFooter from '@/app/components/AppFooter';
 
-// app/devotional-plans/page.tsx — V10: V9 + LUGANDA FORMATTER
+// app/devotional-plans/page.tsx — V10.1 FIXED: V10 + DEPLOY FIX (regex range + TS strict qm.index)
 // WHAT WAS WRONG: the page had NO header. Once you landed on Devotionals you
 // could not get back to Home, Bible Reader, Verse-Songs, Q&A, Community or
 // Dashboard except with the browser Back button.
@@ -27,6 +27,11 @@ import AppFooter from '@/app/components/AppFooter';
 //      It also drops the stray "emanna.com" credit that leaked into both
 //      languages, and the English <h3> headings now render as bold purple
 //      subheadings too.
+// V10.1 FIXES (why V10 failed to deploy):
+//   - /^[—–-:\s]*/ had a BACKWARDS range (– to :) → SyntaxError, whole page
+//     module failed to parse. Now /^[—–:\s-]*/ (hyphen moved to the end).
+//   - qm.index is number | undefined; arithmetic on it fails TS strict build.
+//     Now (qm.index ?? 0).
 // EVERYTHING ELSE IS UNCHANGED FROM V2:
 //   D-001 numbering · auto gradient covers · clickable scriptures -> floating
 //   verse window -> Open in Bible Reader · share row FIRST in the popup
@@ -201,7 +206,8 @@ function formatLugandaBody(raw: string): string {
   hits.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
   const clean: Hit[] = [];
   for (const h of hits) {
-    if (clean.length && h.start < clean[clean.length - 1].end) continue;
+    const prevHit = clean[clean.length - 1];
+    if (clean.length && prevHit && h.start < prevHit.end) continue;
     clean.push(h);
   }
   if (!clean.length) return `<p>${escapeHtml(text)}</p>`;
@@ -217,14 +223,15 @@ function formatLugandaBody(raw: string): string {
   }
   for (let i = 0; i < clean.length; i++) {
     const h = clean[i];
-    const body = text.slice(h.end, i + 1 < clean.length ? clean[i + 1].start : undefined).trim().replace(/^[—–-:\s]*/, '');
+    const body = text.slice(h.end, i + 1 < clean.length ? clean[i + 1].start : undefined).trim().replace(/^[—–:\s-]*/, '');
     out += `<h3 class="dev-h3">${escapeHtml(h.text)}</h3>`;
     if (!body) continue;
     // Scripture section: pull the quoted verse out into a proper quote block.
     const qm = body.match(/["“”]([^"“”]+)["“”]/);
     if (qm) {
-      const beforeQ = body.slice(0, qm.index).trim();
-      const afterQ = body.slice(qm.index + qm[0].length).trim();
+      const qStart = qm.index ?? 0;
+      const beforeQ = body.slice(0, qStart).trim();
+      const afterQ = body.slice(qStart + qm[0].length).trim();
       out += `<blockquote class="dev-quote">“${escapeHtml(qm[1].trim())}”</blockquote>`;
       if (beforeQ) out += `<p>${escapeHtml(beforeQ)}</p>`;
       if (afterQ) out += `<p>${escapeHtml(afterQ)}</p>`;
@@ -442,70 +449,4 @@ export default function DevotionalPlansPage() {
               <div style={{ position: 'absolute', left: 22, right: 22, bottom: 16, color: '#fff' }}>
                 <span style={{ background: '#fff', color: '#4c1d95', fontWeight: 800, fontSize: 12, padding: '4px 11px', borderRadius: 999 }}>{dLabel(open)}</span>
                 <h2 style={{ fontSize: 28, margin: '10px 0 2px', lineHeight: 1.15 }}>{open.title}</h2>
-                <button onClick={() => openVerse(`${open.scripture_book} ${open.scripture_chapter}:${open.scripture_verse}`)} title="Tap to read this verse, then open in Bible Reader" style={{ background: 'none', border: 'none', color: '#fde68a', fontWeight: 700, fontSize: 15, cursor: 'pointer', padding: 0 }}>📖 {open.scripture_book} {open.scripture_chapter}:{open.scripture_verse} — tap to read →</button>
-                {open.author && <div style={{ fontSize: 13, opacity: 0.9 }}>By {open.author}</div>}
-              </div>
-            </div>
-
-            <div style={{ padding: '18px 22px 24px', background: 'rgba(224,242,254,0.55)' }}>
-              {/* SHARE ROW — FIRST */}
-              <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 14, padding: '12px 14px', marginBottom: 16 }}>
-                <div style={{ fontWeight: 800, fontSize: 13, color: '#4c1d95', marginBottom: 8 }}>SHARE THIS DEVOTIONAL</div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <button onClick={() => shareOn(open, 'facebook')} title="Share on Facebook" aria-label="Share on Facebook" style={{ cursor: 'pointer', border: 'none', background: '#1877f2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>f</button>
-                  <button onClick={() => shareOn(open, 'whatsapp')} title="Share on WhatsApp" aria-label="Share on WhatsApp" style={{ cursor: 'pointer', border: 'none', background: '#25d366', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>💬</button>
-                  <button onClick={() => shareOn(open, 'telegram')} title="Share on Telegram" aria-label="Share on Telegram" style={{ cursor: 'pointer', border: 'none', background: '#229ed9', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✈</button>
-                  <button onClick={() => shareOn(open, 'instagram')} title="Share on Instagram" aria-label="Share on Instagram" style={{ cursor: 'pointer', border: 'none', background: 'linear-gradient(45deg,#f58529,#dd2a7b,#8134af)', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📸</button>
-                  <button onClick={() => shareOn(open, 'linkedin')} title="Share on LinkedIn" aria-label="Share on LinkedIn" style={{ cursor: 'pointer', border: 'none', background: '#0a66c2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>in</button>
-                  <button onClick={() => copyLink(open)} title="Copy share link" aria-label="Copy share link" style={{ cursor: 'pointer', border: '1px solid #7c3aed', background: '#fff', color: '#7c3aed', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{copied ? '✓' : '🔗'}</button>
-                </div>
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 7 }}></div>
-              </div>
-
-              {open.scripture_quotation && <div style={{ background: '#fff', border: '1px solid #ede9fe', borderLeft: '5px solid #7c3aed', padding: '14px 16px', borderRadius: 10, marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 800, color: '#7c3aed', marginBottom: 4 }}>SCRIPTURE</div><div dangerouslySetInnerHTML={{ __html: String(open.scripture_quotation) }} /></div>}
-              {open.devotional_text_lu && <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><button onClick={() => setLang('en')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'en' ? '#7c3aed' : '#fff', color: lang === 'en' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇬🇧 English</button><button onClick={() => setLang('lu')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'lu' ? '#7c3aed' : '#fff', color: lang === 'lu' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇺🇬 Luganda</button></div>}
-              <div className="dev-body" style={{ fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: formatDevotionalBody(lang === 'lu' && open.devotional_text_lu ? open.devotional_text_lu : open.devotional_text, lang) }} />
-
-              {relatedItems.length > 0 && (
-                <div style={{ marginTop: 20, background: '#fff', border: '1px solid #c7d2fe', borderRadius: 12, padding: '14px 16px' }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, color: '#4338ca', marginBottom: 10 }}>📖 RELATED SCRIPTURES — TAP A VERSE TO READ IT</div>
-                  <div style={{ display: 'grid', gap: 10 }}>
-                    {relatedItems.map((it: { ref: string; explanation: string }, i: number) => (
-                      <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                        <button onClick={() => openVerse(it.ref)} style={{ cursor: 'pointer', border: '1px solid #6366f1', background: '#eef2ff', color: '#4338ca', borderRadius: 999, padding: '6px 12px', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>{it.ref} →</button>
-                        {it.explanation && <span style={{ color: '#374151', fontSize: 14, lineHeight: 1.5 }}>{it.explanation}</span>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {allRefs.length > 0 && (
-                <div style={{ marginTop: 20, background: '#fff', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px' }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, color: '#92400e', marginBottom: 8 }}>📖 FURTHER READINGS — TAP A VERSE TO READ IT</div>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    {allRefs.filter((r: any) => typeof r === 'string' && r && r !== '[object Object]').map((ref: string) => (
-                      <button key={ref} onClick={() => openVerse(ref)} style={{ cursor: 'pointer', border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', borderRadius: 999, padding: '7px 13px', fontWeight: 700 }}>{ref} →</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <button onClick={() => toggleDone(numOf(open))} style={{ width: '100%', marginTop: 18, padding: 13, borderRadius: 12, border: 'none', cursor: 'pointer', background: done.includes(numOf(open)) ? '#dcfce7' : '#7c3aed', color: done.includes(numOf(open)) ? '#166534' : '#fff', fontWeight: 800 }}>{done.includes(numOf(open)) ? '✓ Completed — tap to unmark' : '✓ Mark complete'}</button>
-            </div>
-          </div>
-        </div>
-      ); })()}
-
-      {/* Floating verse window */}
-      {verseRef && (
-        <div onClick={() => setVerseRef(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 18, maxWidth: 520, width: '100%', padding: 22, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><h3 style={{ margin: 0, color: '#4c1d95' }}>📖 {verseRef}</h3><button onClick={() => setVerseRef(null)} style={{ border: 'none', background: '#f3f4f6', borderRadius: 999, width: 30, height: 30, cursor: 'pointer' }}>✕</button></div>
-            <p style={{ fontSize: 17, lineHeight: 1.7, marginTop: 14 }}>{verseLoading ? 'Loading verse…' : verseText}</p>
-            <a href={refToBibleUrl(verseRef)} style={{ display: 'block', textAlign: 'center', marginTop: 12, padding: '12px', borderRadius: 10, background: '#7c3aed', color: '#fff', fontWeight: 800, textDecoration: 'none' }}>Open {verseRef} in Bible Reader →</a>
-            <button onClick={() => setVerseRef(null)} style={{ width: '100%', marginTop: 8, padding: '10px', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer' }}>Close</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+                <button onClick={() => openVerse(`${open.scripture_book} ${open.scripture_chapter}:${open.scripture_verse
