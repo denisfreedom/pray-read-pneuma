@@ -7,19 +7,29 @@ import {
   BookOpen, Book, Users, MessageCircle, Heart, Calendar,
   TrendingUp, Bell, Bookmark, Clock, Flame,
   ExternalLink, Eye, RefreshCw, Music, HelpCircle,
-  ChevronRight, Activity, Star, Zap, Download, Search, ArrowRight, Sparkles, Quote, LogOut
+  ChevronRight, Activity, Star, Zap, Download, Search, ArrowRight, Sparkles, Quote, LogOut, CheckCircle2, Trophy, BellRing
 } from 'lucide-react';
 import AppNavbar from '@/app/components/AppNavbar';
 import NotificationManager from '@/app/components/NotificationManager';
 import DownloadManager from '@/app/components/DownloadManager';
 import ErrorBoundary from '@/app/components/ErrorBoundary';
 import SessionTracker from '@/app/components/SessionTracker';
+import ReadingReminder from '@/app/components/ReadingReminder';
 
 const LOGO = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
 const BG_IMAGE = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/dashboard-bg_png.jpeg';
 
 interface Activity { activity_type: string; book_name?: string | null; book_number?: number | null; chapter?: number | null; verse_number?: number | null; created_at: string; }
 interface Stats { booksVisited: number; savedVerses: number; streak: number; daysActive: number; }
+// New: shapes returned by /api/reading-plans/progress?stats=true and
+// /api/reading-plans/reminders — the endpoints the new progress system owns.
+interface PlanSummary {
+  plan_id: number; plan_title: string | null; total_days: number;
+  completed_days: number; completed: boolean; pct: number;
+  finished_books: { book_number: number; book_name: string; finished_at: string | null }[];
+}
+interface FinishedBook { book_number: number; book_name: string; finished_at: string | null; plan_id: number; plan_title: string | null; }
+interface PlanReminder { plan_id: number; reminder_time: string; enabled: boolean; }
 
 const FEATURES = [
   { icon: BookOpen, title: 'Read Bible', description: 'English & Luganda', href: '/bible-reader', grad: 'from-blue-500 to-cyan-500', ring: 'hover:border-blue-300', chip: 'bg-blue-50 text-blue-700' },
@@ -90,6 +100,13 @@ export default function DashboardPage() {
   const [search, setSearch] = useState('');
   const [notice, setNotice] = useState('');
   const [loadError, setLoadError] = useState('');
+  // ── NEW: live reading-plan progress (wired to /api/reading-plans/progress) ──
+  const [planSummaries, setPlanSummaries] = useState<PlanSummary[]>([]);
+  const [finishedBooks, setFinishedBooks] = useState<FinishedBook[]>([]);
+  const [completedPlans, setCompletedPlans] = useState<PlanSummary[]>([]);
+  const [planReminders, setPlanReminders] = useState<PlanReminder[]>([]);
+  const [readingLoading, setReadingLoading] = useState(true);
+  const [readingUpdatedAt, setReadingUpdatedAt] = useState<Date | null>(null);
 
   // FIX 1: never call router.push during render / in a half-finished session check.
   // Use a cancelled flag + replace (so Back does not return to a dead dashboard).
@@ -135,9 +152,60 @@ export default function DashboardPage() {
     finally { setActivityLoading(false); }
   }, []);
 
-  useEffect(() => { if (user?.email) loadData(user.email); }, [user, loadData]);
+  // NEW: live reading-plan progress. Same allSettled discipline — a missing
+  // progress/reminders endpoint must never wipe the rest of the dashboard.
+  // Called on load, on Refresh, and every 60s while the dashboard is open,
+  // so marking a day complete on a plan page shows up here without reload.
+  const loadReading = useCallback(async (email: string, silent = false) => {
+    if (!silent) setReadingLoading(true);
+    try {
+      const [prog, rem] = await Promise.allSettled([
+        fetch(`/api/reading-plans/progress?userEmail=${encodeURIComponent(email)}&stats=true`, { cache: 'no-store' }),
+        fetch(`/api/reading-plans/reminders?userEmail=${encodeURIComponent(email)}`, { cache: 'no-store' }),
+      ]);
+      const read = async (r: PromiseSettledResult<Response>) => {
+        if (r.status !== 'fulfilled' || !r.value.ok) return null;
+        try { return await r.value.json(); } catch { return null; }
+      };
+      const [progData, remData] = await Promise.all([read(prog), read(rem)]);
+      if (progData?.success) {
+        const summaries: PlanSummary[] = Array.isArray(progData.summaries) ? progData.summaries : [];
+        setPlanSummaries(summaries);
+        setCompletedPlans(Array.isArray(progData.completed_plans) ? progData.completed_plans : summaries.filter((s) => s.completed));
+        // De-dupe finished books: the same book can finish inside two plans.
+        const seen = new Set<string>();
+        const books: FinishedBook[] = [];
+        for (const b of (Array.isArray(progData.finished_books) ? progData.finished_books : [])) {
+          const key = `${b.book_number}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          books.push(b);
+        }
+        setFinishedBooks(books);
+      }
+      if (remData?.success) {
+        setPlanReminders((Array.isArray(remData.reminders) ? remData.reminders : []).filter((r: PlanReminder) => r.enabled));
+      }
+      setReadingUpdatedAt(new Date());
+    } catch { /* reading progress is additive — never an error state */ }
+    finally { if (!silent) setReadingLoading(false); }
+  }, []);
 
-  const handleRefresh = async () => { if (!user?.email || isRefreshing) return; setIsRefreshing(true); await loadData(user.email); setIsRefreshing(false); };
+  useEffect(() => { if (user?.email) { loadData(user.email); loadReading(user.email); } }, [user, loadData, loadReading]);
+
+  // Live tick: refresh reading progress every 60s while the dashboard is open.
+  useEffect(() => {
+    if (!user?.email) return;
+    const id = setInterval(() => { loadReading(user.email, true); }, 60000);
+    return () => clearInterval(id);
+  }, [user?.email, loadReading]);
+
+  const handleRefresh = async () => {
+    if (!user?.email || isRefreshing) return;
+    setIsRefreshing(true);
+    await Promise.all([loadData(user.email), loadReading(user.email)]);
+    setIsRefreshing(false);
+  };
   const handleLogout = async () => {
     try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
     router.replace('/community');
@@ -155,6 +223,17 @@ export default function DashboardPage() {
     return FEATURES.filter(f => f.title.toLowerCase().includes(q) || f.description.toLowerCase().includes(q));
   }, [search]);
 
+  // Reading plans still in progress (newest activity first = highest pct first).
+  const inProgressPlans = useMemo(
+    () => planSummaries.filter((p) => !p.completed).sort((a, b) => b.pct - a.pct),
+    [planSummaries]
+  );
+  const planTitle = useCallback((planId: number) => {
+    return planSummaries.find((p) => p.plan_id === planId)?.plan_title
+      || completedPlans.find((p) => p.plan_id === planId)?.plan_title
+      || 'Reading Plan';
+  }, [planSummaries, completedPlans]);
+
   if (loading) return (
     <div className="min-h-screen bg-[#FFFBF2] flex flex-col items-center justify-center gap-4">
       <img src={LOGO} alt="Pray-Read" className="h-14 w-auto" />
@@ -166,6 +245,11 @@ export default function DashboardPage() {
   return (
     <ErrorBoundary>
       <SessionTracker />
+      {/* Reminder engines — one per active reminder. This is what makes the
+          plan reminders actually fire while the dashboard is open. */}
+      {planReminders.map((r) => (
+        <ReadingReminder key={r.plan_id} planId={r.plan_id} planTitle={planTitle(r.plan_id)} time={r.reminder_time} enabled={r.enabled} />
+      ))}
       <div className="min-h-screen bg-[#FFFBF2] text-slate-900">
         <AppNavbar />
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
@@ -211,6 +295,102 @@ export default function DashboardPage() {
 
           {loadError && <p className="mt-4 bg-amber-50 border border-amber-200 text-amber-800 text-sm font-semibold rounded-2xl px-4 py-3 flex items-center justify-between gap-3">{loadError}<button onClick={handleRefresh} className="font-black underline shrink-0">Retry</button></p>}
           {notice && <p className="mt-4 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-semibold rounded-2xl px-4 py-3">{notice}</p>}
+
+          {/* ── NEW: YOUR READING PLANS — LIVE PROGRESS ── */}
+          <section className="mt-6" aria-label="Your reading plans">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+              <h2 className="font-black text-lg flex items-center gap-2">
+                <span className="w-1.5 h-6 rounded-full bg-gradient-to-b from-violet-400 to-purple-600" />
+                Your Reading Plans
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-black tracking-widest bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-1 rounded-full">
+                  <span className="relative flex h-2 w-2"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" /><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" /></span>
+                  LIVE
+                </span>
+              </h2>
+              <div className="flex items-center gap-3">
+                {readingUpdatedAt && <span className="text-[11px] font-semibold text-slate-400">Updated {formatTime(readingUpdatedAt.toISOString())}</span>}
+                <Link href="/reading-plans" className="text-xs font-bold text-violet-700 hover:underline inline-flex items-center gap-1">All plans <ArrowRight size={13} /></Link>
+              </div>
+            </div>
+
+            {readingLoading ? (
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 space-y-3">
+                {[0, 1].map((i) => (
+                  <div key={i} className="flex gap-3 items-center"><div className="w-11 h-11 rounded-2xl bg-slate-100 animate-pulse" /><div className="flex-1 space-y-2"><div className="h-3 bg-slate-100 rounded animate-pulse w-1/3" /><div className="h-2 bg-slate-100 rounded animate-pulse" /></div></div>
+                ))}
+              </div>
+            ) : planSummaries.length === 0 ? (
+              <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex gap-3"><span className="w-11 h-11 rounded-2xl bg-violet-50 text-violet-600 flex items-center justify-center shrink-0"><Calendar size={20} /></span><div><h3 className="font-black">No reading plan started yet</h3><p className="text-slate-500 text-sm">Pick a plan — Bible in a Year, Psalms in 30 Days, Romans in 16 Days — and your progress will live here.</p></div></div>
+                <Link href="/reading-plans" className="shrink-0 px-5 py-3 rounded-full bg-violet-600 text-white font-black text-sm hover:bg-violet-700 transition inline-flex items-center justify-center gap-1.5">Choose a plan <ArrowRight size={14} /></Link>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* In-progress plans */}
+                {inProgressPlans.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {inProgressPlans.map((p) => (
+                      <Link key={p.plan_id} href={`/reading-plans/${p.plan_id}`} className="group bg-white rounded-3xl border border-slate-100 shadow-sm p-5 hover:shadow-md hover:-translate-y-0.5 transition block">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-black leading-tight truncate">{p.plan_title || 'Reading Plan'}</p>
+                            <p className="text-xs font-semibold text-slate-500 mt-1">Day {Math.min(p.completed_days + 1, Math.max(p.total_days, 1))} of {p.total_days} · {p.completed_days} days done</p>
+                          </div>
+                          <span className="shrink-0 text-[11px] font-black bg-violet-50 text-violet-700 px-2.5 py-1 rounded-full">{p.pct}%</span>
+                        </div>
+                        <div className="h-2 bg-slate-100 rounded-full mt-3 overflow-hidden"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all" style={{ width: `${p.pct}%` }} /></div>
+                        <span className="inline-flex items-center gap-1 text-xs font-bold text-violet-700 mt-3 group-hover:underline">Continue reading <ArrowRight size={13} /></span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+
+                {/* Completed plans */}
+                {completedPlans.length > 0 && (
+                  <div className="bg-emerald-50/70 border border-emerald-100 rounded-3xl p-5">
+                    <h3 className="font-black text-sm flex items-center gap-2 text-emerald-800"><Trophy size={16} className="text-emerald-600" /> Plans Completed</h3>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {completedPlans.map((p) => (
+                        <Link key={p.plan_id} href={`/reading-plans/${p.plan_id}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-white border border-emerald-200 text-emerald-800 hover:bg-emerald-100 transition">
+                          <CheckCircle2 size={14} className="text-emerald-600" /> {p.plan_title || 'Reading Plan'} — Complete
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Finished books — each chip opens that book at chapter 1 */}
+                {finishedBooks.length > 0 && (
+                  <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
+                    <h3 className="font-black text-sm flex items-center gap-2"><BookOpen size={16} className="text-emerald-600" /> Books You Have Finished <span className="text-[11px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">{finishedBooks.length}</span></h3>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {finishedBooks.map((b) => (
+                        <Link key={b.book_number} href={`/bible-reader/${b.book_number}/1`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-50 border border-emerald-200 text-emerald-800 hover:bg-emerald-100 transition">
+                          <CheckCircle2 size={14} className="text-emerald-600" /> {b.book_name} — Finished
+                        </Link>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-semibold mt-3">Finished when every day covering the book was marked complete in a reading plan.</p>
+                  </div>
+                )}
+
+                {/* Active reminders — tap to manage on the plan page */}
+                {planReminders.length > 0 && (
+                  <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5">
+                    <h3 className="font-black text-sm flex items-center gap-2"><BellRing size={16} className="text-rose-500" /> Active Reading Reminders</h3>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      {planReminders.map((r) => (
+                        <Link key={r.plan_id} href={`/reading-plans/${r.plan_id}`} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-rose-50 border border-rose-200 text-rose-800 hover:bg-rose-100 transition">
+                          <Bell size={13} /> {planTitle(r.plan_id)} · {r.reminder_time} daily
+                        </Link>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-slate-400 font-semibold mt-3">Reminders fire while this site is open — keep a tab open or check back at your reminder time.</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
             {/* FEATURES */}
