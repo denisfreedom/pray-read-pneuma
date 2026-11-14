@@ -582,10 +582,15 @@ function ChapterContent() {
       const d = await r.json().catch(() => null);
       const arr = Array.isArray(d) ? d : (d?.commentaries || d?.rows || d?.data || (d ? [d] : []));
       const rowVerse = (c: any) => Number(c?.verse_number ?? c?.verseNumber ?? c?.verse ?? NaN);
-      // FIX 1: verse match alone is NOT enough — the row must ALSO belong to
-      // THIS book. Otherwise 3 John 1:1 wins in Genesis 1:1, Exodus 1:1, ...
-      const match = arr.find((c: any) => rowVerse(c) === verseNum && rowBookMatches(c, currentBookNames(), book?.id ?? bookNum))
-        || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) && rowBookMatches(arr[0], currentBookNames(), book?.id ?? bookNum) ? arr[0] : undefined);
+      // FIX 1 (corrected): a row is rejected ONLY if it PROVABLY belongs to
+      // another book (its book field says so). A row with NO book label is
+      // shown — the saved 3 John row carries no book label the filter can
+      // read, and the previous strict version wrongly hid it everywhere,
+      // including in 3 John itself. The API (File 2) does the same rule.
+      // If a row's book label says Genesis, it still never shows in 3 John.
+      const bookOk = (c: any) => !rowHasBookField(c) || rowBookMatches(c, currentBookNames(), book?.id ?? bookNum);
+      const match = arr.find((c: any) => rowVerse(c) === verseNum && bookOk(c))
+        || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) && bookOk(arr[0]) ? arr[0] : undefined);
       setCommentary(prev => ({ ...prev, [verseNum]: match || { _none: true } }));
     } catch {
       setCommentary(prev => ({ ...prev, [verseNum]: { _none: true } }));
