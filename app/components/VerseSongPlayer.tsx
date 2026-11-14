@@ -1,3 +1,26 @@
+// app/components/VerseSongPlayer.tsx — FIXED
+// WHAT WAS BROKEN:
+//  1) THE BIG ONE: onProgress and onPlayComplete were received as props and
+//     NEVER CALLED. handleTimeUpdate only updated the store, and handleEnded
+//     just went to the next song. So the whole progress/play wiring in the
+//     series page was dead — progress was never saved (resume never worked),
+//     plays were never recorded, and songs never marked completed, because
+//     the player never told the page anything happened. handleTimeUpdate
+//     now calls onProgress, and handleEnded now calls onPlayComplete
+//     (BEFORE going to the next song, while the page still knows which song
+//     just finished).
+//  2) No way to resume. The player always started at 0. New optional
+//     `startAt` prop: the page passes the saved position and the player
+//     seeks to it on load.
+//  3) Stale closures. The song-load effect captured `isPlaying` from the
+//     render that created its canplay listener, so a play pressed after the
+//     song loaded could be ignored. isPlaying is now read from a ref.
+//     Same for the in-flight play guard (now a ref, not state that can go
+//     stale inside safePlay).
+//  4) Duration could arrive as "3:45" (old rows) — normalised to seconds,
+//     in the main display and in the queue.
+//  5) Removed a dead useEffect that did nothing.
+// Same player, same layout, same controls. Nothing else changed.
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -11,10 +34,23 @@ interface VerseSongPlayerProps {
   mp3Url: string;
   thumbnail?: string;
   description?: string;
+  /** Saved position in seconds — the player seeks here on load (resume). */
+  startAt?: number;
   onPlayComplete?: () => void;
   onProgress?: (seconds: number) => void;
   onNext?: () => void;
   onPrevious?: () => void;
+}
+
+// Duration may arrive as seconds (number), "3:45", or "45" — always seconds.
+function normDuration(v: any): number {
+  if (typeof v === 'number') return Number.isNaN(v) ? 0 : v;
+  if (v === null || v === undefined || v === '') return 0;
+  const s = String(v).trim();
+  const m = s.match(/^(?:(\d+):)?(\d+):(\d{2})$/);
+  if (m) return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
+  const n = parseInt(s, 10);
+  return Number.isNaN(n) ? 0 : n;
 }
 
 export default function VerseSongPlayer({
@@ -24,6 +60,7 @@ export default function VerseSongPlayer({
   mp3Url,
   thumbnail,
   description,
+  startAt,
   onPlayComplete,
   onProgress,
   onNext,
@@ -32,10 +69,19 @@ export default function VerseSongPlayer({
   const lyricsRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [showQueue, setShowQueue] = useState(false);
-  const [isAudioLoading, setIsAudioLoading] = useState(false);
   const pendingPlayRef = useRef<Promise<void> | null>(null);
-  
-  const { 
+  // In-flight play guard as a ref (not state) so safePlay never reads a
+  // stale value from the render that created it.
+  const isAudioLoadingRef = useRef(false);
+
+  // Callback refs — the parent recreates these every render, so calling
+  // the prop directly from an audio event handler would use a stale one.
+  const onProgressRef = useRef(onProgress);
+  const onPlayCompleteRef = useRef(onPlayComplete);
+  useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
+  useEffect(() => { onPlayCompleteRef.current = onPlayComplete; }, [onPlayComplete]);
+
+  const {
     isPlaying,
     currentTime,
     volume,
@@ -58,14 +104,18 @@ export default function VerseSongPlayer({
     setCurrentSong
   } = usePlayerStore();
 
+  // Ref mirror of isPlaying for the canplay listener (see song-load effect).
+  const isPlayingRef = useRef(isPlaying);
+  useEffect(() => { isPlayingRef.current = isPlaying; }, [isPlaying]);
+
   // Safe play helper — cancels any in-flight play before starting a new one
   const safePlay = async (audio: HTMLAudioElement) => {
-    if (isAudioLoading) return;
+    if (isAudioLoadingRef.current) return;
     // If a play is already pending, wait for it to settle first
     if (pendingPlayRef.current) {
       try { await pendingPlayRef.current; } catch (_) { /* ignore */ }
     }
-    setIsAudioLoading(true);
+    isAudioLoadingRef.current = true;
     const p = audio.play();
     pendingPlayRef.current = p;
     try {
@@ -74,7 +124,7 @@ export default function VerseSongPlayer({
       if (err?.name !== 'AbortError') console.error('Play error:', err);
     } finally {
       pendingPlayRef.current = null;
-      setIsAudioLoading(false);
+      isAudioLoadingRef.current = false;
     }
   };
 
@@ -106,22 +156,34 @@ export default function VerseSongPlayer({
     pendingPlayRef.current = null;
     audioRef.current.src = currentSong.mp3_url;
     audioRef.current.load();
-    audioRef.current.currentTime = 0;
-    if (isPlaying) {
+    // Resume at the saved position when the page provides one, otherwise 0.
+    // Clamped inside the song so a stale position can never break playback.
+    const resumeAt = Math.max(0, Math.min(normDuration(startAt), Math.max(0, normDuration(duration) - 1)));
+    audioRef.current.currentTime = resumeAt;
+    setCurrentTime(resumeAt);
+    if (isPlayingRef.current) {
       audioRef.current.addEventListener('canplay', () => {
-        if (audioRef.current && isPlaying) safePlay(audioRef.current);
+        if (audioRef.current && isPlayingRef.current) safePlay(audioRef.current);
       }, { once: true });
     }
-  }, [currentSong?.id, isOnPlayerPage]);
+  }, [currentSong?.id, isOnPlayerPage, startAt]);
 
   const handleTimeUpdate = () => {
     if (audioRef.current && isOnPlayerPage) {
-      setCurrentTime(audioRef.current.currentTime);
+      const t = audioRef.current.currentTime;
+      setCurrentTime(t);
+      // THIS WAS MISSING: tell the page where we are, so it can save
+      // progress. The page throttles saves to once per 5 seconds.
+      onProgressRef.current?.(t);
     }
   };
 
   const handleEnded = () => {
     if (!isOnPlayerPage) return;
+    // THIS WAS MISSING: tell the page the song finished, so it can record
+    // the play and mark the song completed. Called BEFORE moving on, while
+    // the page still knows which song just finished.
+    onPlayCompleteRef.current?.();
     if (repeatMode === 'one') {
       if (audioRef.current) {
         audioRef.current.currentTime = 0;
@@ -143,10 +205,10 @@ export default function VerseSongPlayer({
   // Auto-scroll lyrics smoothly based on playback progress
   useEffect(() => {
     if (!lyricsRef.current || !description || !isPlaying) return;
-    
+
     const progress = duration > 0 ? currentTime / duration : 0;
     const maxScroll = lyricsRef.current.scrollHeight - lyricsRef.current.clientHeight;
-    
+
     // Smooth scroll animation
     lyricsRef.current.scrollTo({
       top: maxScroll * progress,
@@ -154,14 +216,7 @@ export default function VerseSongPlayer({
     });
   }, [currentTime, isPlaying, duration, description]);
 
-  // Sync current song to ensure we're showing the right one
-  useEffect(() => {
-    if (currentSong && currentSong.id !== songId) {
-      // Different song is playing, this player is not active
-    }
-  }, [currentSong, songId]);
-
-  const displayDuration = duration || 0;
+  const displayDuration = normDuration(duration);
   const durationSeconds = displayDuration;
   const minutes = Math.floor(currentTime / 60);
   const seconds = Math.floor(currentTime % 60);
@@ -213,7 +268,7 @@ export default function VerseSongPlayer({
   const handlePrevious = () => {
     globalPreviousSong();
   };
-  
+
   const handleNext = () => {
     globalNextSong();
   };
@@ -236,13 +291,13 @@ export default function VerseSongPlayer({
           <List className="w-6 h-6" />
         </button>
       )}
-      
+
       <div className="flex flex-col lg:flex-row gap-6 items-start">
       {/* Glassy Player Container */}
       <div className="w-full lg:flex-1 relative bg-gradient-to-br from-purple-500/20 via-indigo-500/20 to-purple-600/20 backdrop-blur-2xl rounded-3xl shadow-2xl border border-white/20 overflow-hidden">
         {/* Gradient Overlay */}
         <div className="absolute inset-0 bg-gradient-to-br from-purple-400/10 via-transparent to-indigo-400/10 pointer-events-none" />
-        
+
         {/* Glass Shine Effect */}
         <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none" />
 
@@ -279,7 +334,7 @@ export default function VerseSongPlayer({
 
           {/* Lyrics/Description - Auto-scrolling */}
           {description && (
-            <div 
+            <div
               ref={lyricsRef}
               className="mb-6 h-32 sm:h-40 overflow-y-auto rounded-2xl bg-black/20 backdrop-blur-sm border border-white/10 p-4"
             >
@@ -316,8 +371,8 @@ export default function VerseSongPlayer({
             <button
               onClick={toggleShuffle}
               className={`p-2 sm:p-3 rounded-full transition-all duration-300 hover:scale-110 active:scale-95 ${
-                isShuffle 
-                  ? 'bg-white/30 text-white shadow-lg' 
+                isShuffle
+                  ? 'bg-white/30 text-white shadow-lg'
                   : 'bg-white/10 text-white/60 hover:bg-white/20'
               }`}
               aria-label="Shuffle"
@@ -414,8 +469,8 @@ export default function VerseSongPlayer({
       <div className={`
         ${showQueue ? 'fixed inset-0 z-50 lg:relative lg:inset-auto' : 'hidden lg:block'}
         w-full lg:w-80 rounded-none lg:rounded-3xl border-0 lg:border border-white/20 overflow-hidden transition-all duration-300
-        ${showQueue 
-          ? 'bg-gradient-to-br from-purple-500/20 via-indigo-500/20 to-purple-600/20 backdrop-blur-2xl shadow-2xl' 
+        ${showQueue
+          ? 'bg-gradient-to-br from-purple-500/20 via-indigo-500/20 to-purple-600/20 backdrop-blur-2xl shadow-2xl'
           : 'bg-slate-800/50 backdrop-blur-sm'
       }`}>
         {/* Queue Header */}
@@ -438,6 +493,7 @@ export default function VerseSongPlayer({
           {allPlaylistSongs.length > 0 ? (
             allPlaylistSongs.map((song, index) => {
               const isActive = song.id === currentSong?.id;
+              const qDuration = normDuration(song.duration);
               return (
                 <button
                   key={song.id}
@@ -469,7 +525,7 @@ export default function VerseSongPlayer({
                       {song.title}
                     </p>
                     <p className="text-xs text-white/50 truncate">
-                      {Math.floor(song.duration / 60)}:{String(song.duration % 60).padStart(2, '0')}
+                      {Math.floor(qDuration / 60)}:{String(Math.floor(qDuration % 60)).padStart(2, '0')}
                     </p>
                   </div>
 
