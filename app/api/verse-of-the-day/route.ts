@@ -3,14 +3,15 @@ import sql from '@/app/api/utils/sql';
 
 export const dynamic = 'force-dynamic';
 
-// GET /api/verse-of-the-day — FIXED + IMPROVED
-// Old bugs:
-// 1) Math.random() on every request -> a different verse on every refresh.
-//    "Verse of the Day" must be ONE verse per day, same for everyone.
-// 2) If the DB hiccupped / table was missing, it 500'd with no verse at all.
-// Fixed: deterministic day-seed (same verse all day, changes at midnight Kampala time),
-// fallback verse (John 3:16) if DB is down, always JSON { success, verse, date }.
-// Keep the old flat fields too, so any page reading data.text_english still works.
+// GET /api/verse-of-the-day — FIXED
+// THE BUG: the old code returned { success, date, verse: v, ...v }.
+// The verse object v itself has a field called `verse` (the verse NUMBER, e.g. 28),
+// so spreading ...v AFTER `verse: v` overwrote the verse OBJECT with the NUMBER.
+// Clients then got data.verse = 28, and read 28.name_english -> undefined,
+// 28.chapter -> undefined, 28.verse -> undefined. That is exactly the
+// "undefined undefined:undefined" the page showed, with no verse text.
+// Fixed: spread FIRST, then put `verse: v` LAST, so data.verse is the object
+// and the flat fields (data.text_english etc.) still work for older pages.
 const FALLBACK = {
   id: 0, book_id: 43, book_number: 43, chapter: 3, verse: 16,
   text_english: 'For God so loved the world that he gave his one and only Son, that whoever believes in him shall not perish but have eternal life.',
@@ -41,7 +42,7 @@ export async function GET() {
         AND text_luganda IS NOT NULL AND text_luganda != ''`;
     const totalVerses = parseInt(String(countResult[0]?.total || '0'), 10);
     if (!totalVerses) {
-      return NextResponse.json({ success: true, date, verse: FALLBACK, ...FALLBACK, fallback: true });
+      return NextResponse.json({ success: true, date, ...FALLBACK, verse: FALLBACK, fallback: true });
     }
     // Deterministic index for today — same verse for everyone, all day
     const index = daySeed(date) % totalVerses;
@@ -54,13 +55,14 @@ export async function GET() {
         AND v.text_luganda IS NOT NULL AND v.text_luganda != ''
       ORDER BY v.id LIMIT 1 OFFSET ${index}`;
     if (!verses.length) {
-      return NextResponse.json({ success: true, date, verse: FALLBACK, ...FALLBACK, fallback: true });
+      return NextResponse.json({ success: true, date, ...FALLBACK, verse: FALLBACK, fallback: true });
     }
     const v = verses[0];
-    return NextResponse.json({ success: true, date, verse: v, ...v });
+    // Spread FIRST, verse object LAST — data.verse is the full object.
+    return NextResponse.json({ success: true, date, ...v, verse: v });
   } catch (error: any) {
     console.error('Error fetching verse of the day:', error);
     // Never 500 with no verse — the popup can always show the fallback
-    return NextResponse.json({ success: true, date, verse: FALLBACK, ...FALLBACK, fallback: true, warning: 'Using fallback verse — DB unavailable: ' + (error.message || '') });
+    return NextResponse.json({ success: true, date, ...FALLBACK, verse: FALLBACK, fallback: true, warning: 'Using fallback verse — DB unavailable: ' + (error.message || '') });
   }
 }
