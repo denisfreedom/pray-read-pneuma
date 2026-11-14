@@ -440,13 +440,24 @@ function ChapterContent() {
     load();
   }, [bookNum, chapterNum]);
 
-  // FIX (jump to EXACT verse): links from Devotionals / Cross-Refs / Commentary popup /
-  // Verse of the Day carry #verse-N, but verses load AFTER the page mounts, so the
-  // browser never scrolls to the hash. Once verses are loaded, scroll to it.
+  // FIX (jump to EXACT verse + HIGHLIGHT it): links from Devotionals / Cross-Refs /
+  // Commentary popup / Verse of the Day carry #verse-N, but verses load AFTER the
+  // page mounts, so the browser never scrolls to the hash. Once verses are loaded,
+  // scroll to it AND flash-highlight that verse for 4 seconds, so the reader can
+  // see exactly which verse they landed on — not just the area.
+  const [landedVerse, setLandedVerse] = useState<number | null>(null);
+  const landedTimeout = useRef<any>(null);
+  const flashLandedVerse = (verseNum: number) => {
+    if (isNaN(verseNum)) return;
+    setLandedVerse(verseNum);
+    if (landedTimeout.current) clearTimeout(landedTimeout.current);
+    landedTimeout.current = setTimeout(() => setLandedVerse(null), 4000);
+  };
   useEffect(() => {
     if (loading || !verses.length) return;
     const hash = window.location.hash;
-    if (!hash.startsWith('#verse-')) return;
+    if (!hash.startsWith('#verse-')) { setLandedVerse(null); return; }
+    flashLandedVerse(parseInt(hash.replace('#verse-', ''), 10));
     let tries = 0;
     const go = () => {
       const el = document.getElementById(hash.slice(1));
@@ -454,7 +465,20 @@ function ChapterContent() {
       if (tries++ < 12) setTimeout(go, 150);
     };
     go();
+    return () => { if (landedTimeout.current) clearTimeout(landedTimeout.current); };
   }, [loading, verses]);
+  // Same-chapter verse jumps (hash changes without a reload) get the same treatment.
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash;
+      if (!h.startsWith('#verse-')) return;
+      flashLandedVerse(parseInt(h.replace('#verse-', ''), 10));
+      const el = document.getElementById(h.slice(1));
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
 
   const openPrayer = (verseNum: number) => {
     // Second click on the SAME verse's Prayer button = minimize / close
@@ -561,7 +585,7 @@ function ChapterContent() {
 
   return (
     <div className={`min-h-screen ${themeClasses.page} select-text`} style={{ WebkitUserSelect: 'text', userSelect: 'text' } as any}>
-      <style>{`::selection{background:#2563eb !important;color:#ffffff !important} ::-moz-selection{background:#2563eb !important;color:#ffffff !important}`}</style>
+      <style>{`::selection{background:#2563eb !important;color:#ffffff !important} ::-moz-selection{background:#2563eb !important;color:#ffffff !important} @keyframes landedVersePulse{0%{box-shadow:0 0 0 3px rgba(245,158,11,0.9),0 0 0 10px rgba(245,158,11,0.35)}100%{box-shadow:0 0 0 3px rgba(245,158,11,0),0 0 0 10px rgba(245,158,11,0)}} .landed-verse{animation:landedVersePulse 4s ease-out;background-color:rgba(251,191,36,0.22) !important}`}</style>
       {/* Header — ORIGINAL */}
       <div className={`${themeClasses.header} border-b sticky top-0 z-30`}>
         <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
@@ -600,7 +624,7 @@ function ChapterContent() {
             const isSel = selectedVerse === v.verse;
             const pr = pickPrayer(versePrayers[v.verse]);
             return (
-              <article data-mark-key={`${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} id={`verse-${v.verse}`} key={v.verse} className={`${themeClasses.card} rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''}`}>
+              <article data-mark-key={`${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} id={`verse-${v.verse}`} key={v.verse} className={`${themeClasses.card} rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''} ${landedVerse === v.verse ? 'landed-verse ring-2 ring-amber-500' : ''}`}>
                 <div className="flex gap-2">
                   <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
                   <div className="flex-1">
