@@ -578,19 +578,33 @@ function ChapterContent() {
     setRightTab('commentary');
     if (commentary[verseNum]) return;
     try {
-      const r = await fetch(`/api/commentaries?book_number=${bookNum}&chapter=${chapterNum}&verse=${verseNum}`);
-      const d = await r.json().catch(() => null);
-      const arr = Array.isArray(d) ? d : (d?.commentaries || d?.rows || d?.data || (d ? [d] : []));
+      // V3: ask the route Admin PROVED works (/api/verse-commentaries) FIRST.
+      // Admin loads 3 John 1:1 through it, so the row is there. The old code
+      // asked ONLY /api/commentaries, which kept returning empty for this
+      // page. /api/commentaries stays as a fallback. Every URL is tried
+      // until one returns a matching row — one empty reply no longer ends
+      // the search with "No written commentary".
+      const urls = [
+        `/api/verse-commentaries?book_number=${bookNum}&bookName=${encodeURIComponent(currentBookNames()[0] || '')}&chapter=${chapterNum}&verse=${verseNum}`,
+        `/api/verse-commentaries?bookId=${book?.id ?? bookNum}&chapter=${chapterNum}&verse=${verseNum}`,
+        `/api/commentaries?book_number=${bookNum}&chapter=${chapterNum}&verse=${verseNum}`,
+        `/api/commentaries?bookId=${book?.id ?? bookNum}&chapter=${chapterNum}&verse=${verseNum}`,
+      ];
       const rowVerse = (c: any) => Number(c?.verse_number ?? c?.verseNumber ?? c?.verse ?? NaN);
-      // FIX 1 (corrected): a row is rejected ONLY if it PROVABLY belongs to
-      // another book (its book field says so). A row with NO book label is
-      // shown — the saved 3 John row carries no book label the filter can
-      // read, and the previous strict version wrongly hid it everywhere,
-      // including in 3 John itself. The API (File 2) does the same rule.
-      // If a row's book label says Genesis, it still never shows in 3 John.
+      // A row is rejected ONLY if it PROVABLY belongs to another book (its
+      // book field says so). A row with NO book label is shown.
       const bookOk = (c: any) => !rowHasBookField(c) || rowBookMatches(c, currentBookNames(), book?.id ?? bookNum);
-      const match = arr.find((c: any) => rowVerse(c) === verseNum && bookOk(c))
-        || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) && bookOk(arr[0]) ? arr[0] : undefined);
+      let match: any = undefined;
+      for (const url of urls) {
+        try {
+          const r = await fetch(url);
+          const d = await r.json().catch(() => null);
+          const arr = Array.isArray(d) ? d : (d?.commentaries || d?.rows || d?.data || (d ? [d] : []));
+          match = arr.find((c: any) => rowVerse(c) === verseNum && bookOk(c))
+            || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) && bookOk(arr[0]) ? arr[0] : undefined);
+          if (match) break;
+        } catch {}
+      }
       setCommentary(prev => ({ ...prev, [verseNum]: match || { _none: true } }));
     } catch {
       setCommentary(prev => ({ ...prev, [verseNum]: { _none: true } }));
