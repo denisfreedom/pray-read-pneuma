@@ -1,29 +1,29 @@
+// FIX: POST was INSERT-only. If a commentary already existed (loaded in the editor),
+// Save called POST again -> UNIQUE violation -> 500 "Failed to save".
+// POST is now an UPSERT: INSERT ... ON CONFLICT DO UPDATE. Save works for new AND existing.
+// PUT kept for the admin panel's explicit edit path.
+//
+// V3 FIX (candidate book ids) + V2 FIX (param tolerance): the old GET only understood `bookId`. The chapter
+// page and some callers send `book_number` instead — GET then saw no bookId
+// and returned [] / null, so nothing displayed. This version accepts
+// bookId / book_id / book_number / book, and resolves book_number -> book_id
+// through bible_books. Same table, same columns, same upsert, same return
+// shapes the Admin panel expects (single-verse GET -> object or null,
+// chapter GET -> array). Nothing else changed.
+//
+// CORRECT PATH: app/api/verse-commentaries/route.ts
+// Do NOT paste this into app/api/commentaries/route.ts — that path belongs
+// to the verse DISPLAY route (route-commentaries-BOOK-FILTER-V2.ts), which
+// is what the chapter page calls. Swapping them blanks the front page.
 import { NextRequest, NextResponse } from 'next/server';
 import sql from '@/app/api/utils/sql';
 
-// GET /api/commentaries?book_number=64&chapter=1&verse=1
-// CORRECTED version. The previous version assumed the table is named
-// `commentaries` and rejected every row whose book label it did not
-// recognise — which hid genuinely saved commentary (the 3 John Verse 1
-// card in Admin) from the front page, including from 3 John itself.
-//
-// This version:
-//  1. Searches every table the commentary could live in:
-//     commentaries, verse_commentaries, bible_commentaries — first table
-//     with rows for this chapter+verse wins. A wrong table guess no
-//     longer blanks all commentary.
-//  2. Applies the SAME rule as the reader page: a row is rejected ONLY if
-//     it PROVABLY belongs to another book (its book field says so). A row
-//     with no book label is returned — the data simply carries no book
-//     info to check, and hiding it would be wrong.
-//  3. Returns [] only when nothing matches at all.
 export const dynamic = 'force-dynamic';
 
-const norm = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-// V3: normalize every row to commentary_text / luganda_commentary_text using
-// the first NON-EMPTY field (?? chains stop at '' — the "saved but empty"
-// bug). The page then finds the text whatever field the bulk upload used.
+// V4: normalize rows to commentary_text / luganda_commentary_text using the
+// first NON-EMPTY field — same "saved but empty" fix as the page. Bulk rows
+// may carry the text under another field name or beside an empty
+// commentary_text, and ?? chains would stop at that empty string.
 function firstText(...vals: any[]): string {
   for (const v of vals) if (typeof v === 'string' && v.trim()) return v;
   return '';
@@ -36,80 +36,128 @@ function normalizeRow(c: any): any {
     luganda_commentary_text: firstText(c.luganda_commentary_text, c.luganda_commentary, c.text_luganda, c.luganda, c.lu, c.luganda_text, c.lu_text, c.commentary_luganda, c.luganda_html, c.luganda_content, c.lu_commentary),
   };
 }
+export const revalidate = 0;
+const headers = { 'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0', 'Pragma': 'no-cache', 'Expires': '0' };
 
-function rowHasBookField(c: any): boolean {
-  if (!c || typeof c !== 'object') return false;
-  return ['book_number', 'bookNumber', 'book_id', 'bookId', 'book_name', 'bookName', 'book_title', 'bookTitle', 'book'].some(
-    (k) => c[k] !== undefined && c[k] !== null && String(c[k]).trim() !== ''
-  );
-}
-
-function rowBelongsToBook(c: any, bookNum: number, bookId: number, bookNames: string[]): boolean {
-  if (!c || typeof c !== 'object') return false;
-  for (const f of [c.book_number, c.bookNumber, c.book_id, c.bookId]) {
-    const n = Number(f);
-    if (!Number.isNaN(n) && n > 0 && (n === bookNum || n === bookId)) return true;
+// Resolve whatever book identifier a caller sent into the book_id stored in
+// verse_commentaries. Accepts: a bible_books id, a book_number (1-66), or a
+// book name. Falls back to the raw number when bible_books has no match.
+async function resolveBookId(raw: any): Promise<number | null> {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = parseInt(String(raw), 10);
+  if (!Number.isNaN(n) && n > 0) {
+    try {
+      const b: any[] = await sql`SELECT id FROM bible_books WHERE book_number = ${n} LIMIT 1`;
+      if (b[0]?.id) return Number(b[0].id);
+    } catch { /* bible_books missing — use the number as-is */ }
+    return n;
   }
-  const want = bookNames.map(norm).filter(Boolean);
-  for (const f of [c.book_name, c.bookName, c.book_title, c.bookTitle, c.book]) {
-    if (typeof f === 'string' && f.trim() && want.includes(norm(f))) return true;
-  }
-  return false;
+  try {
+    const b: any[] = await sql`SELECT id FROM bible_books WHERE LOWER(name_english) = ${String(raw).toLowerCase()} OR LOWER(name) = ${String(raw).toLowerCase()} LIMIT 1`;
+    if (b[0]?.id) return Number(b[0].id);
+  } catch {}
+  return null;
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const bookNum = parseInt(String(searchParams.get('book_number') || searchParams.get('book') || searchParams.get('bookId') || searchParams.get('book_id') || ''), 10);
-    const chapter = parseInt(String(searchParams.get('chapter') || ''), 10);
-    const verse = parseInt(String(searchParams.get('verse') || searchParams.get('verse_number') || ''), 10);
-    if (Number.isNaN(bookNum) || Number.isNaN(chapter) || Number.isNaN(verse)) {
-      return NextResponse.json({ success: false, error: 'book, chapter and verse are required' }, { status: 400 });
-    }
-
-    // Resolve the book's id + names so name-stored rows can match too.
-    let bookId = bookNum;
-    const bookNames: string[] = [];
-    try {
-      const b: any[] = await sql`SELECT * FROM bible_books WHERE book_number = ${bookNum} LIMIT 1`;
-      if (b[0]) {
-        if (b[0].id) bookId = Number(b[0].id);
-        for (const k of ['name_english', 'name', 'book_name', 'name_luganda']) {
-          if (b[0][k]) bookNames.push(String(b[0][k]));
-        }
+    const { searchParams } = request.nextUrl;
+    // Accept every param name callers have used: bookId / book_id / book_number / book
+    const bookRaw = searchParams.get('bookId') ?? searchParams.get('book_id') ?? searchParams.get('book_number') ?? searchParams.get('book');
+    const chapter = searchParams.get('chapter');
+    const verse = searchParams.get('verseNumber') || searchParams.get('verse_number') || searchParams.get('verse');
+    // V3: the stored book_id's numbering is not guaranteed to equal the
+    // book_number or the bible_books id — Admin proved the row IS under
+    // 3 John, yet the front page got nothing. So try EVERY candidate id:
+    // bible_books id for the number, id for the name, and the raw number.
+    // First candidate with rows wins. Giving up after one guess is what
+    // blanked the front page.
+    const bookName = searchParams.get('bookName') ?? searchParams.get('book_name') ?? searchParams.get('name');
+    const candidates: number[] = [];
+    const pushCand = (v: number | null) => { if (v && !candidates.includes(v)) candidates.push(v); };
+    pushCand(await resolveBookId(bookRaw));
+    if (bookName) pushCand(await resolveBookId(bookName));
+    const rawN = parseInt(String(bookRaw ?? ''), 10);
+    if (!Number.isNaN(rawN) && rawN > 0) pushCand(rawN);
+    if (!candidates.length) return NextResponse.json([], { headers });
+    if (chapter && verse) {
+      for (const bookId of candidates) {
+        const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} AND verse_number = ${parseInt(verse)} LIMIT 1`;
+        if (rows.length > 0) return NextResponse.json(normalizeRow(rows[0]), { headers });
       }
-    } catch { /* books table missing — numeric match only */ }
-
-    // Try each candidate table + verse-column shape. First table with rows wins.
-    // A missing table/column throws → caught → next attempt. Nothing here
-    // ever returns another book's rows: the book filter below still applies.
-    const attempts: Array<() => Promise<any[]>> = [
-      async () => sql`SELECT * FROM commentaries WHERE chapter = ${chapter} AND (verse_number = ${verse} OR verse = ${verse})`,
-      async () => sql`SELECT * FROM commentaries WHERE chapter = ${chapter} AND verse = ${verse}`,
-      async () => sql`SELECT * FROM verse_commentaries WHERE chapter = ${chapter} AND (verse_number = ${verse} OR verse = ${verse})`,
-      async () => sql`SELECT * FROM verse_commentaries WHERE chapter = ${chapter} AND verse = ${verse}`,
-      async () => sql`SELECT * FROM bible_commentaries WHERE chapter = ${chapter} AND (verse_number = ${verse} OR verse = ${verse})`,
-      async () => sql`SELECT * FROM bible_commentaries WHERE chapter = ${chapter} AND verse = ${verse}`,
-    ];
-    let rows: any[] = [];
-    for (const attempt of attempts) {
-      try {
-        const r = await attempt();
-        if (Array.isArray(r) && r.length) { rows = r; break; }
-      } catch { /* table/column missing — try the next shape */ }
+      return NextResponse.json(null, { headers });
     }
+    if (chapter) {
+      for (const bookId of candidates) {
+        const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} ORDER BY verse_number ASC`;
+        if (rows.length > 0) return NextResponse.json(rows.map(normalizeRow), { headers });
+      }
+      return NextResponse.json([], { headers });
+    }
+    return NextResponse.json([], { headers });
+  } catch (error) {
+    console.error('Error fetching verse commentary:', error);
+    return NextResponse.json({ error: 'Failed to fetch verse commentary' }, { status: 500, headers });
+  }
+}
 
-    // THE RULE (same as the reader page): reject only rows that PROVABLY
-    // belong to another book. Rows with no book label pass through — the
-    // saved data carries no book info to check, and hiding it blanks the
-    // front page (the 3 John bug this version fixes).
-    const anyLabelled = (Array.isArray(rows) ? rows : []).some(rowHasBookField);
-    const kept = (Array.isArray(rows) ? rows : []).filter(
-      (c) => !anyLabelled || !rowHasBookField(c) || rowBelongsToBook(c, bookNum, bookId, bookNames)
-    );
-    return NextResponse.json(kept.map(normalizeRow));
-  } catch (error: any) {
-    console.error('Error in /api/commentaries:', error);
-    return NextResponse.json({ success: false, error: 'Failed to load commentary' }, { status: 500 });
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    // Accept both shapes: admin panel (commentary_text) and bulk/other (commentaryText / english_commentary)
+    // Accept every book key: book_id / bookId / book_number / book
+    const bookRaw = body.book_id ?? body.bookId ?? body.book_number ?? body.book;
+    const chapter = body.chapter;
+    const verse_number = body.verse_number ?? body.verseNumber ?? body.verse;
+    const commentary_text = body.commentary_text ?? body.commentaryText ?? body.english_commentary ?? body.commentary ?? null;
+    const luganda_commentary_text = body.luganda_commentary_text ?? body.lugandaCommentaryText ?? body.luganda_commentary ?? null;
+    const book_id = await resolveBookId(bookRaw);
+    if (!book_id || chapter === undefined || chapter === null || chapter === '' || verse_number === undefined || verse_number === null || verse_number === '') {
+      return NextResponse.json({ error: 'book_id, chapter and verse_number required' }, { status: 400, headers });
+    }
+    await sql`CREATE TABLE IF NOT EXISTS verse_commentaries (id SERIAL PRIMARY KEY, book_id INT NOT NULL, chapter INT NOT NULL, verse_number INT NOT NULL, commentary_text TEXT, luganda_commentary_text TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW())`;
+    await sql`CREATE UNIQUE INDEX IF NOT EXISTS verse_commentaries_book_chapter_verse_unique ON verse_commentaries (book_id, chapter, verse_number)`;
+    const result = await sql`
+      INSERT INTO verse_commentaries (book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at)
+      VALUES (${book_id}, ${parseInt(chapter)}, ${parseInt(verse_number)}, ${commentary_text}, ${luganda_commentary_text}, NOW(), NOW())
+      ON CONFLICT (book_id, chapter, verse_number) DO UPDATE SET commentary_text = EXCLUDED.commentary_text, luganda_commentary_text = EXCLUDED.luganda_commentary_text, updated_at = NOW()
+      RETURNING id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at
+    `;
+    return NextResponse.json(result[0], { headers });
+  } catch (error) {
+    console.error('Error saving verse commentary:', error);
+    return NextResponse.json({ error: 'Failed to save verse commentary' }, { status: 500, headers });
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { id } = body;
+    const commentary_text = body.commentary_text ?? body.commentaryText ?? body.english_commentary ?? null;
+    const luganda_commentary_text = body.luganda_commentary_text ?? body.lugandaCommentaryText ?? body.luganda_commentary ?? null;
+    if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400, headers });
+    const result = await sql`
+      UPDATE verse_commentaries SET commentary_text = ${commentary_text}, luganda_commentary_text = ${luganda_commentary_text}, updated_at = NOW()
+      WHERE id = ${parseInt(id)}
+      RETURNING id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at
+    `;
+    return NextResponse.json(result[0] ?? null, { headers });
+  } catch (error) {
+    console.error('Error updating verse commentary:', error);
+    return NextResponse.json({ error: 'Failed to update verse commentary' }, { status: 500, headers });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = request.nextUrl;
+    const id = searchParams.get('id');
+    if (!id) return NextResponse.json({ error: 'ID required' }, { status: 400, headers });
+    await sql`DELETE FROM verse_commentaries WHERE id = ${parseInt(id)}`;
+    return NextResponse.json({ success: true, message: 'Commentary deleted' }, { headers });
+  } catch (error) {
+    console.error('Error deleting verse commentary:', error);
+    return NextResponse.json({ error: 'Failed to delete verse commentary' }, { status: 500, headers });
   }
 }
