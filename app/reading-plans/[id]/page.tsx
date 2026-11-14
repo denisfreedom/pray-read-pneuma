@@ -1,371 +1,339 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { BookOpen, Calendar, CheckCircle2, Circle, ArrowLeft, ArrowRight } from 'lucide-react';
+import Link from 'next/link';
+import { BookOpen, CheckCircle2, Clock, Bell, BellOff, ArrowRight, Trophy, Sparkles } from 'lucide-react';
 import { useThemeStore } from '@/lib/theme-store';
+import ReadingReminder from '@/app/components/ReadingReminder';
 
-interface ReadingPlan {
-  id: number;
-  title: string;
-  description: string;
-  duration_days: number;
-  icon: string;
-}
-
-interface PlanDay {
-  id: number;
-  day_number: number;
-  book: string;
-  book_number: number | null;
-  start_chapter: number;
-  end_chapter: number;
-  total_chapters: number | null;
-}
-
-interface UserProgress {
-  day_number: number;
-  completed: boolean;
-}
+// app/reading-plans/[id]/page.tsx — plan detail: day-by-day readings,
+// mark days complete, per-book finished badges, plan completion, reminders.
+type Day = { day_number: number; readings: { book_number: number; book_name: string; chapter: number }[]; label: string };
+type Summary = {
+  plan_id: number; plan_title: string | null; total_days: number; completed_days: number;
+  current_day: number; completed: boolean; pct: number;
+  finished_books: { book_number: number; book_name: string; finished_at: string | null }[];
+  completed_day_numbers: number[];
+};
 
 export default function ReadingPlanDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const planId = params.id as string;
-  const { theme } = useThemeStore();
+  const planId = parseInt(String(params?.id ?? ''), 10);
+  const [plan, setPlan] = useState<any>(null);
+  const [days, setDays] = useState<Day[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+  const [savingDay, setSavingDay] = useState<number | null>(null);
+  const [celebrate, setCelebrate] = useState<string | null>(null);
+  // Reminder state
+  const [reminderTime, setReminderTime] = useState('07:00');
+  const [reminderOn, setReminderOn] = useState(false);
+  const [reminderSaved, setReminderSaved] = useState(false);
+  const [notifPerm, setNotifPerm] = useState<string>('default');
+  const theme = useThemeStore((state) => state.theme);
   const isDark = theme === 'dark';
 
-  const [plan, setPlan] = useState<ReadingPlan | null>(null);
-  const [days, setDays] = useState<PlanDay[]>([]);
-  const [progress, setProgress] = useState<Map<number, boolean>>(new Map());
-  const [loading, setLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState<string>('');
-
-  useEffect(() => {
-    // Get user email from session first, fallback to localStorage
-    fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' })
-      .then(r => r.json())
-      .then(s => {
-        const email = s?.user?.email || localStorage.getItem('userEmail') || 'guest@example.com';
-        setUserEmail(email);
-      })
-      .catch(() => setUserEmail(localStorage.getItem('userEmail') || 'guest@example.com'));
-
-    fetchPlanDetails();
-  }, [planId]);
-
-  async function fetchPlanDetails() {
+  const load = useCallback(async (userEmail: string | null) => {
     try {
-      // Fetch plan and days
-      const res = await fetch(`/api/reading-plans/${planId}`);
-      const data = await res.json();
-      
+      const q = userEmail ? `?userEmail=${encodeURIComponent(userEmail)}` : '';
+      const res = await fetch(`/api/reading-plans/${planId}${q}`, { cache: 'no-store' });
+      const data = await res.json().catch(() => null);
+      if (!data?.success) { setNotFound(true); return; }
       setPlan(data.plan);
       setDays(data.days || []);
-
-      // Fetch user progress
-      const sessionRes = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
-      const sessionData = await sessionRes.json();
-      const email = sessionData?.user?.email || localStorage.getItem('userEmail') || 'guest@example.com';
-      const progressRes = await fetch(`/api/reading-progress?email=${email}&planId=${planId}`);
-      const progressData = await progressRes.json();
-
-      const progressMap = new Map<number, boolean>();
-      (progressData.progress || []).forEach((p: UserProgress) => {
-        progressMap.set(p.day_number, p.completed);
-      });
-      setProgress(progressMap);
-    } catch (error) {
-      console.error('Error fetching plan details:', error);
+      setSummary(data.summary || null);
+    } catch {
+      setNotFound(true);
     } finally {
       setLoading(false);
     }
-  }
+  }, [planId]);
 
-  async function toggleDayCompletion(dayNumber: number) {
-    const currentStatus = progress.get(dayNumber) || false;
-    const newStatus = !currentStatus;
+  useEffect(() => {
+    (async () => {
+      let em: string | null = null;
+      try {
+        const r = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
+        const d = await r.json().catch(() => null);
+        if (d?.success && d.user?.email) em = String(d.user.email).toLowerCase();
+      } catch { /* not logged in */ }
+      if (!em) {
+        try { em = localStorage.getItem('userEmail'); } catch { /* ignore */ }
+      }
+      setEmail(em);
+      if (typeof Notification !== 'undefined') setNotifPerm(Notification.permission);
+      await load(em);
+      if (em) {
+        try {
+          const rr = await fetch(`/api/reading-plans/reminders?userEmail=${encodeURIComponent(em)}&planId=${planId}`, { cache: 'no-store' });
+          const rd = await rr.json().catch(() => null);
+          if (rd?.success && rd.reminder) {
+            setReminderTime(rd.reminder.reminder_time || '07:00');
+            setReminderOn(!!rd.reminder.enabled);
+          }
+        } catch { /* no reminder yet */ }
+      }
+    })();
+  }, [load, planId]);
 
+  const toggleDay = async (dayNumber: number, done: boolean) => {
+    if (!email) { router.push('/user-login'); return; }
+    const wasDone = summary?.completed_day_numbers?.includes(dayNumber);
+    if (wasDone === done) return;
+    setSavingDay(dayNumber);
     // Optimistic update
-    const newProgress = new Map(progress);
-    newProgress.set(dayNumber, newStatus);
-    setProgress(newProgress);
-
+    setSummary((prev) => {
+      if (!prev) return prev;
+      const set = new Set(prev.completed_day_numbers);
+      if (done) set.add(dayNumber); else set.delete(dayNumber);
+      const arr = [...set].sort((a, b) => a - b);
+      const completedDays = arr.length;
+      const completed = prev.total_days > 0 && completedDays >= prev.total_days;
+      return { ...prev, completed_day_numbers: arr, completed_days: completedDays, completed, current_day: completed ? prev.total_days : Math.min(completedDays + 1, Math.max(prev.total_days, 1)), pct: prev.total_days > 0 ? Math.round((completedDays / prev.total_days) * 100) : 0 };
+    });
     try {
-      const sessionRes = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
-      const sessionData = await sessionRes.json();
-      const email = sessionData?.user?.email || userEmail;
-
-      await fetch('/api/reading-progress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userEmail: email,
-          planId: parseInt(planId),
-          dayNumber,
-          completed: newStatus,
-        }),
+      const res = await fetch('/api/reading-plans/progress', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userEmail: email, planId, dayNumber, completed: done }),
       });
-    } catch (error) {
-      console.error('Error updating progress:', error);
-      setProgress(progress);
+      const data = await res.json().catch(() => null);
+      if (data?.success && data.summary) {
+        setSummary(data.summary);
+        if (data.plan_completed) setCelebrate('plan');
+        else if (data.newly_finished_books?.length) setCelebrate(`book:${data.newly_finished_books[0].book_name}`);
+        if (data.plan_completed || data.newly_finished_books?.length) {
+          setTimeout(() => setCelebrate(null), 6000);
+        }
+      } else {
+        await load(email);
+      }
+    } catch {
+      await load(email);
+    } finally {
+      setSavingDay(null);
     }
-  }
+  };
 
-  const completedDays = Array.from(progress.values()).filter(Boolean).length;
-  const progressPercentage = days.length > 0 ? (completedDays / days.length) * 100 : 0;
+  const saveReminder = async (time: string, on: boolean) => {
+    if (!email) { router.push('/user-login'); return; }
+    try {
+      await fetch('/api/reading-plans/reminders', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userEmail: email, planId, time, enabled: on }),
+      });
+      setReminderSaved(true);
+      setTimeout(() => setReminderSaved(false), 2500);
+    } catch { /* ignore */ }
+  };
+
+  const askNotifPermission = async () => {
+    try {
+      const p = await Notification.requestPermission();
+      setNotifPerm(p);
+      if (p === 'granted') {
+        new Notification('📖 Reminders on', { body: `We will remind you to read ${plan?.title || 'your plan'} every day.` });
+      }
+    } catch { /* ignore */ }
+  };
 
   if (loading) {
     return (
-      <div className={`min-h-screen ${isDark ? 'dark:bg-gradient-to-br dark:from-[#06090f] dark:via-[#0a0e17] dark:to-[#08060e]' : 'bg-gradient-to-br from-white via-gray-50 to-white'} flex items-center justify-center`}>
-        <div className="text-center">
-          <div className="inline-block w-12 h-12 border-4 border-[rgba(180,140,60,0.2)] border-t-[#f0c060] rounded-full animate-spin" />
-          <p className={`mt-4 text-sm ${isDark ? 'dark:text-[rgba(220,200,155,0.5)]' : 'text-gray-500'}`}>Loading reading plan...</p>
-        </div>
+      <div className={`min-h-screen flex items-center justify-center ${isDark ? 'bg-[#06090f] text-[#f5ece0]' : 'bg-[#FDFBF6] text-[#1B2340]'}`}>
+        <p className="text-sm text-[#B98A2F] animate-pulse">Loading your plan…</p>
+      </div>
+    );
+  }
+  if (notFound || !plan) {
+    return (
+      <div className={`min-h-screen flex flex-col items-center justify-center px-6 text-center ${isDark ? 'bg-[#06090f] text-[#f5ece0]' : 'bg-[#FDFBF6] text-[#1B2340]'}`}>
+        <BookOpen className="w-14 h-14 mb-4 text-[rgba(180,140,60,0.4)]" />
+        <h1 className="font-serif text-2xl mb-2">Plan Not Found</h1>
+        <p className="text-sm text-[#6B6455] mb-6">This reading plan does not exist.</p>
+        <button onClick={() => router.push('/reading-plans')} className="px-8 py-3 rounded-2xl text-sm btn-gold">Back to Reading Plans</button>
       </div>
     );
   }
 
-  if (!plan) {
-    return (
-      <div className={`min-h-screen ${isDark ? 'dark:bg-gradient-to-br dark:from-[#06090f] dark:via-[#0a0e17] dark:to-[#08060e]' : 'bg-gradient-to-br from-white via-gray-50 to-white'} flex items-center justify-center`}>
-        <div className="text-center">
-          <h2 className={`font-serif text-2xl mb-4 ${isDark ? 'dark:text-[#f5ece0]' : 'text-gray-900'}`}>Plan not found</h2>
-          <button onClick={() => router.push('/reading-plans')} className="btn-ghost px-6 py-3 rounded-xl">
-            ← Back to Plans
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const doneSet = new Set(summary?.completed_day_numbers || []);
+  const totalDays = summary?.total_days ?? days.length;
+  const pct = summary?.pct ?? 0;
+  const finishedBooks = summary?.finished_books || [];
 
   return (
-    <div className={`min-h-screen ${isDark ? 'dark:bg-gradient-to-br dark:from-[#06090f] dark:via-[#0a0e17] dark:to-[#08060e]' : 'bg-gradient-to-br from-white via-gray-50 to-white'}`}>
-      {/* Header */}
-      <header className={`glass-nav border-b border-[rgba(180,140,60,0.15)] ${isDark ? 'dark' : ''}`}>
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <button
-            onClick={() => router.push('/reading-plans')}
-            className="flex items-center gap-3 group"
-          >
-            <ArrowLeft className="w-5 h-5 text-[#f0c060]" />
-            <span className={`font-serif text-xl font-semibold ${isDark ? 'dark:text-[#f5ece0]' : 'text-gray-900'}`}>
-              {plan.title}
-            </span>
+    <div className={`min-h-screen ${isDark ? 'bg-gradient-to-br from-[#06090f] via-[#0a0e17] to-[#08060e]' : 'bg-[#FDFBF6]'}`}>
+      {/* Reminder engine — fires the browser notification at the chosen time */}
+      {email && <ReadingReminder planId={planId} planTitle={plan.title} time={reminderTime} enabled={reminderOn} />}
+
+      <header className={`glass-nav border-b ${isDark ? 'border-[rgba(180,140,60,0.15)]' : 'border-[#E8B84B]/30'}`}>
+        <div className="max-w-4xl mx-auto px-6 h-20 flex items-center justify-between">
+          <button onClick={() => router.push('/reading-plans')} className="flex items-center gap-3">
+            <BookOpen className="w-8 h-8 text-[#f0c060]" />
+            <span className={`font-serif text-xl font-semibold ${isDark ? 'text-[#f5ece0]' : 'text-[#1B2340]'}`}>Reading Plans</span>
           </button>
-          <div className="text-sm font-semibold text-[#f0c060]">
-            {completedDays} / {days.length} days
-          </div>
+          <button onClick={() => router.back()} className="px-5 py-2.5 rounded-xl text-sm btn-ghost">← Back</button>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-5xl mx-auto px-6 py-16">
-        {/* Plan Header Card */}
-        <div className={`rounded-3xl p-8 md:p-12 mb-12 ${isDark ? 'dark-card' : 'light-card'}`}
-          style={{ background: 'linear-gradient(135deg, rgba(200,160,50,0.04) 0%, rgba(180,140,60,0.07) 100%)', border: '1px solid rgba(180,140,60,0.18)' }}>
-          
-          <div className="flex items-start gap-6 mb-8">
-            <div className="icon-box w-20 h-20 rounded-2xl flex items-center justify-center text-4xl flex-shrink-0">
-              {plan.icon}
-            </div>
-            <div className="flex-1">
-              <h1 className={`font-serif text-3xl md:text-4xl font-semibold mb-3 ${isDark ? 'text-[#f0d890]' : 'text-[#c9900a]'}`}>
-                {plan.title}
-              </h1>
-              <p className={`text-base leading-relaxed mb-4 ${isDark ? 'dark:text-[rgba(220,200,155,0.65)]' : 'text-gray-600'}`}>
-                {plan.description}
-              </p>
-              <div className="flex items-center gap-4 text-sm">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-[#f0c060]" />
-                  <span className={isDark ? 'dark:text-[rgba(220,200,155,0.7)]' : 'text-gray-600'}>
-                    {plan.duration_days} days
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-[#f0c060]" />
-                  <span className={isDark ? 'dark:text-[rgba(220,200,155,0.7)]' : 'text-gray-600'}>
-                    {completedDays} completed
-                  </span>
-                </div>
-              </div>
-            </div>
+      <main className="max-w-4xl mx-auto px-6 py-12">
+        {/* Celebration banner */}
+        {celebrate && (
+          <div className="mb-6 rounded-3xl p-5 text-center" style={{ background: 'linear-gradient(135deg, rgba(34,197,94,0.14), rgba(200,160,50,0.12))', border: '1px solid rgba(34,197,94,0.4)' }}>
+            <Trophy className="w-8 h-8 mx-auto mb-2 text-green-500" />
+            <p className={`font-serif text-xl font-semibold ${isDark ? 'text-[#f0d890]' : 'text-[#1B2340]'}`}>
+              {celebrate === 'plan' ? '🎉 Plan Complete!' : `🎉 You finished ${celebrate.replace('book:', '')}!`}
+            </p>
+            <p className={`text-sm ${isDark ? 'text-[rgba(220,200,155,0.7)]' : 'text-[#6B6455]'}`}>
+              {celebrate === 'plan' ? 'You read every day of this plan. It is now marked complete on your dashboard.' : 'This book is now marked finished in your reading records and on your dashboard.'}
+            </p>
           </div>
+        )}
 
-          {/* Progress Bar */}
-          <div>
-            <div className="flex items-center justify-between mb-2 text-sm">
-              <span className="font-semibold text-[#f0c060]">Overall Progress</span>
-              <span className={isDark ? 'dark:text-[rgba(220,200,155,0.7)]' : 'text-gray-600'}>
-                {Math.round(progressPercentage)}%
-              </span>
+        {/* Plan header */}
+        <div className="text-center mb-8">
+          <div className="text-5xl mb-4">{plan.icon || '📖'}</div>
+          <h1 className={`font-serif text-4xl md:text-5xl mb-3 ${isDark ? 'text-[#f5ece0]' : 'text-[#1B2340]'}`}>{plan.title}</h1>
+          <p className={`text-base max-w-2xl mx-auto leading-relaxed ${isDark ? 'text-[rgba(220,200,155,0.65)]' : 'text-[#6B6455]'}`}>{plan.description}</p>
+          <p className={`text-xs mt-3 ${isDark ? 'text-[rgba(220,200,155,0.5)]' : 'text-[#9A927E]'}`}>
+            <Clock className="inline w-3.5 h-3.5 mr-1 text-[#f0c060]" /> {totalDays} days
+            {plan.first_book ? <> · Starts in {plan.first_book}</> : null}
+          </p>
+        </div>
+
+        {/* Progress bar */}
+        <div className="rounded-3xl p-6 mb-8" style={{ background: 'linear-gradient(135deg, rgba(200,160,50,0.08), rgba(180,140,60,0.04))', border: '1px solid rgba(180,140,60,0.2)' }}>
+          <div className="flex justify-between items-center mb-2">
+            <span className={`text-sm font-semibold ${isDark ? 'text-[#f0d890]' : 'text-[#1B2340]'}`}>
+              {summary?.completed ? '✅ Plan Complete' : `Day ${summary?.current_day ?? 1} of ${totalDays}`}
+            </span>
+            <span className="text-sm font-bold text-[#B98A2F]">{summary?.completed_days ?? 0} / {totalDays} days · {pct}%</span>
+          </div>
+          <div className="h-3 rounded-full bg-[rgba(180,140,60,0.15)] overflow-hidden">
+            <div className="h-full rounded-full bg-gradient-to-r from-[#c9900a] to-[#f0c060] transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          {!email && (
+            <p className="text-xs mt-3 text-center">
+              <Link href="/user-login" className="text-[#B98A2F] font-semibold underline">Log in</Link> to save your progress.
+            </p>
+          )}
+        </div>
+
+        {/* Finished books — marked finished in this plan's records + dashboard */}
+        {finishedBooks.length > 0 && (
+          <div className="rounded-3xl p-6 mb-8" style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.3)' }}>
+            <h2 className={`font-serif text-xl font-semibold mb-3 flex items-center gap-2 ${isDark ? 'text-[#f0d890]' : 'text-[#1B2340]'}`}>
+              <Sparkles className="w-5 h-5 text-green-500" /> Books You Have Finished
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {finishedBooks.map((b) => (
+                <span key={b.book_number} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold" style={{ background: 'rgba(34,197,94,0.14)', border: '1px solid rgba(34,197,94,0.4)', color: '#16a34a' }}>
+                  <CheckCircle2 className="w-3.5 h-3.5" /> {b.book_name} — Finished
+                </span>
+              ))}
             </div>
-            <div className="h-3 rounded-full overflow-hidden"
-              style={{ background: 'rgba(180,140,60,0.15)' }}>
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${progressPercentage}%`,
-                  background: 'linear-gradient(90deg, #c9900a, #f0c040)',
-                }}
-              />
-            </div>
+            <p className={`text-xs mt-3 ${isDark ? 'text-[rgba(220,200,155,0.6)]' : 'text-[#6B6455]'}`}>
+              These are marked finished in your reading plan records and show on your dashboard.
+            </p>
+          </div>
+        )}
+
+        {/* Reminder card */}
+        <div className="rounded-3xl p-6 mb-8" style={{ background: 'linear-gradient(135deg, rgba(200,160,50,0.08), rgba(180,140,60,0.04))', border: '1px solid rgba(180,140,60,0.2)' }}>
+          <h2 className={`font-serif text-xl font-semibold mb-1 flex items-center gap-2 ${isDark ? 'text-[#f0d890]' : 'text-[#1B2340]'}`}>
+            {reminderOn ? <Bell className="w-5 h-5 text-[#f0c060]" /> : <BellOff className="w-5 h-5 text-[#9A927E]" />} Daily Reading Reminder
+          </h2>
+          <p className={`text-xs mb-4 ${isDark ? 'text-[rgba(220,200,155,0.6)]' : 'text-[#6B6455]'}`}>
+            We will remind you to read this plan every day at the time you choose. Reminders appear while the site is open — keep a tab open or check your dashboard.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="time" value={reminderTime}
+              onChange={(e) => setReminderTime(e.target.value)}
+              className={`px-4 py-2.5 rounded-xl border text-sm font-semibold outline-none ${isDark ? 'bg-[#0a0e17] text-[#f5ece0] border-[rgba(180,140,60,0.25)]' : 'bg-white text-[#1B2340] border-[#E8B84B]/30'}`}
+            />
+            <button
+              onClick={() => { const next = !reminderOn; setReminderOn(next); saveReminder(reminderTime, next); }}
+              className={`px-5 py-2.5 rounded-xl text-sm font-bold transition ${reminderOn ? 'bg-green-600 text-white' : 'bg-[rgba(180,140,60,0.15)] text-[#B98A2F] border border-[rgba(180,140,60,0.4)]'}`}
+            >
+              {reminderOn ? 'Reminder ON' : 'Turn Reminder ON'}
+            </button>
+            {reminderOn && (
+              <button
+                onClick={() => saveReminder(reminderTime, true)}
+                className="px-5 py-2.5 rounded-xl text-sm font-semibold btn-ghost"
+              >
+                Save Time
+              </button>
+            )}
+            {notifPerm !== 'granted' && (
+              <button onClick={askNotifPermission} className="px-5 py-2.5 rounded-xl text-sm font-semibold btn-ghost">
+                Allow Browser Notifications
+              </button>
+            )}
+            {reminderSaved && <span className="text-xs font-bold text-green-600">✓ Reminder saved</span>}
           </div>
         </div>
 
-        {/* Reading Schedule */}
-        <div className="space-y-4">
-          <h2 className={`font-serif text-2xl font-semibold mb-6 ${isDark ? 'dark:text-[#f5ece0]' : 'text-gray-900'}`}>
-            Reading Schedule
-          </h2>
-
+        {/* Day list */}
+        <h2 className={`font-serif text-2xl font-semibold mb-4 ${isDark ? 'text-[#f0d890]' : 'text-[#1B2340]'}`}>Daily Readings</h2>
+        <div className="space-y-3">
           {days.map((day) => {
-            const isCompleted = progress.get(day.day_number) || false;
-            const chapterRange = day.start_chapter === day.end_chapter
-              ? `Chapter ${day.start_chapter}`
-              : `Chapters ${day.start_chapter}-${day.end_chapter}`;
-
+            const done = doneSet.has(day.day_number);
+            const isCurrent = summary && !summary.completed && day.day_number === summary.current_day;
             return (
               <div
-                key={day.id}
-                className={`rounded-2xl p-6 border transition-all cursor-pointer ${
-                  isCompleted
-                    ? 'border-[rgba(180,140,60,0.4)] bg-[rgba(180,140,60,0.08)]'
-                    : `border-[rgba(180,140,60,0.18)] ${isDark ? 'bg-[rgba(200,160,50,0.06)] hover:bg-[rgba(200,160,50,0.1)]' : 'bg-[rgba(200,160,50,0.04)] hover:bg-[rgba(200,160,50,0.07)]'}`
-                }`}
-                onClick={() => toggleDayCompletion(day.day_number)}
+                key={day.day_number}
+                className="flex items-center gap-4 rounded-2xl px-5 py-4"
+                style={{
+                  background: done ? 'rgba(34,197,94,0.07)' : isCurrent ? 'rgba(200,160,50,0.12)' : isDark ? 'rgba(255,255,255,0.03)' : '#fff',
+                  border: `1px solid ${done ? 'rgba(34,197,94,0.35)' : isCurrent ? 'rgba(200,160,50,0.5)' : 'rgba(180,140,60,0.18)'}`,
+                }}
               >
-                <div className="flex items-center gap-4">
-                  {/* Checkbox */}
-                  <button
-                    className="flex-shrink-0"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      toggleDayCompletion(day.day_number);
-                    }}
-                  >
-                    {isCompleted ? (
-                      <CheckCircle2 className="w-6 h-6 text-[#f0c060]" />
-                    ) : (
-                      <Circle className="w-6 h-6 text-[rgba(180,140,60,0.4)]" />
-                    )}
-                  </button>
-
-                  {/* Day Info */}
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-1">
-                      <span className="text-xs font-bold uppercase tracking-widest text-[#f0c060]">
-                        Day {day.day_number}
-                      </span>
-                      {isCompleted && (
-                        <span className="text-xs px-2 py-0.5 rounded-full"
-                          style={{ background: 'rgba(180,140,60,0.2)', color: '#f0c060' }}>
-                          ✓ Complete
-                        </span>
-                      )}
-                    </div>
-                    <p className={`font-semibold text-base ${isDark ? 'dark:text-[#f5ece0]' : 'text-gray-900'}`}>
-                      {day.book} · {chapterRange}
-                    </p>
-                  </div>
-
-                  {/* Read Button */}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (day.book_number) {
-                        router.push(`/bible-reader/${day.book_number}/${day.start_chapter}?planId=${planId}&dayNumber=${day.day_number}`);
-                      } else {
-                        router.push(`/bible-reader`);
-                      }
-                    }}
-                    className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm btn-ghost"
-                  >
-                    Read
-                    <ArrowRight className="w-4 h-4" />
-                  </button>
+                <button
+                  onClick={() => toggleDay(day.day_number, !done)}
+                  disabled={savingDay === day.day_number}
+                  aria-label={`${done ? 'Unmark' : 'Mark'} day ${day.day_number} complete`}
+                  className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center border-2 transition"
+                  style={{ borderColor: done ? '#16a34a' : 'rgba(180,140,60,0.5)', background: done ? '#16a34a' : 'transparent' }}
+                >
+                  {done && <CheckCircle2 className="w-5 h-5 text-white" />}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm font-bold ${isDark ? 'text-[#f5ece0]' : 'text-[#1B2340]'}`}>
+                    Day {day.day_number}
+                    {isCurrent && <span className="ml-2 text-[11px] px-2 py-0.5 rounded-full bg-[#f0c060] text-[#1B2340]">TODAY</span>}
+                  </p>
+                  <p className={`text-sm truncate ${done ? 'line-through opacity-60' : ''} ${isDark ? 'text-[rgba(220,200,155,0.7)]' : 'text-[#6B6455]'}`}>
+                    {day.label || `Day ${day.day_number}`}
+                  </p>
                 </div>
+                {day.readings.length > 0 && (
+                  <Link
+                    href={`/bible-reader/${day.readings[0].book_number}/${day.readings[0].chapter}`}
+                    className="shrink-0 text-xs font-bold text-[#B98A2F] inline-flex items-center gap-1 hover:underline"
+                  >
+                    Read <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                )}
               </div>
             );
           })}
         </div>
 
-        {/* Encouragement Message */}
-        {completedDays === days.length && (
-          <div className={`mt-12 rounded-3xl p-8 text-center ${isDark ? 'dark-complete' : 'light-complete'}`}
-            style={{ background: 'linear-gradient(135deg, rgba(200,160,50,0.1) 0%, rgba(180,140,60,0.15) 100%)', border: '1px solid rgba(180,140,60,0.3)' }}>
-            <div className="text-5xl mb-4">🎉</div>
-            <h3 className={`font-serif text-2xl font-semibold mb-3 ${isDark ? 'text-[#f0d890]' : 'text-[#c9900a]'}`}>
-              Congratulations!
-            </h3>
-            <p className={`text-base mb-6 ${isDark ? 'dark:text-[rgba(220,200,155,0.7)]' : 'text-gray-600'}`}>
-              You've completed the {plan.title}! Keep growing in the Word.
-            </p>
-            <button
-              onClick={() => router.push('/reading-plans')}
-              className="px-8 py-3 rounded-xl text-sm btn-gold"
-            >
-              Explore More Plans
-            </button>
-          </div>
-        )}
+        <div className="text-center mt-10">
+          <button onClick={() => router.push('/reading-plans')} className="px-8 py-3 rounded-2xl text-sm btn-ghost">← All Reading Plans</button>
+        </div>
       </main>
 
       <style jsx global>{`
-        .glass-nav {
-          background: rgba(255, 255, 255, 0.9);
-          backdrop-filter: blur(24px);
-          -webkit-backdrop-filter: blur(24px);
-        }
-
-        .dark .glass-nav {
-          background: rgba(6,9,15,0.82);
-        }
-
-        .btn-gold {
-          background: linear-gradient(135deg, #c9900a 0%, #f0c040 45%, #e0a820 80%, #c9900a 100%);
-          background-size: 200% 100%;
-          color: #0d0a02;
-          font-weight: 700;
-          letter-spacing: 0.04em;
-          transition: all 0.4s cubic-bezier(.16,1,.3,1);
-          box-shadow: 0 4px 24px rgba(200,150,10,0.35), 0 1px 0 rgba(255,220,80,0.5) inset;
-        }
-        .btn-gold:hover {
-          background-position: 100% 0;
-          transform: translateY(-3px) scale(1.02);
-          box-shadow: 0 16px 48px rgba(200,150,10,0.55), 0 1px 0 rgba(255,220,80,0.5) inset;
-        }
-
-        .btn-ghost {
-          background: rgba(200,160,50,0.05);
-          border: 1px solid rgba(200,160,50,0.35);
-          color: #c9900a;
-          font-weight: 500;
-          letter-spacing: 0.03em;
-          transition: all 0.3s ease;
-          backdrop-filter: blur(10px);
-        }
-
-        .dark .btn-ghost {
-          background: rgba(255,255,255,0.05);
-          color: #e0d0a8;
-        }
-
-        .btn-ghost:hover {
-          background: rgba(200,160,50,0.12);
-          border-color: rgba(200,160,50,0.6);
-          color: #b8860b;
-          transform: translateY(-2px);
-          box-shadow: 0 8px 32px rgba(200,150,10,0.2);
-        }
-
-        .icon-box {
-          background: radial-gradient(circle at 30% 30%, rgba(200,160,40,0.2) 0%, rgba(180,140,60,0.06) 100%);
-          border: 1px solid rgba(180,140,60,0.28);
-          transition: all 0.3s ease;
-        }
+        .glass-nav { background: ${isDark ? 'rgba(6,9,15,0.82)' : 'rgba(255, 255, 255, 0.9)'}; backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+        .btn-gold { background: linear-gradient(135deg, #c9900a 0%, #f0c040 45%, #e0a820 80%, #c9900a 100%); background-size: 200% 100%; color: #0d0a02; font-weight: 700; letter-spacing: 0.04em; transition: all 0.4s cubic-bezier(.16,1,.3,1); box-shadow: 0 4px 24px rgba(200,150,10,0.35), 0 1px 0 rgba(255,220,80,0.5) inset; }
+        .btn-gold:hover { background-position: 100% 0; transform: translateY(-3px) scale(1.02); box-shadow: 0 16px 48px rgba(200,150,10,0.55), 0 1px 0 rgba(255,220,80,0.5) inset; }
+        .btn-ghost { background: ${isDark ? 'rgba(255,255,255,0.05)' : 'rgba(200,160,50,0.05)'}; border: 1px solid rgba(200,160,50,0.35); color: ${isDark ? '#e0d0a8' : '#c9900a'}; font-weight: 500; letter-spacing: 0.03em; transition: all 0.3s ease; backdrop-filter: blur(10px); }
+        .btn-ghost:hover { background: rgba(200,160,50,0.12); border-color: rgba(200,160,50,0.6); color: #b8860b; transform: translateY(-2px); box-shadow: 0 8px 32px rgba(200,150,10,0.2); }
       `}</style>
     </div>
   );
