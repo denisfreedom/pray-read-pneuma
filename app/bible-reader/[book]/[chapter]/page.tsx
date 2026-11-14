@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense, memo, useRef } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import VerseShare from '@/components/VerseShare';
+import ReadingPlanProgressBar from '@/app/components/ReadingPlanProgressBar';
 
 // RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
 // Only the data wiring is fixed. No redesign.
@@ -613,6 +614,8 @@ function ChapterContent() {
           {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
           <hr className="border-blue-200 my-4" />
 
+          <ReadingPlanProgressBar bookNumber={bookNum} chapter={chapterNum} />
+
           {verses.length === 0 ? (
             <div className={`${themeClasses.card} rounded-xl p-8 text-center shadow-sm`}>
               <p className="font-bold">Verses could not be loaded.</p>
@@ -651,7 +654,7 @@ function ChapterContent() {
                     {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
                       <>
                         {pr.en && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-EN`)} data-mark-key={`prayer-${v.verse}-EN`} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(pr.en, `prayer-${v.verse}-EN`)}</p>}
-                        {pr.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-LU`)} data-mark-key={`prayer-${v.verse}-LU`} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{renderMarkedByKey(pr.lu, `prayer-${v.verse}-LU`)}</p>}
+                        {pr.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-LU`)} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{renderMarkedByKey(pr.lu, `prayer-${v.verse}-LU`)}</p>}
                       </>
                     )}
                   </div>
@@ -702,8 +705,11 @@ function ChapterContent() {
           )}
         </div>
 
-        {/* RIGHT — ORIGINAL tabs */}
-        <aside className={`lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
+        {/* RIGHT — ORIGINAL tabs. FIX (sidebar at the BOTTOM on phones/tablets):
+            the grid below lg: is ONE column, so this <aside> stacked UNDER the
+            verses. hidden lg:block keeps it desktop-only; phones/tablets use the
+            hamburger drawer, which holds the same Intro / Commentary / Prayer tabs. */}
+        <aside className={`hidden lg:block lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
           <div className={`flex border-b ${themeClasses.divider} ${themeClasses.header}`}>
             {([
               { id: 'intro', label: '📕 Intro' },
