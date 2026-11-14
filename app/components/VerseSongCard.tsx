@@ -1,6 +1,21 @@
+// app/components/VerseSongCard.tsx — FIXED
+// WHAT WAS BROKEN:
+//  1) Stale internal state. The card copied its props into useState ONCE
+//     (useState(userLiked), useState(likesCount)) and never looked at them
+//     again. So when the series page did its optimistic like update — or
+//     rolled it back on an API failure — the card kept showing its OLD
+//     state. Parent and card disagreed forever: the page said unliked, the
+//     card still showed a filled heart. The card now SYNCs its state
+//     whenever the parent's props change, so optimistic updates, rollbacks,
+//     and refetches after login all show up immediately.
+//  2) Duration "3:45" showed NaN:NaN. "3:45" / 60 is NaN. Durations are
+//     normalised to seconds first, like the series and library pages do.
+//  3) Fractional seconds (45.7) leaked into the badge as "45.7". Seconds
+//     are floored for display.
+// Same card, same layout, same buttons. Nothing else changed.
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Heart, Bookmark, Play, Music, Pause } from 'lucide-react';
 import { usePlayerStore } from '@/app/store/playerStore';
 import Image from 'next/image';
@@ -18,6 +33,17 @@ interface VerseSongCardProps {
   onPlay: () => void;
   onLike: (id: number, liked: boolean) => void;
   onFavorite: (id: number, favorited: boolean) => void;
+}
+
+// Duration may arrive as seconds (number), "3:45", or "45" — always seconds.
+function normDuration(v: any): number {
+  if (typeof v === 'number') return Number.isNaN(v) ? 0 : v;
+  if (v === null || v === undefined || v === '') return 0;
+  const s = String(v).trim();
+  const m = s.match(/^(?:(\d+):)?(\d+):(\d{2})$/);
+  if (m) return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
+  const n = parseInt(s, 10);
+  return Number.isNaN(n) ? 0 : n;
 }
 
 export default function VerseSongCard({
@@ -38,12 +64,21 @@ export default function VerseSongCard({
   const [isFavorited, setIsFavorited] = useState(userFavorited);
   const [likeCount, setLikeCount] = useState(likesCount);
   const [imageError, setImageError] = useState(false);
-  
+
+  // SYNC with the parent. useState only reads the prop ONCE (first render)
+  // — without these effects, the parent's optimistic like update, its
+  // rollback on API failure, and the refetch after login would never show
+  // up in the card. The parent owns the truth; the card mirrors it.
+  useEffect(() => { setIsLiked(!!userLiked); }, [userLiked]);
+  useEffect(() => { setIsFavorited(!!userFavorited); }, [userFavorited]);
+  useEffect(() => { setLikeCount(Number(likesCount) || 0); }, [likesCount]);
+
   const { currentSong, isPlaying, setMiniPlayer } = usePlayerStore();
   const isCurrentSong = currentSong?.id === id;
 
-  const minutes = duration ? Math.floor(duration / 60) : 0;
-  const seconds = duration ? duration % 60 : 0;
+  const totalSeconds = normDuration(duration);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.floor(totalSeconds % 60);
 
   const handleLike = () => {
     const newLiked = !isLiked;
@@ -83,7 +118,7 @@ export default function VerseSongCard({
             </div>
           </div>
         )}
-        
+
         {/* Always Visible Play Button */}
         <div className="absolute inset-0 flex items-center justify-center">
           <button
@@ -104,7 +139,7 @@ export default function VerseSongCard({
         </div>
 
         {/* Duration Badge */}
-        {duration && (
+        {totalSeconds > 0 && (
           <div className="absolute bottom-1 right-1 bg-black/75 backdrop-blur-sm px-1.5 py-0.5 rounded text-xs text-white font-medium">
             {String(minutes).padStart(2, '0')}:{String(seconds).padStart(2, '0')}
           </div>
@@ -114,14 +149,14 @@ export default function VerseSongCard({
       {/* Content */}
       <div className="p-2.5">
         <h3 className="text-white font-semibold truncate text-sm mb-1">{title}</h3>
-        
+
         {description && (
           <p className="text-slate-300 text-xs mb-2 line-clamp-1">{description}</p>
         )}
 
         {/* Stats */}
         <div className="flex items-center gap-1 mb-2 text-slate-400 text-xs">
-          <span>❤️ {likeCount}</span>
+          <span>❤ {likeCount}</span>
           <span>•</span>
           <span>🎵 {playCount}</span>
         </div>
