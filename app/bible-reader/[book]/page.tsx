@@ -40,7 +40,7 @@ const BOOK_NUMBERS: Record<string, number> = {};
 BOOK_NAMES.forEach((b, i) => { BOOK_NUMBERS[b.toLowerCase()] = i + 1; });
 BOOK_NUMBERS['psalm'] = 19; BOOK_NUMBERS['song of solomon'] = 22; BOOK_NUMBERS['song of songs'] = 22; BOOK_NUMBERS['judges'] = 7;
 const LU_BOOK_NUMBERS: Record<string, number> = { 'olubereberye': 1, 'okuva': 2, 'ebyabaleevi': 3, 'okubala': 4, 'ekyamateeka': 5, 'yoswa': 6, 'abalamuzi': 7, 'ruusa': 8, 'samwiri': 9, '1 samwiri': 9, '2 samwiri': 10, 'bassekabaka': 11, '1 bassekabaka': 11, '2 bassekabaka': 12, 'ebyomumirembe': 13, '1 ebyomumirembe': 13, '2 ebyomumirembe': 14, 'ezera': 15, 'nekemiya': 16, 'eseza': 17, 'yobu': 18, 'zabbuli': 19, 'engero': 20, 'omubuulizi': 21, 'oluyimba': 22, 'isaaya': 23, 'yeremiya': 24, 'okukungubaga': 25, 'ebyokukungubaga': 25, 'ezekyeri': 26, 'danyeri': 27, 'koseya': 28, 'yoweri': 29, 'amosi': 30, 'obadiya': 31, 'yona': 32, 'mika': 33, 'nakumu': 34, 'abakuku': 35, 'zefaniya': 36, 'kaggayi': 37, 'zekkariya': 38, 'malaki': 39, 'matayo': 40, 'makko': 41, 'lukka': 42, 'yokaana': 43, '1 yokaana': 62, '2 yokaana': 63, '3 yokaana': 64, 'ebikolwa': 44, 'abaruumi': 45, 'abakkolinso': 46, '1 abakkolinso': 46, '2 abakkolinso': 47, 'abaggalatiya': 48, 'abaefeso': 49, 'abafiripi': 50, 'abakkolosaayi': 51, 'abasessalonika': 52, '1 abasessalonika': 52, '2 abasessalonika': 53, 'timosewo': 54, '1 timosewo': 54, '2 timosewo': 55, 'tito': 56, 'firemooni': 57, 'abaebbulaniya': 58, 'yakobo': 59, 'peetero': 60, '1 peetero': 60, '2 peetero': 61, 'yuda': 65, 'okubikkulirwa': 66 };
-const REF_RE = new RegExp('\\b((?:[123]\\s)?(?:' + [...BOOK_NAMES, ...Object.keys(LU_BOOK_MAP)].map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + '))\\s+(\\d+):(\\d+(?:-\\d+)?(?:,\\s*\\d+(?:-\\d+)?)*)', 'gi');
+const REF_RE = new RegExp('\\b((?:[123]\\s)?(?:' + [...BOOK_NAMES, ...Object.keys(LU_BOOK_MAP)].map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + '))\\s+(\\d+):(\\d+(?:[\\-–—]\\d+)?(?:,\\s*\\d+(?:[\\-–—]\\d+)?)*)', 'gi');
 const linkifyRefs = (html: string): string => {
   if (!html) return '';
   return html.split(/(<[^>]+>)/g).map(part => {
@@ -139,7 +139,7 @@ function BookContentHtml({ html, markKey, marksStoreKey, marksTick, onSelect, on
       <div className="flex justify-end mb-1">
         <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); markSection(); }} title="Select this section & mark it — highlight / underline" className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 text-[14px] shrink-0" aria-label="Mark this section">🖍</button>
       </div>
-      <div data-mark-key={markKey} onClick={handleClick} className="leading-relaxed text-sm select-text cursor-text" dangerouslySetInnerHTML={{ __html: finalHtml }} />
+      <div data-mark-key={markKey} onClick={handleClick} className="leading-relaxed select-text cursor-text" style={{ fontSize: 'var(--bible-font-size, 16px)' }} dangerouslySetInnerHTML={{ __html: finalHtml }} />
     </>
   );
 }
@@ -228,7 +228,7 @@ function BookChaptersContent() {
   // verse and flash-highlights it, exactly like the chapter-page refs do.
   const lastVerseRef = useRef<{ bookNumber: number; chapter: number; verse: number } | null>(null);
   const parseVerseRef = (ref: string) => {
-    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z' ]+?)\s+(\d+):(\d+)(?:\s*[-,].*)?$/);
+    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z' ]+?)\s+(\d+):(\d+)(?:\s*[-–,—].*)?$/);
     if (!m) return null;
     const raw = m[1].trim().replace(/\s+/g, ' ');
     const lower = raw.toLowerCase();
@@ -246,11 +246,27 @@ function BookChaptersContent() {
     if (!eng) return ref;
     return `${numPrefix}${eng} ${m[2]}:${m[3]}`;
   };
+  // The shared popup only understands ONE plain verse ("Ephesians 6:17"). Ranges
+  // ("6:17–18") and verse lists ("8:2, 9–13") made it answer "Could not determine
+  // book." — so always hand it the first verse only, in English.
+  const firstVerseRef = (ref: string): string | null => {
+    const eng = translateLuRef(ref);
+    const colon = eng.indexOf(':');
+    if (colon === -1) return null;
+    const head = eng.slice(0, colon).trim();
+    const tail = eng.slice(colon + 1).trim();
+    const verseMatch = tail.match(/^\d+/);
+    if (!verseMatch) return null;
+    const parts = head.split(/\s+/);
+    const ch = parts[parts.length - 1];
+    if (!/^\d+$/.test(ch)) return null;
+    return `${parts.slice(0, -1).join(' ')} ${ch}:${verseMatch[0]}`;
+  };
   const handleVerseClick = (ref: string) => {
     const parsed = parseVerseRef(ref);
     if (parsed) lastVerseRef.current = parsed;
-    // Shared popup resolves English book names — translate Luganda refs ("Yokaana" -> "John").
-    openScriptureVerse(translateLuRef(ref));
+    // Hand the popup ONE plain verse in English — ranges/lists made it say "Could not determine book."
+    openScriptureVerse(firstVerseRef(ref) || translateLuRef(ref));
   };
   useEffect(() => {
     if (!scripturePopup) return;
@@ -337,6 +353,12 @@ function BookChaptersContent() {
     logBookVisit();
   }, [bookNumber]);
 
+  // The APIs do not all use the same field names (en_* vs english_*, lu_* vs luganda_*,
+  // sometimes wrapped in { data } / { introduction } / ...). Normalise so the language
+  // toggle actually finds the Luganda text when the admin filled it in.
+  const unwrap = (d: any) => (d && typeof d === 'object' && !Array.isArray(d) ? (d.data ?? d.introduction ?? d.commentary ?? d.insight ?? d.prayer ?? d.historical_content ?? d.historical ?? d) : d);
+  const pick = (d: any, ...keys: string[]) => { for (const k of keys) { if (d && d[k] != null && d[k] !== '') return d[k]; } return undefined; };
+
   useEffect(() => {
     const fetchBook = async () => {
       try {
@@ -361,12 +383,11 @@ function BookChaptersContent() {
 
           // Fetch all secondary data in parallel (optional, non-blocking)
           Promise.allSettled([
-            fetch(`/api/book-introductions?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookIntroduction(d)),
-            fetch(`/api/outlines?book_id=${bookData.id}&language=english`).then(r => r.json()).then(d => Array.isArray(d) && setBookOutlines(d)),
-            fetch(`/api/book-prayers?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookPrayers(d)),
-            fetch(`/api/book-commentaries?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookCommentary(d)),
-            fetch(`/api/book-theological-insights?book_id=${bookData.id}`).then(r => r.json()).then(d => setBookTheological(d)),
-            fetch(`/api/historical-content?bookId=${bookData.id}`).then(r => r.json()).then(d => setBookHistorical(d)),
+            fetch(`/api/book-introductions?bookId=${bookData.id}`).then(r => r.json()).then(d => { const u = unwrap(d); setBookIntroduction({ en_introduction: pick(u, 'en_introduction', 'english_introduction', 'introduction_en'), lu_introduction: pick(u, 'lu_introduction', 'luganda_introduction', 'introduction_lu') }); }),
+            fetch(`/api/book-prayers?bookId=${bookData.id}`).then(r => r.json()).then(d => { const u = unwrap(d); setBookPrayers({ en_prayer: pick(u, 'en_prayer', 'english_prayer', 'prayer_en'), lu_prayer: pick(u, 'lu_prayer', 'luganda_prayer', 'prayer_lu') }); }),
+            fetch(`/api/book-commentaries?bookId=${bookData.id}`).then(r => r.json()).then(d => { const u = unwrap(d); setBookCommentary({ english_commentary: pick(u, 'english_commentary', 'en_commentary', 'commentary_en'), luganda_commentary: pick(u, 'luganda_commentary', 'lu_commentary', 'commentary_lu') }); }),
+            fetch(`/api/book-theological-insights?book_id=${bookData.id}`).then(r => r.json()).then(d => { const u = unwrap(d); setBookTheological({ english_insight: pick(u, 'english_insight', 'en_insight', 'insight_en'), luganda_insight: pick(u, 'luganda_insight', 'lu_insight', 'insight_lu') }); }),
+            fetch(`/api/historical-content?bookId=${bookData.id}`).then(r => r.json()).then(d => { const u = unwrap(d); setBookHistorical({ historical_background: pick(u, 'historical_background', 'background'), cultural_context: pick(u, 'cultural_context', 'culture'), maps_geography: pick(u, 'maps_geography', 'geography', 'maps'), timeline: pick(u, 'timeline'), archaeological_notes: pick(u, 'archaeological_notes', 'archaeology', 'archaeological') }); }),
           ]).catch(err => console.warn('Secondary data fetch failed:', err));
         }
       } catch (error) {
@@ -401,6 +422,17 @@ function BookChaptersContent() {
     };
     if (bookNumber) fetchBook();
   }, [bookNumber]);
+
+  // Outlines must follow the language toggle (was: always fetched in English).
+  useEffect(() => {
+    if (!book?.id) return;
+    const lang = language === 'luganda' ? 'luganda' : 'english';
+    fetch(`/api/outlines?book_id=${book.id}&language=${lang}`).then(r => r.json()).then(d => {
+      const u = unwrap(d);
+      const arr = Array.isArray(u) ? u : (u.outlines || u.data || []);
+      setBookOutlines(Array.isArray(arr) ? arr : []);
+    }).catch(() => {});
+  }, [book?.id, language]);
 
   // Theme helpers
   const isOT = book?.testament === 'Old Testament';
@@ -549,6 +581,7 @@ ${lu}`;
 
   return (
     <div className={`min-h-screen ${bg()} p-4 md:p-8`} style={{ '--bible-font-size': fontSize === 'small' ? '14px' : fontSize === 'large' ? '18px' : '16px' } as React.CSSProperties}>
+      <style>{`::selection{background:#2563eb !important;color:#ffffff !important} ::-moz-selection{background:#2563eb !important;color:#ffffff !important} [data-mark-key]{-webkit-user-select:text;user-select:text} [data-mark-key]::selection{background:#2563eb !important;color:#ffffff !important}`}</style>
       <div className="max-w-7xl mx-auto">
 
         {/* ── Header ── */}
