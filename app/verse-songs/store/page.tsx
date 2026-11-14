@@ -1,9 +1,11 @@
-// app/verse-songs/store/page.tsx — NEW: Verse Songs Album Store
-// The shopfront. Songs stream free everywhere else; THIS page is where
-// downloads are bought. Each album's Buy button goes to the Pesapal store
-// (the checkout). Nothing on this page offers a free file download.
+// app/verse-songs/store/page.tsx — Album Store V2 (same data-layer fix as Library V3)
+// V1 had the same trap as Library V2: its series fetch fell back to the base
+// /api/verse-songs endpoint, which returns SONGS — so albums would have
+// been built from songs. V2: series ONLY from /api/verse-songs/series,
+// song-shaped rows filtered out, songs tried at /api/verse-songs/songs
+// AND the base endpoint.
 // ── EDIT YOUR PRICES HERE ────────────────────────────────────────────
-// These are placeholder prices — change them to your real prices.
+// Placeholder prices — change them to your real prices.
 // CURRENCY is the label shown next to prices (UGX = Ugandan Shillings).
 // ALBUM_PRICES maps a series/album id to its price. Albums not listed
 // here use DEFAULT_ALBUM_PRICE. FULL_BOOK_PRICE is the bundle price
@@ -52,6 +54,10 @@ function asArray(d: any): any[] {
   return [];
 }
 
+// A row is a SONG if it carries an audio file. Series never do.
+const isSongRow = (r: any) => !!(r && (r.mp3_url || r.audio_url || r.audioUrl));
+const isSeriesRow = (r: any) => !!r && !isSongRow(r);
+
 interface Album {
   id: number;
   title: string;
@@ -71,40 +77,44 @@ function StoreContent() {
   useEffect(() => {
     (async () => {
       try {
-        // Series first.
+        // Series ONLY from the series endpoint — the base endpoint
+        // returns songs, and treating them as series was the V1 bug.
         let seriesList: any[] = [];
-        for (const url of ['/api/verse-songs/series', '/api/verse-songs']) {
+        try {
+          const res = await fetch('/api/verse-songs/series');
+          if (res.ok) seriesList = asArray(await res.json()).filter(isSeriesRow);
+        } catch { /* fall through */ }
+
+        // Songs: try the songs endpoint, then the base endpoint.
+        let allSongs: any[] = [];
+        for (const url of ['/api/verse-songs/songs', '/api/verse-songs']) {
           try {
             const res = await fetch(url);
             if (!res.ok) continue;
-            const rows = asArray(await res.json());
-            if (rows.length) { seriesList = rows; break; }
+            const rows = asArray(await res.json()).filter(isSongRow);
+            if (rows.length) { allSongs = rows; break; }
           } catch { /* try next */ }
         }
-        // All songs once, to count + total each album's duration.
-        let allSongs: any[] = [];
-        try {
-          const res = await fetch('/api/verse-songs/songs');
-          if (res.ok) allSongs = asArray(await res.json());
-        } catch { /* counts fall back to 0 */ }
-        // Per-series fallback if the songs endpoint gave nothing.
+        // Per-series fallback if the songs endpoints gave nothing.
         if (!allSongs.length && seriesList.length) {
           const perSeries = await Promise.all(seriesList.map(async (sr) => {
-            for (const url of [`/api/verse-songs/series/${sr.id}`, `/api/verse-songs/songs?seriesId=${sr.id}`]) {
+            for (const url of [`/api/verse-songs/series/${sr.id}`, `/api/verse-songs/songs?seriesId=${sr.id}`, `/api/verse-songs/songs?series_id=${sr.id}`]) {
               try {
                 const res = await fetch(url);
                 if (!res.ok) continue;
-                const rows = asArray(await res.json());
-                if (rows.length) return rows.map((sg: any) => ({ ...sg, series_id: sg.series_id ?? sr.id }));
+                const rows = asArray(await res.json()).filter(isSongRow);
+                if (rows.length) return rows.map((sg: any) => ({ ...sg, series_id: sg.series_id ?? sg.seriesId ?? sr.id }));
               } catch { /* try next */ }
             }
             return [];
           }));
           allSongs = perSeries.flat();
         }
+
         setAlbums(seriesList.map((sr: any) => {
           const id = Number(sr.id);
-          const mine = allSongs.filter((sg: any) => Number(sg.series_id ?? sg.seriesId) === id);
+          const nested = (sg: any) => (sg.series && typeof sg.series === 'object' ? sg.series : {});
+          const mine = allSongs.filter((sg: any) => Number(sg.series_id ?? sg.seriesId ?? nested(sg).id) === id);
           return {
             id,
             title: sr.title || 'Untitled',
