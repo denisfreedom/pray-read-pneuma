@@ -2,6 +2,19 @@
 // Save called POST again -> UNIQUE violation -> 500 "Failed to save".
 // POST is now an UPSERT: INSERT ... ON CONFLICT DO UPDATE. Save works for new AND existing.
 // PUT kept for the admin panel's explicit edit path.
+//
+// V2 FIX (param tolerance): the old GET only understood `bookId`. The chapter
+// page and some callers send `book_number` instead — GET then saw no bookId
+// and returned [] / null, so nothing displayed. This version accepts
+// bookId / book_id / book_number / book, and resolves book_number -> book_id
+// through bible_books. Same table, same columns, same upsert, same return
+// shapes the Admin panel expects (single-verse GET -> object or null,
+// chapter GET -> array). Nothing else changed.
+//
+// CORRECT PATH: app/api/verse-commentaries/route.ts
+// Do NOT paste this into app/api/commentaries/route.ts — that path belongs
+// to the verse DISPLAY route (route-commentaries-BOOK-FILTER-V2.ts), which
+// is what the chapter page calls. Swapping them blanks the front page.
 import { NextRequest, NextResponse } from 'next/server';
 import sql from '@/app/api/utils/sql';
 
@@ -9,18 +22,40 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 const headers = { 'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0', 'Pragma': 'no-cache', 'Expires': '0' };
 
+// Resolve whatever book identifier a caller sent into the book_id stored in
+// verse_commentaries. Accepts: a bible_books id, a book_number (1-66), or a
+// book name. Falls back to the raw number when bible_books has no match.
+async function resolveBookId(raw: any): Promise<number | null> {
+  if (raw === undefined || raw === null || raw === '') return null;
+  const n = parseInt(String(raw), 10);
+  if (!Number.isNaN(n) && n > 0) {
+    try {
+      const b: any[] = await sql`SELECT id FROM bible_books WHERE book_number = ${n} LIMIT 1`;
+      if (b[0]?.id) return Number(b[0].id);
+    } catch { /* bible_books missing — use the number as-is */ }
+    return n;
+  }
+  try {
+    const b: any[] = await sql`SELECT id FROM bible_books WHERE LOWER(name_english) = ${String(raw).toLowerCase()} OR LOWER(name) = ${String(raw).toLowerCase()} LIMIT 1`;
+    if (b[0]?.id) return Number(b[0].id);
+  } catch {}
+  return null;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
-    const bookId = searchParams.get('bookId');
+    // Accept every param name callers have used: bookId / book_id / book_number / book
+    const bookRaw = searchParams.get('bookId') ?? searchParams.get('book_id') ?? searchParams.get('book_number') ?? searchParams.get('book');
     const chapter = searchParams.get('chapter');
-    const verse = searchParams.get('verseNumber') || searchParams.get('verse');
+    const verse = searchParams.get('verseNumber') || searchParams.get('verse_number') || searchParams.get('verse');
+    const bookId = await resolveBookId(bookRaw);
     if (bookId && chapter && verse) {
-      const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${parseInt(bookId)} AND chapter = ${parseInt(chapter)} AND verse_number = ${parseInt(verse)} LIMIT 1`;
+      const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} AND verse_number = ${parseInt(verse)} LIMIT 1`;
       return NextResponse.json(rows.length > 0 ? rows[0] : null, { headers });
     }
     if (bookId && chapter) {
-      const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${parseInt(bookId)} AND chapter = ${parseInt(chapter)} ORDER BY verse_number ASC`;
+      const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} ORDER BY verse_number ASC`;
       return NextResponse.json(rows, { headers });
     }
     return NextResponse.json([], { headers });
@@ -34,11 +69,13 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     // Accept both shapes: admin panel (commentary_text) and bulk/other (commentaryText / english_commentary)
-    const book_id = body.book_id ?? body.bookId;
+    // Accept every book key: book_id / bookId / book_number / book
+    const bookRaw = body.book_id ?? body.bookId ?? body.book_number ?? body.book;
     const chapter = body.chapter;
     const verse_number = body.verse_number ?? body.verseNumber ?? body.verse;
     const commentary_text = body.commentary_text ?? body.commentaryText ?? body.english_commentary ?? body.commentary ?? null;
     const luganda_commentary_text = body.luganda_commentary_text ?? body.lugandaCommentaryText ?? body.luganda_commentary ?? null;
+    const book_id = await resolveBookId(bookRaw);
     if (!book_id || chapter === undefined || chapter === null || chapter === '' || verse_number === undefined || verse_number === null || verse_number === '') {
       return NextResponse.json({ error: 'book_id, chapter and verse_number required' }, { status: 400, headers });
     }
@@ -46,7 +83,7 @@ export async function POST(request: NextRequest) {
     await sql`CREATE UNIQUE INDEX IF NOT EXISTS verse_commentaries_book_chapter_verse_unique ON verse_commentaries (book_id, chapter, verse_number)`;
     const result = await sql`
       INSERT INTO verse_commentaries (book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at)
-      VALUES (${parseInt(book_id)}, ${parseInt(chapter)}, ${parseInt(verse_number)}, ${commentary_text}, ${luganda_commentary_text}, NOW(), NOW())
+      VALUES (${book_id}, ${parseInt(chapter)}, ${parseInt(verse_number)}, ${commentary_text}, ${luganda_commentary_text}, NOW(), NOW())
       ON CONFLICT (book_id, chapter, verse_number) DO UPDATE SET commentary_text = EXCLUDED.commentary_text, luganda_commentary_text = EXCLUDED.luganda_commentary_text, updated_at = NOW()
       RETURNING id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at
     `;
