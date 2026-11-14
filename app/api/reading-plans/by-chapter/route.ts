@@ -2,14 +2,35 @@ import { NextRequest, NextResponse } from 'next/server';
 import sql from '@/app/api/utils/sql';
 import { BUILTIN_PLANS, getPlanDays } from '../lib';
 
-// GET /api/reading-plans/by-chapter?book=45&chapter=1&userEmail=...
+// GET /api/reading-plans/by-chapter?book=1&chapter=5&userEmail=...
 // Answers the Bible reader's question: "which reading plans contain this
 // chapter, which day is it in each, and has the user done that day?"
-// Built-in plans are mapped from real chapter counts (lib.ts). DB plans are
-// mapped from plan_days rows when that table exists.
+// ALSO answers the follow-up the reader needs: "where does this chapter sit
+// inside that day's reading?" — so the reader can show a green plan indicator
+// on every chapter of the day, but only offer "Mark complete" on the LAST
+// chapter of the day (e.g. Day 3 = Genesis 5–6 → the button appears at the
+// end of Genesis 6, not Genesis 5).
 // Returns: { success, matches: [{ plan_id, plan_title, day_number, day_label,
-//   total_days, completed_days, completed, day_done, current_day, pct }] }
+//   total_days, completed_days, completed, day_done, current_day, pct,
+//   day_readings: [{book_number, chapter}], day_chapter_index,
+//   day_chapter_count, is_last_chapter_of_day,
+//   next_chapter: {book_number, chapter} | null }] }
 export const dynamic = 'force-dynamic';
+
+type Reading = { book_number: number; chapter: number };
+
+function dayPosition(readings: Reading[], book: number, chapter: number) {
+  const idx = readings.findIndex((r) => r.book_number === book && r.chapter === chapter);
+  const index = idx === -1 ? 1 : idx + 1;
+  const count = Math.max(readings.length, 1);
+  return {
+    day_readings: readings,
+    day_chapter_index: index,
+    day_chapter_count: count,
+    is_last_chapter_of_day: idx !== -1 && idx === readings.length - 1,
+    next_chapter: idx !== -1 && idx < readings.length - 1 ? readings[idx + 1] : null,
+  };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -30,13 +51,12 @@ export async function GET(request: NextRequest) {
       if (!day) continue;
       let completedDays = 0;
       let dayDone = false;
-      let doneSet = new Set<number>();
       if (userEmail) {
         try {
           const rows: any[] = await sql`
             SELECT day_number FROM user_reading_progress
             WHERE LOWER(TRIM(user_email)) = ${userEmail} AND plan_id = ${plan.id} AND completed = true`;
-          doneSet = new Set(rows.map((r: any) => Number(r.day_number)));
+          const doneSet = new Set(rows.map((r: any) => Number(r.day_number)));
           completedDays = doneSet.size;
           dayDone = doneSet.has(day.day_number);
         } catch { /* progress table missing — treat as not started */ }
@@ -50,6 +70,7 @@ export async function GET(request: NextRequest) {
         completed, day_done: dayDone,
         current_day: completed ? totalDays : Math.min(completedDays + 1, Math.max(totalDays, 1)),
         pct: totalDays > 0 ? Math.round((completedDays / totalDays) * 100) : 0,
+        ...dayPosition(day.readings as Reading[], book, chapter),
       });
     }
 
@@ -73,6 +94,20 @@ export async function GET(request: NextRequest) {
             totalDays = Number(pr[0].duration_days ?? pr[0].duration ?? pr[0].total_days ?? pr[0].day_count ?? 0) || 0;
           }
         } catch { /* reading_plans table missing */ }
+        // Whole day's readings, in order, so we know if this is the last chapter.
+        let dayReadings: Reading[] = [{ book_number: book, chapter }];
+        try {
+          const all: any[] = await sql`
+            SELECT book_number, book_id, chapter, chapter_number FROM plan_days
+            WHERE plan_id = ${planId} AND day_number = ${Number(dr.day_number)}
+            ORDER BY id ASC`;
+          if (all.length) {
+            dayReadings = all.map((r: any) => ({
+              book_number: Number(r.book_number ?? r.book_id),
+              chapter: Number(r.chapter ?? r.chapter_number),
+            }));
+          }
+        } catch { /* fall back to this chapter alone */ }
         let completedDays = 0;
         let dayDone = false;
         if (userEmail) {
@@ -92,11 +127,12 @@ export async function GET(request: NextRequest) {
           completed, day_done: dayDone,
           current_day: completed ? totalDays : Math.min(completedDays + 1, Math.max(totalDays, 1)),
           pct: totalDays > 0 ? Math.round((completedDays / totalDays) * 100) : 0,
+          ...dayPosition(dayReadings, book, chapter),
         });
       }
     } catch { /* no plan_days table — built-ins already covered the common case */ }
 
-    // Most specific plan first (fewest days) — the reader auto-marks that one.
+    // Most specific plan first (fewest days) — the reader treats that one as primary.
     matches.sort((a, b) => (a.total_days || 9999) - (b.total_days || 9999));
     return NextResponse.json({ success: true, matches });
   } catch (error: any) {
