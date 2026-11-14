@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo, Suspense } from 'react';
+import { useState, useEffect, useMemo, Suspense } from 'react';
 import { ChevronLeft, Menu, X, BookOpen, ScrollText, Heart, MessageSquare, Lightbulb, History } from 'lucide-react';
 import TheologicalInsightsModal from '@/app/components/TheologicalInsightsModal';
-import { useScripturePopup, ScriptureVersePopup } from '@/components/ScriptureVersePopup';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 
@@ -31,7 +30,7 @@ type BottomTab = 'commentary' | 'theological' | 'historical';
 // Marks live in localStorage under `prayread-marks-book-{bookId}` — one store for the
 // whole book page, same Mark bar, same colours as the chapter page. Nothing is sent
 // to the server, and no separate highlight store is used on this page anymore.
-type Mark = { id: string; text: string; style: 'highlight' | 'underline'; color: string };
+type Mark = { id: string; text: string; style: 'highlight' | 'underline' | 'selection'; color: string; atOffset?: number };
 
 const BOOK_NAMES = ['Genesis','Exodus','Leviticus','Numbers','Deuteronomy','Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings','1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther','Job','Psalms','Psalm','Proverbs','Ecclesiastes','Song of Solomon','Song of Songs','Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel','Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi','Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
 // Lowercase Luganda name -> English name (keys lowercase because the regex is /i).
@@ -70,12 +69,29 @@ const findLoose = (hay: string, needle: string): { index: number; length: number
   const endHay = hm[ci + ncs.length - 1];
   return { index: start, length: endHay - start + 1 };
 };
+// Find the occurrence of NEEDLE nearest to TARGET offset — for marks that remember
+// exactly where they were selected. Falls back to the closest one if text shifted.
+const findOccurrenceNear = (hay: string, needle: string, target: number): { index: number; length: number } | null => {
+  let from = 0;
+  let best: { index: number; length: number } | null = null;
+  let bestDist = Infinity;
+  while (from <= hay.length) {
+    const r = findLoose(hay.slice(from), needle);
+    if (!r) break;
+    const abs = from + r.index;
+    const d = Math.abs(abs - target);
+    if (d < bestDist) { bestDist = d; best = { index: abs, length: r.length }; }
+    if (abs >= target) break;
+    from = abs + 1;
+  }
+  return best;
+};
 // Tag-aware mark painting (same as chapter page): wraps overlapping slices of each
 // text run, never breaks tags, never breaks a clickable verse ref.
 const applyMarksToHtml = (html: string, marksList: Mark[]): string => {
   if (!html || !marksList.length) return html;
   const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  const decodeEnt = (s: string) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
+  const decodeEnt = (s: string) => s.replace(/&nbsp;/g, String.fromCharCode(160)).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
   let out = html;
   [...marksList].sort((a, b) => b.text.length - a.text.length).forEach(m => {
     if (!m.text) return;
@@ -88,10 +104,10 @@ const applyMarksToHtml = (html: string, marksList: Mark[]): string => {
       ranges.push({ start: plain.length, end: plain.length + dec.length, dec });
       plain += dec;
     });
-    const found = findLoose(plain, m.text);
+    const found = m.atOffset != null ? findOccurrenceNear(plain, m.text, m.atOffset) : findLoose(plain, m.text);
     if (!found) return;
     const start = found.index, end = found.index + found.length;
-    const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
+    const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : m.style === 'selection' ? 'bg-blue-300 text-slate-900 px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
     out = tokens.map((tok, ti) => {
       if (tok.startsWith('<')) return tok;
       const r = ranges[ti];
@@ -106,14 +122,22 @@ const applyMarksToHtml = (html: string, marksList: Mark[]): string => {
 
 // Renders one book-page section (intro / commentary / theological / historical / outline):
 // verse refs become clickable pills, saved marks paint from the chapter-page system.
-function BookContentHtml({ html, markKey, marksStoreKey, marksTick, onSelect, onVerseClick }: {
+function BookContentHtml({ html, markKey, marksStoreKey, marksTick, onSelect, onVerseClick, selectionMark }: {
   html: string; markKey: string; marksStoreKey: string; marksTick: number;
   onSelect: (key: string) => void; onVerseClick: (ref: string) => void;
+  selectionMark: { key: string; text: string; offset: number } | null;
 }) {
   const marks = useMemo(() => {
-    try { const all = JSON.parse(localStorage.getItem(marksStoreKey) || '{}') as Record<string, Mark[]>; return all[markKey] || []; }
-    catch { return []; }
-  }, [marksStoreKey, markKey, marksTick]);
+    let base: Mark[] = [];
+    try { const all = JSON.parse(localStorage.getItem(marksStoreKey) || '{}') as Record<string, Mark[]>; base = all[markKey] || []; }
+    catch { base = []; }
+    // Temporary blue mark: shows the CURRENT selection exactly where it is, so you
+    // see what will be highlighted before you tap a Mark button.
+    if (selectionMark && selectionMark.key === markKey && selectionMark.text.trim()) {
+      return [...base, { id: '__selection__', text: selectionMark.text, style: 'selection' as const, color: '', atOffset: selectionMark.offset }];
+    }
+    return base;
+  }, [marksStoreKey, markKey, marksTick, selectionMark]);
   const finalHtml = useMemo(() => applyMarksToHtml(linkifyRefs(html), marks), [html, marks]);
   const handleClick = (e: React.MouseEvent) => {
     try { if (window.getSelection()?.toString().trim()) return; } catch {}
@@ -137,7 +161,7 @@ function BookContentHtml({ html, markKey, marksStoreKey, marksTick, onSelect, on
   return (
     <>
       <div className="flex justify-end mb-1">
-        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); markSection(); }} title="Select this section & mark it — highlight / underline" className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 text-[14px] shrink-0" aria-label="Mark this section">🖍</button>
+        <button data-mark-btn onClick={(e) => { e.preventDefault(); e.stopPropagation(); markSection(); }} title="Select this section & mark it — highlight / underline" className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 text-[14px] shrink-0" aria-label="Mark this section">🖍</button>
       </div>
       <div data-mark-key={markKey} onClick={handleClick} className="leading-relaxed select-text cursor-text" style={{ fontSize: 'var(--bible-font-size, 16px)' }} dangerouslySetInnerHTML={{ __html: finalHtml }} />
     </>
@@ -166,22 +190,52 @@ function BookChaptersContent() {
   const [activeBottomTab, setActiveBottomTab] = useState<BottomTab>('commentary');
   const [showBottomSection, setShowBottomSection] = useState(false);
   const [bookTheologicalModalOpen, setBookTheologicalModalOpen] = useState(false);
-  const { popup: scripturePopup, openVerse: openScriptureVerse, closePopup: closeScripturePopup } = useScripturePopup();
 
   // ── Marks (chapter-page system) ────────────────────────────────────────────
   const marksStoreKey = `prayread-marks-book-${book?.id ?? bookNumber}`;
-  const [pendingMark, setPendingMark] = useState<{ key: string; text: string } | null>(null);
+  const [pendingMark, setPendingMark] = useState<{ key: string; text: string; offset: number } | null>(null);
   const [marksTick, setMarksTick] = useState(0);
   const readMarksAll = (): Record<string, Mark[]> => {
     try { return JSON.parse(localStorage.getItem(marksStoreKey) || '{}'); } catch { return {}; }
   };
-  const onSelectMark = (key: string) => {
+  // Character offset of the selection START inside its section — this is what pins a
+  // mark to the exact occurrence you touched. Text search alone finds the FIRST
+  // matching phrase in the section, which on a phone often meant a different
+  // paragraph than the one you selected.
+  const selOffsetIn = (root: HTMLElement, startNode: Node, startOffset: number): number => {
+    let total = 0;
+    const walk = (n: Node): boolean => {
+      if (n === startNode) {
+        if (n.nodeType === 3) total += startOffset;
+        else { for (let i = 0; i < startOffset && i < n.childNodes.length; i++) total += (n.childNodes[i].textContent || '').length; }
+        return true;
+      }
+      if (n.nodeType === 3) { total += (n as Text).length; return false; }
+      for (const c of Array.from(n.childNodes)) { if (walk(c)) return true; }
+      return false;
+    };
+    walk(root);
+    return total;
+  };
+  const captureSelection = (): { key: string; text: string; offset: number } | null => {
+    try {
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return null;
+      const txt = sel.toString() || '';
+      if (!txt.trim() || txt.trim().length < 2) return null;
+      const range = sel.getRangeAt(0);
+      const node: any = range.startContainer;
+      const el: any = node ? (node.nodeType === 3 ? node.parentElement : node) : null;
+      const holder = el?.closest?.('[data-mark-key]') as HTMLElement | null;
+      if (!holder) return null;
+      return { key: holder.dataset.markKey as string, text: txt, offset: selOffsetIn(holder, range.startContainer, range.startOffset) };
+    } catch { return null; }
+  };
+  const onSelectMark = (_key: string) => {
     setTimeout(() => {
-      try {
-        const sel = window.getSelection(); const txt = sel?.toString() || '';
-        if (!txt.trim() || txt.trim().length < 2) { setPendingMark(null); return; }
-        setPendingMark({ key, text: txt });
-      } catch { setPendingMark(null); }
+      const c = captureSelection();
+      if (c) setPendingMark(c);
+      else setPendingMark(null);
     }, 10);
   };
   const applyMark = (style: 'highlight' | 'underline', color: string) => {
@@ -189,7 +243,7 @@ function BookChaptersContent() {
     const all = readMarksAll();
     const existing = all[pendingMark.key] || [];
     if (existing.some(m => m.text === pendingMark.text && m.style === style && m.color === color)) { setPendingMark(null); return; }
-    const next = { ...all, [pendingMark.key]: [...existing, { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: pendingMark.text, style, color }] };
+    const next = { ...all, [pendingMark.key]: [...existing, { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: pendingMark.text, style, color, atOffset: pendingMark.offset }] };
     try { localStorage.setItem(marksStoreKey, JSON.stringify(next)); } catch {}
     setMarksTick(t => t + 1);
     setPendingMark(null);
@@ -204,96 +258,92 @@ function BookChaptersContent() {
   useEffect(() => {
     const onUp = () => {
       setTimeout(() => {
-        try {
-          const sel = window.getSelection(); const txt = sel?.toString() || '';
-          if (!txt.trim() || txt.trim().length < 2) return;
-          const node: any = sel?.anchorNode;
-          const el: any = node ? (node.nodeType === 3 ? node.parentElement : node) : null;
-          const holder = el?.closest?.('[data-mark-key]') as HTMLElement | null;
-          if (!holder) return;
-          setPendingMark({ key: holder.dataset.markKey as string, text: txt });
-        } catch {}
+        const c = captureSelection();
+        if (c) setPendingMark(c);
       }, 90);
     };
     document.addEventListener('mouseup', onUp);
     document.addEventListener('touchend', onUp);
     return () => { document.removeEventListener('mouseup', onUp); document.removeEventListener('touchend', onUp); };
   }, []);
-
-  // ── FIX: verse refs must jump to the EXACT verse, not just the chapter ─────
-  // The shared popup's "Open in Bible Reader" button only carries the chapter, and
-  // this page cannot change the popup's own code — so when the popup is open, a
-  // capture-phase click listener appends #verse-N to that button's link (or, if it
-  // is a plain button, navigates directly). The chapter page then scrolls to the
-  // verse and flash-highlights it, exactly like the chapter-page refs do.
-  const lastVerseRef = useRef<{ bookNumber: number; chapter: number; verse: number } | null>(null);
-  const parseVerseRef = (ref: string) => {
-    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z' ]+?)\s+(\d+):(\d+)(?:\s*[-–,—].*)?$/);
-    if (!m) return null;
-    const raw = m[1].trim().replace(/\s+/g, ' ');
-    const lower = raw.toLowerCase();
-    const num = BOOK_NUMBERS[lower] ?? LU_BOOK_NUMBERS[lower];
-    if (!num) return null;
-    return { bookNumber: num, chapter: parseInt(m[2]), verse: parseInt(m[3]) };
-  };
-  const translateLuRef = (ref: string) => {
-    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z' ]+?)\s+(\d+):(.+)$/);
-    if (!m) return ref;
-    const raw = m[1].trim().replace(/\s+/g, ' ');
-    const numPrefix = raw.match(/^[123]\s+/)?.[0] || '';
-    const base = raw.replace(/^[123]\s+/, '').toLowerCase();
-    const eng = LU_BOOK_MAP[base];
-    if (!eng) return ref;
-    return `${numPrefix}${eng} ${m[2]}:${m[3]}`;
-  };
-  // The shared popup only understands ONE plain verse ("Ephesians 6:17"). Ranges
-  // ("6:17–18") and verse lists ("8:2, 9–13") made it answer "Could not determine
-  // book." — so always hand it the first verse only, in English.
-  const firstVerseRef = (ref: string): string | null => {
-    const eng = translateLuRef(ref);
-    const colon = eng.indexOf(':');
-    if (colon === -1) return null;
-    const head = eng.slice(0, colon).trim();
-    const tail = eng.slice(colon + 1).trim();
-    const verseMatch = tail.match(/^\d+/);
-    if (!verseMatch) return null;
-    const parts = head.split(/\s+/);
-    const ch = parts[parts.length - 1];
-    if (!/^\d+$/.test(ch)) return null;
-    return `${parts.slice(0, -1).join(' ')} ${ch}:${verseMatch[0]}`;
-  };
-  const handleVerseClick = (ref: string) => {
-    const parsed = parseVerseRef(ref);
-    if (parsed) lastVerseRef.current = parsed;
-    // Hand the popup ONE plain verse in English — ranges/lists made it say "Could not determine book."
-    openScriptureVerse(firstVerseRef(ref) || translateLuRef(ref));
-  };
+  // Tapping anywhere outside the text / Mark bar clears the temporary blue selection.
   useEffect(() => {
-    if (!scripturePopup) return;
-    const onClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const anchor = target.closest?.('a[href*="/bible-reader/"]') as HTMLAnchorElement | null;
-      if (anchor) {
-        const href = anchor.getAttribute('href') || '';
-        const m = href.match(/\/bible-reader\/\d+\/\d+/);
-        if (m && !href.includes('#verse-') && lastVerseRef.current) {
-          e.preventDefault(); e.stopPropagation();
-          closeScripturePopup();
-          router.push(`${m[0]}#verse-${lastVerseRef.current.verse}`);
-        }
-        return;
-      }
-      const btn = target.closest?.('button') as HTMLButtonElement | null;
-      if (btn && /bible reader|go to|open/i.test(btn.textContent || '') && lastVerseRef.current) {
-        e.preventDefault(); e.stopPropagation();
-        const v = lastVerseRef.current;
-        closeScripturePopup();
-        router.push(`/bible-reader/${v.bookNumber}/${v.chapter}#verse-${v.verse}`);
-      }
+    const onDown = (e: MouseEvent) => {
+      const tgt = e.target as HTMLElement;
+      if (tgt.closest?.('[data-mark-key]') || tgt.closest?.('[data-mark-bar]') || tgt.closest?.('[data-mark-btn]')) return;
+      setPendingMark(null);
     };
-    document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, [scripturePopup]);
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  // ── Verse popup (LOCAL — the shared popup could not parse refs) ────────────
+  // The shared popup kept answering "Could not determine book." even for plain refs,
+  // so this page now fetches the verse text itself with the same /api/bible-verses
+  // fallback chain the chapter page uses, and shows it in its own popup.
+  // "Open in Bible Reader" goes straight to the exact verse.
+  const [versePopup, setVersePopup] = useState<null | { ref: string; bookName: string; bookNum: number; chapter: number; verses: number[]; loading: boolean; text: string; error?: string }>(null);
+  const parseVerseRefFull = (ref: string) => {
+    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z' ]+?)\s+(\d+):(.+)$/);
+    if (!m) return null;
+    const rawName = m[1].trim().replace(/\s+/g, ' ');
+    const lower = rawName.toLowerCase();
+    const numPrefix = rawName.match(/^[123]\s+/)?.[0] || '';
+    const base = rawName.replace(/^[123]\s+/, '').toLowerCase();
+    const engName = LU_BOOK_MAP[base] ? (numPrefix + LU_BOOK_MAP[base]) : rawName;
+    const bookNumber = BOOK_NUMBERS[engName.toLowerCase()] ?? LU_BOOK_NUMBERS[lower];
+    if (!bookNumber) return null;
+    const verses: number[] = [];
+    m[3].split(',').forEach(seg => {
+      const mm = seg.trim().match(/^(\d+)(?:\s*[-–—]\s*(\d+))?$/);
+      if (!mm) return;
+      const a = parseInt(mm[1]); const b = mm[2] ? parseInt(mm[2]) : a;
+      for (let v = a; v <= b; v++) verses.push(v);
+    });
+    if (!verses.length) return null;
+    const isLuganda = !!(LU_BOOK_MAP[base] || LU_BOOK_NUMBERS[lower]);
+    return { bookNumber, displayName: rawName, isLuganda, chapter: parseInt(m[2]), verses };
+  };
+  const handleVerseClick = async (ref: string) => {
+    const parsed = parseVerseRefFull(ref);
+    if (!parsed) return;
+    setVersePopup({ ref, bookName: parsed.displayName, bookNum: parsed.bookNumber, chapter: parsed.chapter, verses: parsed.verses, loading: true, text: '' });
+    try {
+      let rows: any[] = [];
+      const targetBookId = parsed.bookNumber === bookNumber ? (book?.id ?? parsed.bookNumber) : parsed.bookNumber;
+      const urls = [
+        `/api/bible-verses?book_number=${parsed.bookNumber}&chapter=${parsed.chapter}`,
+        `/api/bible-verses?bookId=${targetBookId}&chapter=${parsed.chapter}`,
+        `/api/bible-verses?book=${parsed.bookNumber}&chapter=${parsed.chapter}`,
+        `/api/bible-verses?id=${targetBookId}&chapter=${parsed.chapter}`,
+        `/api/bible-verses?book_id=${targetBookId}&chapter=${parsed.chapter}`,
+      ];
+      for (const url of urls) {
+        try {
+          const r = await fetch(url);
+          const d = await r.json().catch(() => null);
+          const arr = Array.isArray(d) ? d : (d?.verses || d?.data || d?.rows || []);
+          if (Array.isArray(arr) && arr.length) { rows = arr; break; }
+        } catch {}
+      }
+      const showLu = parsed.isLuganda || language === 'luganda';
+      const showBoth = language === 'both' && !parsed.isLuganda;
+      const getEn = (v: any) => v.text_english || v.english || v.text_en || v.text || v.verse_text || '';
+      const getLu = (v: any) => v.text_luganda || v.luganda || v.text_lu || v.text_english || v.english || v.text_en || v.text || v.verse_text || '';
+      const norm = rows.map((v: any) => ({ verse: v.verse ?? v.verse_number ?? v.number, en: getEn(v), lu: getLu(v) }));
+      const picked = norm.filter((v: any) => parsed.verses.includes(Number(v.verse))).sort((a: any, b2: any) => a.verse - b2.verse);
+      let text = '';
+      if (picked.length) {
+        text = picked.map((v: any) => {
+          const t = showBoth ? `${v.en}\n\n---\n\n${v.lu}` : (showLu ? v.lu : v.en);
+          return `${v.verse}. ${t}`;
+        }).join('\n\n');
+      }
+      setVersePopup(prev => (prev && prev.ref === ref) ? { ...prev, loading: false, text, error: text ? undefined : 'Verse text not found.' } : prev);
+    } catch {
+      setVersePopup(prev => (prev && prev.ref === ref) ? { ...prev, loading: false, error: 'Could not load this verse. Please try again.' } : prev);
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -489,6 +539,7 @@ ${lu}`;
         marksTick={marksTick}
         onSelect={onSelectMark}
         onVerseClick={handleVerseClick}
+        selectionMark={pendingMark}
       />
     );
   };
@@ -541,6 +592,7 @@ ${lu}`;
                     marksTick={marksTick}
                     onSelect={onSelectMark}
                     onVerseClick={handleVerseClick}
+                    selectionMark={pendingMark}
                   />
                 </div>
               );
@@ -851,7 +903,7 @@ ${lu}`;
 
         {/* Mark bar — same as chapter page: appears when you select text */}
         {pendingMark && (
-          <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
+          <div data-mark-bar className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
             <span className="hidden sm:inline text-[11px] text-slate-300 pl-1 pr-1 whitespace-nowrap">Mark:</span>
             <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
             <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
@@ -864,8 +916,29 @@ ${lu}`;
           </div>
         )}
 
-        {/* Scripture Verse Popup */}
-        <ScriptureVersePopup popup={scripturePopup} onClose={closeScripturePopup} />
+        {/* Verse Popup — local: fetches the verse text itself, so it always shows */}
+        {versePopup && (
+          <div className="fixed inset-0 z-[80] bg-black/50 flex items-center justify-center p-4" onClick={() => setVersePopup(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-4 flex items-center justify-between">
+                <div>
+                  <p className="text-white font-bold text-lg">{versePopup.ref}</p>
+                  <p className="text-indigo-200 text-sm">{versePopup.bookName} {versePopup.chapter}:{versePopup.verses.join(', ')}</p>
+                </div>
+                <button onClick={() => setVersePopup(null)} className="text-white/80 hover:text-white text-2xl leading-none px-1" aria-label="Close">×</button>
+              </div>
+              <div className="p-5">
+                {versePopup.loading ? <p className="text-sm text-slate-500">Loading verse…</p>
+                  : versePopup.error ? <p className="text-sm text-red-600">{versePopup.error}</p>
+                  : <p className="leading-relaxed whitespace-pre-wrap text-slate-800">{versePopup.text}</p>}
+                {!versePopup.loading && versePopup.bookNum > 0 && (
+                  <button onClick={() => { setVersePopup(null); router.push(`/bible-reader/${versePopup.bookNum}/${versePopup.chapter}#verse-${versePopup.verses[0]}`); }} className="w-full mt-4 py-3 rounded-xl bg-blue-600 text-white font-semibold">Open in Bible Reader →</button>
+                )}
+                <button onClick={() => setVersePopup(null)} className="w-full mt-2 py-2.5 rounded-xl bg-slate-100 text-slate-700 font-semibold">Close</button>
+              </div>
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
