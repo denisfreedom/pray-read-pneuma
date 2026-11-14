@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense, memo, useRef } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import VerseShare from '@/components/VerseShare';
+import { ReadingPlanChapterIndicator, ReadingPlanChapterFooter } from '@/app/components/ReadingPlanChapterTracker';
 
 // RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
 // Only the data wiring is fixed. No redesign.
@@ -613,6 +614,8 @@ function ChapterContent() {
           {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
           <hr className="border-blue-200 my-4" />
 
+          <ReadingPlanChapterIndicator bookNumber={bookNum} chapter={chapterNum} />
+
           {verses.length === 0 ? (
             <div className={`${themeClasses.card} rounded-xl p-8 text-center shadow-sm`}>
               <p className="font-bold">Verses could not be loaded.</p>
@@ -700,6 +703,7 @@ function ChapterContent() {
               {bookClose.lu && <p data-mark-key="book-closing-LU" onMouseUp={() => onSelectGeneric('book-closing-LU')} onTouchEnd={() => onSelectGeneric('book-closing-LU')} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${bookClose.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{renderMarkedByKey(bookClose.lu, 'book-closing-LU')}</p>}
             </div>
           )}
+          <ReadingPlanChapterFooter bookNumber={bookNum} chapter={chapterNum} />
         </div>
 
         {/* RIGHT — ORIGINAL tabs. FIX (sidebar at the BOTTOM on phones/tablets):
