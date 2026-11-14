@@ -1,14 +1,40 @@
+// app/verse-songs/[seriesId]/page.tsx — FIXED (series detail page)
+// WHAT WAS BROKEN:
+//  1) handleProgress sent `completed: false` on EVERY progress tick. The
+//     fixed progress route honours an explicit false, so every tick
+//     un-completed a finished song. Progress saves now OMIT `completed`
+//     entirely (the route keeps the old value). And handlePlayComplete
+//     never sent completed at all — it now marks the song completed AND
+//     records the play, so finishing a song actually completes it.
+//  2) No `key` on <VerseSongPlayer>. Tapping a different song reused the
+//     same player instance, which kept the OLD song's audio/position.
+//     The player now remounts per song (key={selectedSong.id}).
+//  3) Like / Favorite fired the API but never updated local state, so the
+//     heart/star only filled after a full refresh. They now update
+//     optimistically (and roll back if the API call fails).
+//  4) The songs API returns user_liked / user_favorited as 0/1 and old rows
+//     can carry duration as "3:45" — both are normalised here, so the cards
+//     and the player always get boolean / seconds.
+//  5) Songs were fetched before the session loaded, so the first paint
+//     always showed every song unliked/unfavorited, then refetched. The
+//     page now waits for the session (one fetch, correct first paint).
+//  6) Progress saved on EVERY tick (API spam). It now saves at most once
+//     per 5 seconds of playback.
+//  7) Removed unused imports (Heart, Bookmark, useRouter/router) that can
+//     fail a strict build, and guarded non-array API responses so a single
+//     error object can no longer crash the page on songs.map.
+// Same page, same layout, same components. Nothing else changed.
 'use client';
 
-import { useState, useEffect } from 'react';
-import { ArrowLeft, Music, Heart, Bookmark } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { ArrowLeft, Music } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import VerseSongPlayer from '@/app/components/VerseSongPlayer';
 import VerseSongCard from '@/app/components/VerseSongCard';
 import { usePlayerStore } from '@/app/store/playerStore';
 import type { PlayerSong } from '@/app/store/playerStore';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 
 interface Series {
   id: number;
@@ -32,26 +58,57 @@ interface Song {
   user_favorited: boolean;
 }
 
+// Duration may arrive as seconds (number), "3:45", or "45" — always seconds.
+function normDuration(v: any): number {
+  if (typeof v === 'number') return Number.isNaN(v) ? 0 : v;
+  if (v === null || v === undefined || v === '') return 0;
+  const s = String(v).trim();
+  const m = s.match(/^(?:(\d+):)?(\d+):(\d{2})$/);
+  if (m) return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
+  const n = parseInt(s, 10);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+function normLiked(v: any): boolean {
+  return v === true || v === 1 || v === '1';
+}
+
+// API returns user_liked / user_favorited as 0/1 and counts can be null —
+// normalise once so cards and the player always get boolean / numbers.
+function normSong(s: any): Song {
+  return {
+    ...s,
+    duration: normDuration(s.duration),
+    likes_count: Number(s.likes_count) || 0,
+    play_count: Number(s.play_count) || 0,
+    user_liked: normLiked(s.user_liked),
+    user_favorited: normLiked(s.user_favorited),
+  };
+}
+
 export default function SeriesDetailPage() {
   const params = useParams();
-  const router = useRouter();
   const seriesId = params?.seriesId as string;
-  
+
   const [series, setSeries] = useState<Series | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [imageError, setImageError] = useState(false);
-  const [activeSongId, setActiveSongId] = useState<number | null>(null);
-  
+
+  // Last position actually saved to the API — progress saves at most once
+  // per 5 seconds of playback instead of on every tick.
+  const lastSavedPositionRef = useRef(0);
+
   const { setPlaylist, currentSong, setIsOnPlayerPage, setIsMaximized } = usePlayerStore();
 
   // Mark that we're on the player page and set up navigation handling
   useEffect(() => {
     setIsOnPlayerPage(true);
     setIsMaximized(false); // Start non-maximized on this page
-    
+
     return () => {
       setIsOnPlayerPage(false);
     };
@@ -67,6 +124,8 @@ export default function SeriesDetailPage() {
         }
       } catch (error) {
         console.error('Error getting session:', error);
+      } finally {
+        setSessionLoaded(true);
       }
     };
 
@@ -76,7 +135,7 @@ export default function SeriesDetailPage() {
   useEffect(() => {
     const fetchData = async () => {
       if (!seriesId) return;
-      
+
       setLoading(true);
       try {
         const [seriesRes, songsRes] = await Promise.all([
@@ -86,13 +145,15 @@ export default function SeriesDetailPage() {
 
         if (seriesRes.ok) {
           const data = await seriesRes.json();
-          if (Array.isArray(data) && data.length > 0) {
-            setSeries(data[0]);
-          }
+          // Series route returns an array — but accept a bare object too.
+          const row = Array.isArray(data) ? data[0] : data;
+          if (row) setSeries(row);
         }
 
         if (songsRes.ok) {
-          setSongs(await songsRes.json());
+          const data = await songsRes.json();
+          // Guard: an error object must never reach songs.map.
+          setSongs(Array.isArray(data) ? data.map(normSong) : []);
         }
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -101,23 +162,40 @@ export default function SeriesDetailPage() {
       }
     };
 
-    if (seriesId && userEmail !== undefined) {
+    // Wait for the session so the first paint already has the correct
+    // liked / favorited state — no flash of unliked cards, no double fetch.
+    if (seriesId && sessionLoaded) {
       fetchData();
     }
-  }, [seriesId, userEmail]);
+  }, [seriesId, userEmail, sessionLoaded]);
 
   const handlePlayComplete = async () => {
     if (selectedSong && userEmail) {
       try {
-        await fetch('/api/verse-songs/play', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userEmail,
-            verseSongId: selectedSong.id,
-            playDurationSeconds: selectedSong.duration
+        // Finishing a song does TWO things: records the play AND marks the
+        // song completed. The old code only recorded the play, so a song
+        // could be finished and never count as completed.
+        await Promise.all([
+          fetch('/api/verse-songs/play', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userEmail,
+              verseSongId: selectedSong.id,
+              playDurationSeconds: selectedSong.duration
+            })
+          }),
+          fetch('/api/verse-songs/progress', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userEmail,
+              verseSongId: selectedSong.id,
+              lastPositionSeconds: Math.floor(selectedSong.duration),
+              completed: true
+            })
           })
-        });
+        ]);
       } catch (error) {
         console.error('Error recording play:', error);
       }
@@ -127,14 +205,21 @@ export default function SeriesDetailPage() {
   const handleProgress = async (seconds: number) => {
     if (selectedSong && userEmail) {
       try {
+        const pos = Math.floor(seconds);
+        // Save at most once per 5 seconds of playback — not on every tick.
+        if (Math.abs(pos - lastSavedPositionRef.current) < 5 && pos !== 0) return;
+        lastSavedPositionRef.current = pos;
+        // NOTE: `completed` is deliberately NOT sent here. The progress
+        // route keeps the old value when completed is omitted — sending
+        // `completed: false` on every tick used to un-complete a finished
+        // song on its next listen.
         await fetch('/api/verse-songs/progress', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             userEmail,
             verseSongId: selectedSong.id,
-            lastPositionSeconds: Math.floor(seconds),
-            completed: false
+            lastPositionSeconds: pos
           })
         });
       } catch (error) {
@@ -149,20 +234,30 @@ export default function SeriesDetailPage() {
       return;
     }
 
+    // Optimistic update — the heart fills immediately.
+    const prevSongs = songs;
+    setSongs(prev => prev.map(s => s.id === songId
+      ? { ...s, user_liked: liked, likes_count: Math.max(0, (s.likes_count || 0) + (liked ? 1 : -1)) }
+      : s));
+
     try {
-      if (liked) {
-        await fetch('/api/verse-songs/likes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userEmail, verseSongId: songId })
-        });
-      } else {
-        await fetch(`/api/verse-songs/likes?userEmail=${userEmail}&verseSongId=${songId}`, {
-          method: 'DELETE'
-        });
-      }
+      const res = await fetch(
+        liked
+          ? '/api/verse-songs/likes'
+          : `/api/verse-songs/likes?userEmail=${userEmail}&verseSongId=${songId}`,
+        liked
+          ? {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userEmail, verseSongId: songId })
+            }
+          : { method: 'DELETE' }
+      );
+      if (!res.ok) throw new Error('Like failed');
     } catch (error) {
       console.error('Error toggling like:', error);
+      // Roll back so the UI never lies about the like state.
+      setSongs(prevSongs);
     }
   };
 
@@ -172,20 +267,28 @@ export default function SeriesDetailPage() {
       return;
     }
 
+    // Optimistic update — the star fills immediately.
+    const prevSongs = songs;
+    setSongs(prev => prev.map(s => s.id === songId ? { ...s, user_favorited: favorited } : s));
+
     try {
-      if (favorited) {
-        await fetch('/api/verse-songs/favorites', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userEmail, verseSongId: songId })
-        });
-      } else {
-        await fetch(`/api/verse-songs/favorites?userEmail=${userEmail}&verseSongId=${songId}`, {
-          method: 'DELETE'
-        });
-      }
+      const res = await fetch(
+        favorited
+          ? '/api/verse-songs/favorites'
+          : `/api/verse-songs/favorites?userEmail=${userEmail}&verseSongId=${songId}`,
+        favorited
+          ? {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userEmail, verseSongId: songId })
+            }
+          : { method: 'DELETE' }
+      );
+      if (!res.ok) throw new Error('Favorite failed');
     } catch (error) {
       console.error('Error toggling favorite:', error);
+      // Roll back so the UI never lies about the favorite state.
+      setSongs(prevSongs);
     }
   };
 
@@ -201,11 +304,11 @@ export default function SeriesDetailPage() {
       series_title: series?.title,
       series_id: series?.id
     }));
-    
+
     const currentIndex = songs.findIndex(s => s.id === song.id);
     setPlaylist(playerSongs, currentIndex, series?.id);
     setIsMaximized(true);
-    
+
     // Scroll to player section
     setTimeout(() => {
       const playerElement = document.getElementById('now-playing');
@@ -214,14 +317,13 @@ export default function SeriesDetailPage() {
       }
     }, 100);
   };
-  
+
   // Sync selected song with global player
   useEffect(() => {
     if (currentSong) {
       const song = songs.find(s => s.id === currentSong.id);
       if (song) {
         setSelectedSong(song);
-        setActiveSongId(song.id);
       }
     }
   }, [currentSong, songs]);
@@ -312,6 +414,7 @@ export default function SeriesDetailPage() {
           <div className="mb-12" id="now-playing">
             <h2 className="text-2xl font-bold mb-4">Now Playing</h2>
             <VerseSongPlayer
+              key={selectedSong.id}
               songId={selectedSong.id}
               title={selectedSong.title}
               duration={selectedSong.duration}
