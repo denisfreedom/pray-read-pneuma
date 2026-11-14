@@ -35,7 +35,29 @@ export default function VerseOfTheDayPage() {
         const res = await fetch('/api/verse-of-the-day', { cache: 'no-store' });
         const data = await res.json();
         // API returns { success, date, verse: {...} } and also the flat fields
-        const v: Verse | null = data?.verse || (data?.text_english ? data : null);
+        // Defensive parse: the old API returned data.verse as a NUMBER (the spread
+        // overwrote the object), older shapes used different field names. Accept
+        // all of them: verse object, flat fields, array, or alternate names.
+        const pickVerse = (d: any): Verse | null => {
+          const obj = d?.verse;
+          const cand = (obj && typeof obj === 'object' ? (Array.isArray(obj) ? obj[0] : obj) : null)
+            || (d?.text_english || d?.text ? d : null);
+          if (!cand) return null;
+          const name = cand.name_english || cand.book_name || cand.name || cand.book || '';
+          const chapter = cand.chapter ?? cand.chapter_number ?? 0;
+          const verseNum = cand.verse ?? cand.verse_number ?? 0;
+          const en = cand.text_english || cand.text || cand.english || '';
+          const lu = cand.text_luganda || cand.luganda || cand.lu || '';
+          if (!name || !en) return null;
+          return {
+            id: cand.id, book_id: cand.book_id,
+            book_number: cand.book_number ?? cand.book_id,
+            chapter: Number(chapter), verse: Number(verseNum),
+            text_english: en, text_luganda: lu,
+            name_english: name, name_luganda: cand.name_luganda || '',
+          };
+        };
+        const v: Verse | null = pickVerse(data);
         if (!cancelled && v) {
           setVerse(v);
           if (data?.date) setDate(data.date);
