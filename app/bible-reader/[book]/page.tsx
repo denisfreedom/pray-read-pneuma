@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { ChevronLeft, Menu, X, BookOpen, ScrollText, Heart, MessageSquare, Lightbulb, History } from 'lucide-react';
 import TheologicalInsightsModal from '@/app/components/TheologicalInsightsModal';
-import { useScripturePopup, ScriptureVersePopup, ScriptureHtml, ScriptureContext } from '@/components/ScriptureVersePopup';
-import HighlightableText from '@/app/components/HighlightableText';
+import { useScripturePopup, ScriptureVersePopup } from '@/components/ScriptureVersePopup';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 
@@ -27,6 +26,123 @@ interface BookHistorical { historical_background?: string; cultural_context?: st
 
 type SidePanelTab = 'intro' | 'outline' | 'prayer';
 type BottomTab = 'commentary' | 'theological' | 'historical';
+
+// ── SAME MARK SYSTEM AS THE CHAPTER PAGE (one store for the whole app) ──
+// Marks live in localStorage under `prayread-marks-book-{bookId}` — one store for the
+// whole book page, same Mark bar, same colours as the chapter page. Nothing is sent
+// to the server, and no separate highlight store is used on this page anymore.
+type Mark = { id: string; text: string; style: 'highlight' | 'underline'; color: string };
+
+const BOOK_NAMES = ['Genesis','Exodus','Leviticus','Numbers','Deuteronomy','Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings','1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther','Job','Psalms','Psalm','Proverbs','Ecclesiastes','Song of Solomon','Song of Songs','Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel','Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi','Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
+// Lowercase Luganda name -> English name (keys lowercase because the regex is /i).
+const LU_BOOK_MAP: Record<string, string> = { 'olubereberye': 'Genesis', 'okuva': 'Exodus', 'ebyabaleevi': 'Leviticus', 'okubala': 'Numbers', 'ekyamateeka': 'Deuteronomy', 'yoswa': 'Joshua', 'abalamuzi': 'Judges', 'ruusa': 'Ruth', 'samwiri': 'Samuel', 'bassekabaka': 'Kings', 'ebyomumirembe': 'Chronicles', 'ezera': 'Ezra', 'nekemiya': 'Nehemiah', 'eseza': 'Esther', 'yobu': 'Job', 'zabbuli': 'Psalms', 'engero': 'Proverbs', 'omubuulizi': 'Ecclesiastes', 'oluyimba': 'Song of Solomon', 'isaaya': 'Isaiah', 'yeremiya': 'Jeremiah', 'okukungubaga': 'Lamentations', 'ebyokukungubaga': 'Lamentations', 'ezekyeri': 'Ezekiel', 'danyeri': 'Daniel', 'koseya': 'Hosea', 'yoweri': 'Joel', 'amosi': 'Amos', 'obadiya': 'Obadiah', 'yona': 'Jonah', 'mika': 'Micah', 'nakumu': 'Nahum', 'abakuku': 'Habakkuk', 'zefaniya': 'Zephaniah', 'kaggayi': 'Haggai', 'zekkariya': 'Zechariah', 'malaki': 'Malachi', 'matayo': 'Matthew', 'makko': 'Mark', 'lukka': 'Luke', 'yokaana': 'John', 'ebikolwa': 'Acts', 'abaruumi': 'Romans', 'abakkolinso': 'Corinthians', 'abaggalatiya': 'Galatians', 'abaefeso': 'Ephesians', 'abafiripi': 'Philippians', 'abakkolosaayi': 'Colossians', 'abasessalonika': 'Thessalonians', 'timosewo': 'Timothy', 'tito': 'Titus', 'firemooni': 'Philemon', 'abaebbulaniya': 'Hebrews', 'yakobo': 'James', 'peetero': 'Peter', 'yuda': 'Jude', 'okubikkulirwa': 'Revelation' };
+const BOOK_NUMBERS: Record<string, number> = {};
+BOOK_NAMES.forEach((b, i) => { BOOK_NUMBERS[b.toLowerCase()] = i + 1; });
+BOOK_NUMBERS['psalm'] = 19; BOOK_NUMBERS['song of solomon'] = 22; BOOK_NUMBERS['song of songs'] = 22; BOOK_NUMBERS['judges'] = 7;
+const LU_BOOK_NUMBERS: Record<string, number> = { 'olubereberye': 1, 'okuva': 2, 'ebyabaleevi': 3, 'okubala': 4, 'ekyamateeka': 5, 'yoswa': 6, 'abalamuzi': 7, 'ruusa': 8, 'samwiri': 9, '1 samwiri': 9, '2 samwiri': 10, 'bassekabaka': 11, '1 bassekabaka': 11, '2 bassekabaka': 12, 'ebyomumirembe': 13, '1 ebyomumirembe': 13, '2 ebyomumirembe': 14, 'ezera': 15, 'nekemiya': 16, 'eseza': 17, 'yobu': 18, 'zabbuli': 19, 'engero': 20, 'omubuulizi': 21, 'oluyimba': 22, 'isaaya': 23, 'yeremiya': 24, 'okukungubaga': 25, 'ebyokukungubaga': 25, 'ezekyeri': 26, 'danyeri': 27, 'koseya': 28, 'yoweri': 29, 'amosi': 30, 'obadiya': 31, 'yona': 32, 'mika': 33, 'nakumu': 34, 'abakuku': 35, 'zefaniya': 36, 'kaggayi': 37, 'zekkariya': 38, 'malaki': 39, 'matayo': 40, 'makko': 41, 'lukka': 42, 'yokaana': 43, '1 yokaana': 62, '2 yokaana': 63, '3 yokaana': 64, 'ebikolwa': 44, 'abaruumi': 45, 'abakkolinso': 46, '1 abakkolinso': 46, '2 abakkolinso': 47, 'abaggalatiya': 48, 'abaefeso': 49, 'abafiripi': 50, 'abakkolosaayi': 51, 'abasessalonika': 52, '1 abasessalonika': 52, '2 abasessalonika': 53, 'timosewo': 54, '1 timosewo': 54, '2 timosewo': 55, 'tito': 56, 'firemooni': 57, 'abaebbulaniya': 58, 'yakobo': 59, 'peetero': 60, '1 peetero': 60, '2 peetero': 61, 'yuda': 65, 'okubikkulirwa': 66 };
+const REF_RE = new RegExp('\\b((?:[123]\\s)?(?:' + [...BOOK_NAMES, ...Object.keys(LU_BOOK_MAP)].map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + '))\\s+(\\d+):(\\d+(?:-\\d+)?(?:,\\s*\\d+(?:-\\d+)?)*)', 'gi');
+const linkifyRefs = (html: string): string => {
+  if (!html) return '';
+  return html.split(/(<[^>]+>)/g).map(part => {
+    if (!part || part.startsWith('<')) return part;
+    return part.replace(REF_RE, (m) => `<span class="scripture-ref" data-ref="${m}" style="color:#1d4ed8;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:600">${m}</span>`);
+  }).join('');
+};
+// Whitespace-tolerant find (same as chapter page): returns match in HAYSTACK coordinates.
+const findLoose = (hay: string, needle: string): { index: number; length: number } | null => {
+  if (!hay || !needle) return null;
+  const trimmed = needle.trim();
+  if (!trimmed) return null;
+  const exact = hay.indexOf(trimmed);
+  if (exact !== -1) return { index: exact, length: trimmed.length };
+  const hc: string[] = []; const hm: number[] = [];
+  for (let i = 0; i < hay.length; i++) {
+    const ch = hay[i];
+    if (/\s/.test(ch)) { if (hc.length && hc[hc.length - 1] !== ' ') { hc.push(' '); hm.push(i); } continue; }
+    hc.push(ch); hm.push(i);
+  }
+  while (hc.length && hc[0] === ' ') { hc.shift(); hm.shift(); }
+  while (hc.length && hc[hc.length - 1] === ' ') { hc.pop(); hm.pop(); }
+  const ncs = trimmed.replace(/\s+/g, ' ');
+  const ci = hc.join('').indexOf(ncs);
+  if (ci === -1) return null;
+  const start = hm[ci];
+  const endHay = hm[ci + ncs.length - 1];
+  return { index: start, length: endHay - start + 1 };
+};
+// Tag-aware mark painting (same as chapter page): wraps overlapping slices of each
+// text run, never breaks tags, never breaks a clickable verse ref.
+const applyMarksToHtml = (html: string, marksList: Mark[]): string => {
+  if (!html || !marksList.length) return html;
+  const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const decodeEnt = (s: string) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
+  let out = html;
+  [...marksList].sort((a, b) => b.text.length - a.text.length).forEach(m => {
+    if (!m.text) return;
+    const tokens = out.match(/(<[^>]+>|[^<]+)/g) || [];
+    let plain = '';
+    const ranges: { start: number; end: number; dec: string }[] = [];
+    tokens.forEach(tok => {
+      if (tok.startsWith('<')) { ranges.push({ start: -1, end: -1, dec: '' }); return; }
+      const dec = decodeEnt(tok);
+      ranges.push({ start: plain.length, end: plain.length + dec.length, dec });
+      plain += dec;
+    });
+    const found = findLoose(plain, m.text);
+    if (!found) return;
+    const start = found.index, end = found.index + found.length;
+    const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
+    out = tokens.map((tok, ti) => {
+      if (tok.startsWith('<')) return tok;
+      const r = ranges[ti];
+      const lo = Math.max(start, r.start), hi = Math.min(end, r.end);
+      if (lo >= hi) return tok;
+      const a = lo - r.start, b = hi - r.start;
+      return escHtml(r.dec.slice(0, a)) + `<span class="${cls}">` + escHtml(r.dec.slice(a, b)) + `</span>` + escHtml(r.dec.slice(b));
+    }).join('');
+  });
+  return out;
+};
+
+// Renders one book-page section (intro / commentary / theological / historical / outline):
+// verse refs become clickable pills, saved marks paint from the chapter-page system.
+function BookContentHtml({ html, markKey, marksStoreKey, marksTick, onSelect, onVerseClick }: {
+  html: string; markKey: string; marksStoreKey: string; marksTick: number;
+  onSelect: (key: string) => void; onVerseClick: (ref: string) => void;
+}) {
+  const marks = useMemo(() => {
+    try { const all = JSON.parse(localStorage.getItem(marksStoreKey) || '{}') as Record<string, Mark[]>; return all[markKey] || []; }
+    catch { return []; }
+  }, [marksStoreKey, markKey, marksTick]);
+  const finalHtml = useMemo(() => applyMarksToHtml(linkifyRefs(html), marks), [html, marks]);
+  const handleClick = (e: React.MouseEvent) => {
+    try { if (window.getSelection()?.toString().trim()) return; } catch {}
+    const el = (e.target as HTMLElement).closest?.('.scripture-ref') as HTMLElement | null;
+    if (el?.dataset?.ref) { e.preventDefault(); e.stopPropagation(); onVerseClick(el.dataset.ref); }
+  };
+  const markSection = () => {
+    try {
+      const el = document.querySelector(`[data-mark-key="${markKey}"]`) as HTMLElement | null;
+      if (!el) return;
+      const sel = window.getSelection();
+      const cur = sel?.toString() || '';
+      const node: any = sel?.anchorNode;
+      const inSection = node && (node.nodeType === 3 ? node.parentElement : node)?.closest?.(`[data-mark-key="${markKey}"]`);
+      if (cur.trim() && inSection) { onSelect(markKey); return; }
+      const range = document.createRange(); range.selectNodeContents(el);
+      sel?.removeAllRanges(); sel?.addRange(range);
+      onSelect(markKey);
+    } catch {}
+  };
+  return (
+    <>
+      <div className="flex justify-end mb-1">
+        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); markSection(); }} title="Select this section & mark it — highlight / underline" className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 text-[14px] shrink-0" aria-label="Mark this section">🖍</button>
+      </div>
+      <div data-mark-key={markKey} onClick={handleClick} className="leading-relaxed text-sm select-text cursor-text" dangerouslySetInnerHTML={{ __html: finalHtml }} />
+    </>
+  );
+}
 
 function BookChaptersContent() {
   const params = useParams();
@@ -51,6 +167,117 @@ function BookChaptersContent() {
   const [showBottomSection, setShowBottomSection] = useState(false);
   const [bookTheologicalModalOpen, setBookTheologicalModalOpen] = useState(false);
   const { popup: scripturePopup, openVerse: openScriptureVerse, closePopup: closeScripturePopup } = useScripturePopup();
+
+  // ── Marks (chapter-page system) ────────────────────────────────────────────
+  const marksStoreKey = `prayread-marks-book-${book?.id ?? bookNumber}`;
+  const [pendingMark, setPendingMark] = useState<{ key: string; text: string } | null>(null);
+  const [marksTick, setMarksTick] = useState(0);
+  const readMarksAll = (): Record<string, Mark[]> => {
+    try { return JSON.parse(localStorage.getItem(marksStoreKey) || '{}'); } catch { return {}; }
+  };
+  const onSelectMark = (key: string) => {
+    setTimeout(() => {
+      try {
+        const sel = window.getSelection(); const txt = sel?.toString() || '';
+        if (!txt.trim() || txt.trim().length < 2) { setPendingMark(null); return; }
+        setPendingMark({ key, text: txt });
+      } catch { setPendingMark(null); }
+    }, 10);
+  };
+  const applyMark = (style: 'highlight' | 'underline', color: string) => {
+    if (!pendingMark) return;
+    const all = readMarksAll();
+    const existing = all[pendingMark.key] || [];
+    if (existing.some(m => m.text === pendingMark.text && m.style === style && m.color === color)) { setPendingMark(null); return; }
+    const next = { ...all, [pendingMark.key]: [...existing, { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: pendingMark.text, style, color }] };
+    try { localStorage.setItem(marksStoreKey, JSON.stringify(next)); } catch {}
+    setMarksTick(t => t + 1);
+    setPendingMark(null);
+    try { window.getSelection()?.removeAllRanges(); } catch {}
+  };
+  const clearMarksForKey = (key: string) => {
+    const all = readMarksAll(); delete all[key];
+    try { localStorage.setItem(marksStoreKey, JSON.stringify(all)); } catch {}
+    setMarksTick(t => t + 1);
+  };
+  // Catch a drag-select in ANY book section (same as chapter page).
+  useEffect(() => {
+    const onUp = () => {
+      setTimeout(() => {
+        try {
+          const sel = window.getSelection(); const txt = sel?.toString() || '';
+          if (!txt.trim() || txt.trim().length < 2) return;
+          const node: any = sel?.anchorNode;
+          const el: any = node ? (node.nodeType === 3 ? node.parentElement : node) : null;
+          const holder = el?.closest?.('[data-mark-key]') as HTMLElement | null;
+          if (!holder) return;
+          setPendingMark({ key: holder.dataset.markKey as string, text: txt });
+        } catch {}
+      }, 90);
+    };
+    document.addEventListener('mouseup', onUp);
+    document.addEventListener('touchend', onUp);
+    return () => { document.removeEventListener('mouseup', onUp); document.removeEventListener('touchend', onUp); };
+  }, []);
+
+  // ── FIX: verse refs must jump to the EXACT verse, not just the chapter ─────
+  // The shared popup's "Open in Bible Reader" button only carries the chapter, and
+  // this page cannot change the popup's own code — so when the popup is open, a
+  // capture-phase click listener appends #verse-N to that button's link (or, if it
+  // is a plain button, navigates directly). The chapter page then scrolls to the
+  // verse and flash-highlights it, exactly like the chapter-page refs do.
+  const lastVerseRef = useRef<{ bookNumber: number; chapter: number; verse: number } | null>(null);
+  const parseVerseRef = (ref: string) => {
+    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z' ]+?)\s+(\d+):(\d+)(?:\s*[-,].*)?$/);
+    if (!m) return null;
+    const raw = m[1].trim().replace(/\s+/g, ' ');
+    const lower = raw.toLowerCase();
+    const num = BOOK_NUMBERS[lower] ?? LU_BOOK_NUMBERS[lower];
+    if (!num) return null;
+    return { bookNumber: num, chapter: parseInt(m[2]), verse: parseInt(m[3]) };
+  };
+  const translateLuRef = (ref: string) => {
+    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z' ]+?)\s+(\d+):(.+)$/);
+    if (!m) return ref;
+    const raw = m[1].trim().replace(/\s+/g, ' ');
+    const numPrefix = raw.match(/^[123]\s+/)?.[0] || '';
+    const base = raw.replace(/^[123]\s+/, '').toLowerCase();
+    const eng = LU_BOOK_MAP[base];
+    if (!eng) return ref;
+    return `${numPrefix}${eng} ${m[2]}:${m[3]}`;
+  };
+  const handleVerseClick = (ref: string) => {
+    const parsed = parseVerseRef(ref);
+    if (parsed) lastVerseRef.current = parsed;
+    // Shared popup resolves English book names — translate Luganda refs ("Yokaana" -> "John").
+    openScriptureVerse(translateLuRef(ref));
+  };
+  useEffect(() => {
+    if (!scripturePopup) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const anchor = target.closest?.('a[href*="/bible-reader/"]') as HTMLAnchorElement | null;
+      if (anchor) {
+        const href = anchor.getAttribute('href') || '';
+        const m = href.match(/\/bible-reader\/\d+\/\d+/);
+        if (m && !href.includes('#verse-') && lastVerseRef.current) {
+          e.preventDefault(); e.stopPropagation();
+          closeScripturePopup();
+          router.push(`${m[0]}#verse-${lastVerseRef.current.verse}`);
+        }
+        return;
+      }
+      const btn = target.closest?.('button') as HTMLButtonElement | null;
+      if (btn && /bible reader|go to|open/i.test(btn.textContent || '') && lastVerseRef.current) {
+        e.preventDefault(); e.stopPropagation();
+        const v = lastVerseRef.current;
+        closeScripturePopup();
+        router.push(`/bible-reader/${v.bookNumber}/${v.chapter}#verse-${v.verse}`);
+      }
+    };
+    document.addEventListener('click', onClick, true);
+    return () => document.removeEventListener('click', onClick, true);
+  }, [scripturePopup]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -217,25 +444,21 @@ ${lu}`;
     return cleaned;
   };
 
-  // Render rich HTML content with highlight support
-  const renderContent = (content: string | null | undefined, sectionKey?: string, ctxChapter?: number) => {
+  // Render rich HTML content with the chapter-page mark system (highlight / underline).
+  const renderContent = (content: string | null | undefined, sectionKey?: string) => {
     if (!content) return null;
     const cleanedContent = cleanHtmlContent(content);
     if (!cleanedContent) return null;
-    
-    const ctx: ScriptureContext | undefined = book
-      ? { book: book.name_english, bookNumber: book.book_number, chapter: ctxChapter || 1 }
-      : undefined;
-    if (sectionKey) return (
-      <HighlightableText
-        sectionKey={sectionKey}
+    return (
+      <BookContentHtml
         html={cleanedContent}
-        className="leading-relaxed text-sm"
-        scriptureContext={ctx}
-        onVerseClick={openScriptureVerse}
+        markKey={sectionKey || `book-content-${book?.id ?? bookNumber}`}
+        marksStoreKey={marksStoreKey}
+        marksTick={marksTick}
+        onSelect={onSelectMark}
+        onVerseClick={handleVerseClick}
       />
     );
-    return <ScriptureHtml html={cleanedContent} onVerseClick={openScriptureVerse} className="leading-relaxed text-sm" context={ctx} />;
   };
 
   if (loading) return (
@@ -276,19 +499,16 @@ ${lu}`;
           <div className="space-y-3">
             {bookOutlines.map(o => {
               const cleanedContent = cleanHtmlContent(o.content);
-              const ctx: ScriptureContext = { 
-                book: book.name_english, 
-                bookNumber: book.book_number, 
-                chapter: 1 
-              };
               return (
                 <div key={o.id} className={`rounded-lg p-4 border ${cardBg()}`}>
                   <h4 className={`font-bold mb-2 ${theme === 'dark' ? 'text-indigo-300' : theme === 'sepia' ? 'text-amber-800' : 'text-indigo-700'}`}>{o.title}</h4>
-                  <ScriptureHtml 
-                    html={cleanedContent || ''} 
-                    onVerseClick={openScriptureVerse} 
-                    className="leading-relaxed text-sm" 
-                    context={ctx} 
+                  <BookContentHtml
+                    html={cleanedContent || ''}
+                    markKey={`book-outline-${o.id}`}
+                    marksStoreKey={marksStoreKey}
+                    marksTick={marksTick}
+                    onSelect={onSelectMark}
+                    onVerseClick={handleVerseClick}
                   />
                 </div>
               );
@@ -358,7 +578,7 @@ ${lu}`;
             {/* Theme */}
             <button onClick={cycleTheme}
               className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded text-xs sm:text-sm font-semibold transition-colors ${theme === 'light' ? 'bg-yellow-400 text-gray-900' : theme === 'sepia' ? 'bg-blue-600 text-white' : 'bg-indigo-700 text-white'}`}>
-              {theme === 'light' ? '☀️' : theme === 'sepia' ? '📄' : '🌙'}
+              {theme === 'light' ? '☀' : theme === 'sepia' ? '📄' : '🌙'}
             </button>
 
             {/* Font Size */}
@@ -431,7 +651,7 @@ ${lu}`;
                 </Link>
                 {book.total_chapters > 1 && (
                   <Link href={`/bible-reader/${book.book_number}/${Math.ceil(book.total_chapters / 2)}`} className="px-4 py-2 rounded font-semibold transition-all bg-indigo-600 hover:bg-indigo-700 text-white hover:shadow-lg">
-                    ⏭️ Middle
+                    ⏭ Middle
                   </Link>
                 )}
                 <Link href={`/bible-reader/${book.book_number}/${book.total_chapters}`} className="px-4 py-2 rounded font-semibold transition-all bg-purple-600 hover:bg-purple-700 text-white hover:shadow-lg">
@@ -527,9 +747,9 @@ ${lu}`;
                             {[
                               { key: 'historical_background', label: '🏺 Historical Background', icon: '🏺', color: theme === 'dark' ? 'border-amber-700 bg-amber-950/20' : 'border-amber-200 bg-amber-50' },
                               { key: 'cultural_context', label: '🌍 Cultural Context', icon: '🌍', color: theme === 'dark' ? 'border-orange-700 bg-orange-950/20' : 'border-orange-200 bg-orange-50' },
-                              { key: 'maps_geography', label: '🗺️ Maps & Geography', icon: '🗺️', color: theme === 'dark' ? 'border-green-800 bg-green-950/20' : 'border-green-200 bg-green-50' },
+                              { key: 'maps_geography', label: '🗺 Maps & Geography', icon: '🗺', color: theme === 'dark' ? 'border-green-800 bg-green-950/20' : 'border-green-200 bg-green-50' },
                               { key: 'timeline', label: '📅 Timeline', icon: '📅', color: theme === 'dark' ? 'border-blue-800 bg-blue-950/20' : 'border-blue-200 bg-blue-50' },
-                              { key: 'archaeological_notes', label: '⛏️ Archaeological Notes', icon: '⛏️', color: theme === 'dark' ? 'border-purple-800 bg-purple-950/20' : 'border-purple-200 bg-purple-50' },
+                              { key: 'archaeological_notes', label: '⛏ Archaeological Notes', icon: '⛏', color: theme === 'dark' ? 'border-purple-800 bg-purple-950/20' : 'border-purple-200 bg-purple-50' },
                             ].map(({ key, label, color }) => {
                               const val = bookHistorical[key as keyof BookHistorical];
                               if (!val) return null;
@@ -594,6 +814,21 @@ ${lu}`;
             theme={theme}
             language={language}
           />
+        )}
+
+        {/* Mark bar — same as chapter page: appears when you select text */}
+        {pendingMark && (
+          <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
+            <span className="hidden sm:inline text-[11px] text-slate-300 pl-1 pr-1 whitespace-nowrap">Mark:</span>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('underline', 'decoration-orange-500 text-inherit')} title="Underline orange" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-orange-500">U</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('underline', 'decoration-blue-500 text-inherit')} title="Underline blue" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-blue-500">U</button>
+            <button onClick={() => { clearMarksForKey(pendingMark.key); setPendingMark(null); }} title="Clear all marks in this section" className="px-2 h-8 rounded-full bg-white/15 text-[11px] font-bold flex items-center justify-center whitespace-nowrap">Clear</button>
+            <button onMouseDown={(e) => e.preventDefault()} onClick={() => { try { navigator.clipboard?.writeText(pendingMark.text); } catch {} setPendingMark(null); }} title="Copy selection" className="w-8 h-8 rounded-full bg-white/15 text-[13px] flex items-center justify-center">⧉</button>
+            <button onClick={() => setPendingMark(null)} title="Close" className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">✕</button>
+          </div>
         )}
 
         {/* Scripture Verse Popup */}
