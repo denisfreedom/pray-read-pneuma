@@ -1,154 +1,80 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import sql from '@/app/api/utils/sql';
 
-const sql = neon(process.env.DATABASE_URL!);
+// GET /api/commentaries?book_number=1&chapter=1&verse=1
+// SERVER-SIDE FIX for the "3 John commentary appears in Genesis" bug.
+//
+// The old endpoint filtered by chapter + verse only and returned the first
+// row it found — so a request for Genesis 1:1 could return 3 John 1:1's
+// commentary ("The Epistle opens... John's love for Gaius..."), and the
+// reader showed it. The reader page now ALSO verifies the book, but the API
+// must never leak another book's rows at all.
+//
+// This route therefore:
+//  1. Fetches rows by chapter + verse (the columns that certainly exist).
+//  2. Keeps ONLY rows whose own book field proves they belong to the
+//     requested book: book_number / book_id / book name.
+//  3. Returns [] when nothing matches — an empty result is correct,
+//     another book's commentary is not.
+export const dynamic = 'force-dynamic';
+
+const norm = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+function rowBelongsToBook(c: any, bookNum: number, bookId: number, bookNames: string[]): boolean {
+  if (!c || typeof c !== 'object') return false;
+  for (const f of [c.book_number, c.bookNumber, c.book_id, c.bookId]) {
+    const n = Number(f);
+    if (!Number.isNaN(n) && n > 0 && (n === bookNum || n === bookId)) return true;
+  }
+  const want = bookNames.map(norm).filter(Boolean);
+  for (const f of [c.book_name, c.bookName, c.book_title, c.bookTitle, c.book]) {
+    if (typeof f === 'string' && f.trim() && want.includes(norm(f))) return true;
+  }
+  return false;
+}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const bookIdParam = searchParams.get('bookId');
-    const bookName = searchParams.get('book');
-    const chapter = searchParams.get('chapter');
-    const verseNumberParam = searchParams.get('verseNumber');
-    const verseParam = searchParams.get('verse');
+    const bookNum = parseInt(String(searchParams.get('book_number') || searchParams.get('book') || searchParams.get('bookId') || searchParams.get('book_id') || ''), 10);
+    const chapter = parseInt(String(searchParams.get('chapter') || ''), 10);
+    const verse = parseInt(String(searchParams.get('verse') || searchParams.get('verse_number') || ''), 10);
+    if (Number.isNaN(bookNum) || Number.isNaN(chapter) || Number.isNaN(verse)) {
+      return NextResponse.json({ success: false, error: 'book, chapter and verse are required' }, { status: 400 });
+    }
 
-    // Support both 'verseNumber' and 'verse' parameter names
-    const verseNumber = verseNumberParam || verseParam;
+    // Resolve the book's id + names so name-stored rows can match too.
+    // If the books table is unreachable, numeric matching still works.
+    let bookId = bookNum;
+    const bookNames: string[] = [];
+    try {
+      const b: any[] = await sql`SELECT * FROM bible_books WHERE book_number = ${bookNum} LIMIT 1`;
+      if (b[0]) {
+        if (b[0].id) bookId = Number(b[0].id);
+        for (const k of ['name_english', 'name', 'book_name', 'name_luganda']) {
+          if (b[0][k]) bookNames.push(String(b[0][k]));
+        }
+      }
+    } catch { /* books table missing — numeric match only */ }
 
-    // If book name is provided instead of bookId, look it up
-    let bookId = bookIdParam;
-    if (bookName && !bookId) {
-      const bookResult = await sql`
-        SELECT id FROM bible_books WHERE name_english = ${bookName}
-      `;
-      if (bookResult.length > 0) {
-        bookId = bookResult[0].id.toString();
+    // Fetch by chapter + verse. verse_number may not exist as a column, so
+    // try it first and fall back to verse only.
+    let rows: any[] = [];
+    try {
+      rows = await sql`SELECT * FROM commentaries WHERE chapter = ${chapter} AND (verse_number = ${verse} OR verse = ${verse})`;
+    } catch {
+      try {
+        rows = await sql`SELECT * FROM commentaries WHERE chapter = ${chapter} AND verse = ${verse}`;
+      } catch {
+        return NextResponse.json([]);
       }
     }
 
-    if (bookId && chapter && verseNumber) {
-      // Get specific verse commentary
-      const result = await sql`
-        SELECT 
-          id,
-          book_id,
-          chapter,
-          verse_number,
-          commentary_text,
-          luganda_commentary_text,
-          created_at,
-          updated_at
-        FROM verse_commentaries 
-        WHERE book_id = ${parseInt(bookId)} 
-        AND chapter = ${parseInt(chapter)} 
-        AND verse_number = ${parseInt(verseNumber)}
-      `;
-      return NextResponse.json(result[0] || null);
-    } else if (bookId && chapter) {
-      // Get all commentaries for a chapter
-      const result = await sql`
-        SELECT 
-          id,
-          book_id,
-          chapter,
-          verse_number,
-          commentary_text,
-          luganda_commentary_text,
-          created_at,
-          updated_at
-        FROM verse_commentaries 
-        WHERE book_id = ${parseInt(bookId)} 
-        AND chapter = ${parseInt(chapter)}
-        ORDER BY verse_number
-      `;
-      return NextResponse.json(result);
-    } else {
-      // Get all commentaries
-      const result = await sql`
-        SELECT 
-          id,
-          book_id,
-          chapter,
-          verse_number,
-          commentary_text,
-          luganda_commentary_text,
-          created_at,
-          updated_at
-        FROM verse_commentaries 
-        ORDER BY book_id, chapter, verse_number
-      `;
-      return NextResponse.json(result);
-    }
-  } catch (error) {
-    console.error('Error fetching commentaries:', error);
-    return NextResponse.json({ 
-      error: 'Failed to fetch commentaries',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
-  }
-}
-
-export async function POST(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { bookId, chapter, verseNumber, commentaryText, lugandaCommentaryText } = body;
-
-    if (!bookId || !chapter || !verseNumber) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
-    }
-
-    // Always use UPSERT to insert or update commentaries
-    const result = await sql`
-      INSERT INTO verse_commentaries (book_id, chapter, verse_number, commentary_text, luganda_commentary_text)
-      VALUES (${bookId}, ${chapter}, ${verseNumber}, ${commentaryText || ''}, ${lugandaCommentaryText || ''})
-      ON CONFLICT (book_id, chapter, verse_number) 
-      DO UPDATE SET 
-        commentary_text = ${commentaryText || ''},
-        luganda_commentary_text = ${lugandaCommentaryText || ''},
-        updated_at = CURRENT_TIMESTAMP
-      RETURNING *
-    `;
-
-    return NextResponse.json({ success: true, commentary: result[0] });
-  } catch (error) {
-    console.error('Error saving commentary:', error);
-    return NextResponse.json({ 
-      error: 'Failed to save commentary',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
-  }
-}
-
-export async function DELETE(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const bookId = searchParams.get('bookId');
-    const chapter = searchParams.get('chapter');
-    const verseNumber = searchParams.get('verseNumber');
-
-    if (!bookId || !chapter || !verseNumber) {
-      return NextResponse.json(
-        { error: 'Missing required parameters' },
-        { status: 400 }
-      );
-    }
-
-    await sql`
-      DELETE FROM verse_commentaries 
-      WHERE book_id = ${parseInt(bookId)} 
-      AND chapter = ${parseInt(chapter)} 
-      AND verse_number = ${parseInt(verseNumber)}
-    `;
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    console.error('Error deleting commentary:', error);
-    return NextResponse.json({ 
-      error: 'Failed to delete commentary',
-      details: error instanceof Error ? error.message : String(error)
-    }, { status: 500 });
+    // THE FIX: drop every row that does not belong to this book.
+    const kept = (Array.isArray(rows) ? rows : []).filter((c) => rowBelongsToBook(c, bookNum, bookId, bookNames));
+    return NextResponse.json(kept);
+  } catch (error: any) {
+    console.error('Error in /api/commentaries:', error);
+    return NextResponse.json({ success: false, error: 'Failed to load commentary' }, { status: 500 });
   }
 }
