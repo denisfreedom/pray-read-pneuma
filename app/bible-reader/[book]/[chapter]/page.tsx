@@ -93,10 +93,19 @@ function ChapterContent() {
   const [chapterCommentary, setChapterCommentary] = useState<any>(null);
   // Pick the right field from ANY commentary shape (verse / chapter / book, any API).
   // Returns raw HTML (admin saves RichText) — render with dangerouslySetInnerHTML, never as plain text.
+  // V4 FIX ("saved but empty" on verses 3+): the old extractor used ?? chains,
+  // which stop at an EMPTY STRING — a bulk-saved row with commentary_text: ''
+  // and the real text in another field returned '' and the panel reported
+  // "saved but empty". Now: first NON-EMPTY field wins, across every field
+  // name the manual form and the bulk upload have ever used.
+  const firstText = (...vals: any[]): string => {
+    for (const v of vals) if (typeof v === 'string' && v.trim()) return v;
+    return '';
+  };
   const commHtml = (c: any, wantLu: boolean): string => {
     if (!c || typeof c !== 'object') return typeof c === 'string' ? c : '';
-    if (wantLu) return c.luganda_commentary_text ?? c.luganda_commentary ?? c.text_luganda ?? c.luganda ?? c.lu ?? '';
-    return c.commentary_text ?? c.english_commentary ?? c.text_english ?? c.commentary ?? c.text ?? c.content ?? '';
+    if (wantLu) return firstText(c.luganda_commentary_text, c.luganda_commentary, c.text_luganda, c.luganda, c.lu, c.luganda_text, c.lu_text, c.commentary_luganda, c.luganda_html, c.luganda_content, c.lu_commentary, c.luganda_commentary_text_html);
+    return firstText(c.commentary_text, c.english_commentary, c.text_english, c.commentary, c.text, c.content, c.body, c.english_text, c.en, c.commentary_html, c.html, c.explanation, c.explanation_english, c.insight, c.text_html, c.content_html, c.commentary_english, c.en_commentary, c.english);
   };
   const commHtmlForLang = (c: any, lang: 'EN' | 'LU' | 'BOTH', markKey?: string): string => {
     if (!c) return '';
@@ -104,8 +113,10 @@ function ChapterContent() {
     // only ran on the BOTH path. This page runs on EN (GB EN), so refs were never blue.
     // Now EVERY path goes through linkifyRefs(), then through saved highlight marks.
     let raw = '';
-    if (lang === 'EN') raw = commHtml(c, false);
-    else if (lang === 'LU') raw = commHtml(c, true);
+    // V4: if the requested language is empty but the other language has text,
+    // show the other language instead of "saved but empty".
+    if (lang === 'EN') raw = commHtml(c, false) || commHtml(c, true);
+    else if (lang === 'LU') raw = commHtml(c, true) || commHtml(c, false);
     else { const en = commHtml(c, false), lu = commHtml(c, true); raw = en && lu ? en + '<hr style="margin:12px 0;opacity:.3"/>' + lu : (en || lu); }
     let html = linkifyRefs(raw);
     if (markKey) html = applyMarksToHtml(html, markKey);
