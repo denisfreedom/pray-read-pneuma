@@ -3,7 +3,7 @@
 // POST is now an UPSERT: INSERT ... ON CONFLICT DO UPDATE. Save works for new AND existing.
 // PUT kept for the admin panel's explicit edit path.
 //
-// V2 FIX (param tolerance): the old GET only understood `bookId`. The chapter
+// V3 FIX (candidate book ids) + V2 FIX (param tolerance): the old GET only understood `bookId`. The chapter
 // page and some callers send `book_number` instead — GET then saw no bookId
 // and returned [] / null, so nothing displayed. This version accepts
 // bookId / book_id / book_number / book, and resolves book_number -> book_id
@@ -49,14 +49,33 @@ export async function GET(request: NextRequest) {
     const bookRaw = searchParams.get('bookId') ?? searchParams.get('book_id') ?? searchParams.get('book_number') ?? searchParams.get('book');
     const chapter = searchParams.get('chapter');
     const verse = searchParams.get('verseNumber') || searchParams.get('verse_number') || searchParams.get('verse');
-    const bookId = await resolveBookId(bookRaw);
-    if (bookId && chapter && verse) {
-      const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} AND verse_number = ${parseInt(verse)} LIMIT 1`;
-      return NextResponse.json(rows.length > 0 ? rows[0] : null, { headers });
+    // V3: the stored book_id's numbering is not guaranteed to equal the
+    // book_number or the bible_books id — Admin proved the row IS under
+    // 3 John, yet the front page got nothing. So try EVERY candidate id:
+    // bible_books id for the number, id for the name, and the raw number.
+    // First candidate with rows wins. Giving up after one guess is what
+    // blanked the front page.
+    const bookName = searchParams.get('bookName') ?? searchParams.get('book_name') ?? searchParams.get('name');
+    const candidates: number[] = [];
+    const pushCand = (v: number | null) => { if (v && !candidates.includes(v)) candidates.push(v); };
+    pushCand(await resolveBookId(bookRaw));
+    if (bookName) pushCand(await resolveBookId(bookName));
+    const rawN = parseInt(String(bookRaw ?? ''), 10);
+    if (!Number.isNaN(rawN) && rawN > 0) pushCand(rawN);
+    if (!candidates.length) return NextResponse.json([], { headers });
+    if (chapter && verse) {
+      for (const bookId of candidates) {
+        const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} AND verse_number = ${parseInt(verse)} LIMIT 1`;
+        if (rows.length > 0) return NextResponse.json(rows[0], { headers });
+      }
+      return NextResponse.json(null, { headers });
     }
-    if (bookId && chapter) {
-      const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} ORDER BY verse_number ASC`;
-      return NextResponse.json(rows, { headers });
+    if (chapter) {
+      for (const bookId of candidates) {
+        const rows = await sql`SELECT id, book_id, chapter, verse_number, commentary_text, luganda_commentary_text, created_at, updated_at FROM verse_commentaries WHERE book_id = ${bookId} AND chapter = ${parseInt(chapter)} ORDER BY verse_number ASC`;
+        if (rows.length > 0) return NextResponse.json(rows, { headers });
+      }
+      return NextResponse.json([], { headers });
     }
     return NextResponse.json([], { headers });
   } catch (error) {
