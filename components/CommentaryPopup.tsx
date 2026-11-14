@@ -14,6 +14,15 @@ import { useEffect, useState, useCallback } from 'react';
 //     Old code injected DB HTML straight into the page.
 //  5) UX: EN / LU / BOTH toggle, Retry, Copy, ESC-to-close, scroll-lock, stale-verse guard
 //     (old code could show verse 3's commentary while verse 5 was open).
+//  6) BOOK + VERSE CHECK (new): the old code took data[0] — the FIRST row returned —
+//     without checking book or verse. That is the same leak that put 3 John's
+//     commentary into Genesis/Exodus: a row for another book (or another verse)
+//     was shown as if it were this verse's. Now a row is used ONLY if its verse
+//     matches AND it does not provably belong to another book. A row with no
+//     book label is accepted (same rule as the chapter page + API).
+//  7) HTML STRIPPING (new): saved commentary is HTML (<div data-styled-content...>).
+//     This popup renders plain text, so tags are stripped and entities decoded —
+//     otherwise the reader would see raw <p><span> tags instead of the words.
 // Usage in chapter page:
 //   const [commentaryVerse, setCommentaryVerse] = useState<number|null>(null);
 //   <button onClick={()=>setCommentaryVerse(v.verse)}>📖 Commentary</button>
@@ -34,12 +43,52 @@ interface CommentaryPopupProps {
   initialCommentary?: any;
 }
 
+// Saved commentary is HTML. This popup renders plain text, so strip tags and
+// decode the entities the editor stores (&quot; &amp; &nbsp; etc.).
+function stripHtml(s: string): string {
+  return String(s || '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p\s*>/gi, '\n\n')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 function pickText(row: any): { en: string; lu: string } {
   if (!row) return { en: '', lu: '' };
-  if (typeof row === 'string') return { en: row, lu: '' };
+  if (typeof row === 'string') return { en: stripHtml(row), lu: '' };
   const en = row.text_english || row.commentary_text || row.commentary_english || row.en_commentary || row.commentary || row.content || row.text || row.explanation_english || '';
   const lu = row.text_luganda || row.luganda_commentary_text || row.commentary_luganda || row.lu_commentary || row.luganda || row.explanation_luganda || '';
-  return { en: String(en || ''), lu: String(lu || '') };
+  return { en: stripHtml(en), lu: stripHtml(lu) };
+}
+
+// Same book rule as the chapter page + API: reject ONLY a row that PROVABLY
+// belongs to another book. A row with no book label is accepted.
+function rowHasBookField(c: any): boolean {
+  if (!c || typeof c !== 'object') return false;
+  return ['book_number', 'bookNumber', 'book_id', 'bookId', 'book_name', 'bookName', 'book_title', 'bookTitle', 'book'].some(
+    (k) => c[k] !== undefined && c[k] !== null && String(c[k]).trim() !== ''
+  );
+}
+
+function rowBookMatches(c: any, bookNum: number, bookId: number, bookName: string): boolean {
+  if (!c || typeof c !== 'object') return false;
+  const norm = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const f of [c.book_number, c.bookNumber, c.book_id, c.bookId]) {
+    const n = Number(f);
+    if (!Number.isNaN(n) && n > 0 && (n === bookNum || n === bookId)) return true;
+  }
+  const want = norm(bookName);
+  for (const f of [c.book_name, c.bookName, c.book_title, c.bookTitle, c.book]) {
+    if (typeof f === 'string' && f.trim() && want && norm(f) === want) return true;
+  }
+  return false;
+}
+
+function rowVerse(c: any): number {
+  return Number(c?.verse_number ?? c?.verseNumber ?? c?.verse ?? NaN);
 }
 
 export default function CommentaryPopup({ isOpen, onClose, bookId, bookNum, chapter, verseNumber, bookName, isDark = false, initialCommentary }: CommentaryPopupProps) {
@@ -76,11 +125,19 @@ export default function CommentaryPopup({ isOpen, onClose, bookId, bookNum, chap
         const data = await res.json().catch(() => null);
         if (!data) continue;
         // Unwrap every shape: array / {commentary} / {data} / {success,commentary} / bare object
-        const row = Array.isArray(data) ? data[0]
-          : data.commentary ?? data.data ?? data.result ?? (data.success === false ? null : data);
-        const arr = Array.isArray(row) ? row[0] : row;
-        if (!arr) continue;
-        const p = pickText(arr);
+        const unwrapped = Array.isArray(data) ? data
+          : (data.commentary ?? data.data ?? data.result ?? (data.success === false ? null : data));
+        const rows = Array.isArray(unwrapped) ? unwrapped : (unwrapped ? [unwrapped] : []);
+        // FIX (6): never take rows[0] blindly. Prefer the row whose verse matches
+        // AND which does not provably belong to another book; then any row whose
+        // verse matches; then the first row with no book label. A row that
+        // provably belongs to another book is never used.
+        const bookOk = (c: any) => !rowHasBookField(c) || rowBookMatches(c, book, id, bookName);
+        const pick = rows.find((c: any) => rowVerse(c) === verseNumber && bookOk(c))
+          || rows.find((c: any) => rowVerse(c) === verseNumber && !rowHasBookField(c))
+          || rows.find((c: any) => Number.isNaN(rowVerse(c)) && bookOk(c));
+        if (!pick) continue;
+        const p = pickText(pick);
         if (p.en || p.lu) { found = p; break; }
         // Row exists but empty — keep trying other URLs, don't stop yet
       } catch {}
@@ -88,7 +145,7 @@ export default function CommentaryPopup({ isOpen, onClose, bookId, bookNum, chap
     if (found) { setCommentary(found); setError(null); }
     else { setError('No commentary available for this verse yet.'); }
     setLoading(false);
-  }, [book, id, chapter, verseNumber, initialCommentary]);
+  }, [book, id, chapter, verseNumber, bookName, initialCommentary]);
 
   useEffect(() => {
     if (!isOpen) return;
