@@ -1,23 +1,24 @@
-// app/verse-songs/page.tsx — LIBRARY V2 (songs actually appear)
-// WHAT WAS WRONG IN V1 (see screenshot): the page fetched
-// /api/verse-songs/songs?userEmail=... and expected ONE response shape.
-// It came back empty, so the page showed "No songs in this series yet"
-// even though songs exist, and the series tabs vanished too.
-// V2 fixes the data layer:
-//  1) Fetches songs WITHOUT userEmail first (the parameter may have been
-//     what broke it), then retries WITH userEmail only to pick up liked /
-//     saved state — and only uses that result if it actually has songs.
-//  2) Accepts every response shape: a bare array, { songs }, { data },
-//     { items }, { success, data }.
-//  3) Fallback: if the songs endpoint stays empty, fetches songs per-series
-//     from the series endpoint — the one we KNOW works, because the series
-//     page shows songs. The library can never be emptier than the series pages.
-//  4) Real error state with a Retry button, instead of the misleading
-//     "No songs yet" message when the load actually failed.
-//  5) Tabs are derived from the songs themselves if the series fetch fails.
-// FLOW: songs stream free here. Every Download / Buy button goes to the
-// Album Store page (/verse-songs/store) — Pesapal checkout lives only there.
-// Same mini-player, same like/favorite/play/progress wiring as V1.
+// app/verse-songs/page.tsx — LIBRARY V3 (the "0 songs" fix)
+// ROOT CAUSE (from the live screenshot): the tabs showed SONG titles
+// ("Intro to Philemon 2 · 0") instead of series names. V2's series fetch
+// had a fallback to the base /api/verse-songs endpoint — but that endpoint
+// returns SONGS, not series. So the page filed the 2 songs as "series",
+// the tabs became song titles, and the per-series song lookup (using song
+// ids as series ids) found nothing. 0 songs everywhere — while Admin
+// proves the 2 songs ARE attached to Philemon.
+// V3 fixes the data layer:
+//  1) Series come ONLY from /api/verse-songs/series. Any row shaped like
+//     a song (has mp3_url / audio_url) is filtered OUT of the series list,
+//     so songs can never again masquerade as series.
+//  2) Songs fetch tries /api/verse-songs/songs AND the base /api/verse-songs
+//     (the endpoint that actually returns the songs), plus the userEmail
+//     variant — first non-empty result wins.
+//  3) Songs may carry their series nested ({ series: { id, title } }) —
+//     handled in normalizeSong.
+//  4) Per-series fallback uses REAL series ids only.
+//  5) Tabs derived from songs only if the series endpoint truly returns
+//     nothing — and only from rows with a real series_id.
+// FLOW unchanged: songs stream free here; Download goes to the Album Store.
 'use client';
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
@@ -64,16 +65,22 @@ function asArray(d: any): any[] {
   return [];
 }
 
+// A row is a SONG if it carries an audio file. Series never do.
+const isSongRow = (r: any) => !!(r && (r.mp3_url || r.audio_url || r.audioUrl));
+// A row is a SERIES if it is not a song.
+const isSeriesRow = (r: any) => !!r && !isSongRow(r);
+
 function normalizeSong(sg: any, fallbackSeries?: Series): Song {
+  const nested = sg.series && typeof sg.series === 'object' ? sg.series : {};
   return {
     id: Number(sg.id),
     title: sg.title || 'Untitled',
     description: sg.description || '',
     thumbnail: sg.thumbnail || sg.thumbnail_url || sg.cover || '',
-    mp3_url: sg.mp3_url || sg.audio_url || sg.url || '',
+    mp3_url: sg.mp3_url || sg.audio_url || sg.audioUrl || sg.url || '',
     duration: normDuration(sg.duration),
-    series_id: Number(sg.series_id ?? sg.seriesId ?? fallbackSeries?.id ?? 0),
-    series_title: sg.series_title || sg.seriesTitle || fallbackSeries?.title || '',
+    series_id: Number(sg.series_id ?? sg.seriesId ?? nested.id ?? fallbackSeries?.id ?? 0),
+    series_title: sg.series_title || sg.seriesTitle || nested.title || fallbackSeries?.title || '',
     likes_count: Number(sg.likes_count ?? sg.likesCount ?? sg.likes ?? 0) || 0,
     play_count: Number(sg.play_count ?? sg.playCount ?? sg.plays ?? 0) || 0,
     user_liked: !!sg.user_liked || !!sg.userLiked || !!sg.liked,
@@ -103,48 +110,54 @@ export default function VerseSongsLibraryPage() {
       const email = s?.user?.email || s?.email || '';
       if (email) setUserEmail(email);
 
-      // ── Series (tabs) ───────────────────────────────────────────
-      // Try the series endpoint, then the plain endpoint as fallback.
+      // ── Series (tabs) — ONLY from the series endpoint ───────────
+      // NEVER fall back to the base /api/verse-songs endpoint: it returns
+      // SONGS, and V2 mistook them for series (tabs became song titles).
+      // Also drop any song-shaped row, so songs can never masquerade as series.
       let seriesList: Series[] = [];
-      for (const url of ['/api/verse-songs/series', '/api/verse-songs']) {
-        try {
-          const res = await fetch(url);
-          if (!res.ok) continue;
-          const rows = asArray(await res.json()).map((r: any) => ({
-            id: Number(r.id), title: r.title || 'Untitled',
-            description: r.description || '', thumbnail: r.thumbnail || r.thumbnail_url || '',
-          }));
-          if (rows.length) { seriesList = rows; break; }
-        } catch { /* try next */ }
-      }
+      try {
+        const res = await fetch('/api/verse-songs/series');
+        if (res.ok) {
+          seriesList = asArray(await res.json())
+            .filter(isSeriesRow)
+            .map((r: any) => ({
+              id: Number(r.id), title: r.title || 'Untitled',
+              description: r.description || '', thumbnail: r.thumbnail || r.thumbnail_url || '',
+            }))
+            .filter(r => Number.isFinite(r.id) && r.id > 0);
+        }
+      } catch { /* series fall back to deriving from songs below */ }
       setSeries(seriesList);
 
-      // ── Songs ───────────────────────────────────────────────────
-      // 1) Plain fetch first — NO userEmail (the parameter may be what
-      //    broke V1). 2) If we have an email, retry WITH it to pick up
-      //    liked/saved state — but only use it if it actually has songs.
-      let songList: Song[] = [];
+      // ── Songs — try every endpoint that can return them ──────────
+      // The base /api/verse-songs endpoint returns the songs list, so it
+      // is a first-class candidate — NOT a series fallback.
       const fetchSongs = async (url: string): Promise<Song[]> => {
         try {
           const res = await fetch(url);
           if (!res.ok) return [];
-          return asArray(await res.json()).map((sg: any) => normalizeSong(sg));
+          return asArray(await res.json()).filter(isSongRow).map((sg: any) => normalizeSong(sg));
         } catch { return []; }
       };
-      songList = await fetchSongs('/api/verse-songs/songs');
+      let songList: Song[] = [];
+      for (const url of ['/api/verse-songs/songs', '/api/verse-songs']) {
+        songList = await fetchSongs(url);
+        if (songList.length) break;
+      }
+      // With-user variant only to pick up liked/saved state — and only
+      // if it actually returns songs.
       if (email) {
         const withUser = await fetchSongs(`/api/verse-songs/songs?userEmail=${encodeURIComponent(email)}`);
         if (withUser.length) songList = withUser;
       }
-      // 3) Fallback: per-series fetch — the series endpoint is the one we
-      //    KNOW returns songs (the series page shows them). Collect them.
+      // Per-series fallback — uses REAL series ids only.
       if (!songList.length && seriesList.length) {
         const perSeries = await Promise.all(seriesList.map(async (sr) => {
-          for (const url of [`/api/verse-songs/series/${sr.id}`, `/api/verse-songs/series?seriesId=${sr.id}`, `/api/verse-songs/songs?seriesId=${sr.id}`]) {
+          for (const url of [`/api/verse-songs/series/${sr.id}`, `/api/verse-songs/songs?seriesId=${sr.id}`, `/api/verse-songs/songs?series_id=${sr.id}`]) {
             try {
               const res = await fetch(url);
               if (!res.ok) continue;
-              const rows = asArray(await res.json());
+              const rows = asArray(await res.json()).filter(isSongRow);
               if (rows.length) return rows.map((sg: any) => normalizeSong(sg, sr));
             } catch { /* try next */ }
           }
@@ -154,11 +167,16 @@ export default function VerseSongsLibraryPage() {
       }
       setSongs(songList);
 
-      // Tabs: if the series fetch failed but songs loaded, derive tabs
-      // from the songs themselves so the tabs never vanish.
+      // Tabs: if the series endpoint truly returned nothing, derive tabs
+      // from the songs — but ONLY from rows with a real series_id, so a
+      // song can never become its own tab again.
       if (!seriesList.length && songList.length) {
         const seen = new Map<number, string>();
-        songList.forEach(sg => { if (sg.series_id && !seen.has(sg.series_id)) seen.set(sg.series_id, sg.series_title || `Series ${sg.series_id}`); });
+        songList.forEach(sg => {
+          if (sg.series_id > 0 && !seen.has(sg.series_id)) {
+            seen.set(sg.series_id, sg.series_title && sg.series_title !== sg.title ? sg.series_title : `Series ${sg.series_id}`);
+          }
+        });
         setSeries(Array.from(seen.entries()).map(([id, title]) => ({ id, title })));
       }
 
@@ -259,7 +277,7 @@ export default function VerseSongsLibraryPage() {
   return (
     <div className="min-h-screen bg-[#120e2b] text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        {/* Tabs */}
+        {/* Tabs — series names, never song titles */}
         <div className="flex flex-wrap gap-2 mb-6">
           <button
             onClick={() => setActiveTab('all')}
