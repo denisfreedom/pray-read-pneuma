@@ -21,6 +21,22 @@ export const dynamic = 'force-dynamic';
 
 const norm = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+// V3: normalize every row to commentary_text / luganda_commentary_text using
+// the first NON-EMPTY field (?? chains stop at '' — the "saved but empty"
+// bug). The page then finds the text whatever field the bulk upload used.
+function firstText(...vals: any[]): string {
+  for (const v of vals) if (typeof v === 'string' && v.trim()) return v;
+  return '';
+}
+function normalizeRow(c: any): any {
+  if (!c || typeof c !== 'object') return c;
+  return {
+    ...c,
+    commentary_text: firstText(c.commentary_text, c.english_commentary, c.text_english, c.commentary, c.text, c.content, c.body, c.english_text, c.en, c.commentary_html, c.html, c.explanation, c.explanation_english, c.insight, c.text_html, c.content_html, c.commentary_english, c.en_commentary, c.english),
+    luganda_commentary_text: firstText(c.luganda_commentary_text, c.luganda_commentary, c.text_luganda, c.luganda, c.lu, c.luganda_text, c.lu_text, c.commentary_luganda, c.luganda_html, c.luganda_content, c.lu_commentary),
+  };
+}
+
 function rowHasBookField(c: any): boolean {
   if (!c || typeof c !== 'object') return false;
   return ['book_number', 'bookNumber', 'book_id', 'bookId', 'book_name', 'bookName', 'book_title', 'bookTitle', 'book'].some(
@@ -91,7 +107,7 @@ export async function GET(request: NextRequest) {
     const kept = (Array.isArray(rows) ? rows : []).filter(
       (c) => !anyLabelled || !rowHasBookField(c) || rowBelongsToBook(c, bookNum, bookId, bookNames)
     );
-    return NextResponse.json(kept);
+    return NextResponse.json(kept.map(normalizeRow));
   } catch (error: any) {
     console.error('Error in /api/commentaries:', error);
     return NextResponse.json({ success: false, error: 'Failed to load commentary' }, { status: 500 });
