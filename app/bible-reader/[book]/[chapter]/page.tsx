@@ -3,7 +3,6 @@ import { useState, useEffect, Suspense, memo, useRef } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import VerseShare from '@/components/VerseShare';
-import ReadingPlanProgressBar from '@/app/components/ReadingPlanProgressBar';
 
 // RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
 // Only the data wiring is fixed. No redesign.
@@ -613,8 +612,6 @@ function ChapterContent() {
           <p className="text-[19px] font-bold {linkColor} mt-1">Chapter {chapterNum}</p>
           {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
           <hr className="border-blue-200 my-4" />
-
-          <ReadingPlanProgressBar bookNumber={bookNum} chapter={chapterNum} />
 
           {verses.length === 0 ? (
             <div className={`${themeClasses.card} rounded-xl p-8 text-center shadow-sm`}>
