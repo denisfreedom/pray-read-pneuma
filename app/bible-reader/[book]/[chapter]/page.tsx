@@ -111,6 +111,36 @@ function ChapterContent() {
     if (markKey) html = applyMarksToHtml(html, markKey);
     return html;
   };
+
+  // FIX (3 John 1:1 commentary leaking into Genesis 1:1, Exodus 1:1, every book):
+  // the commentary endpoints return rows for the requested chapter+verse but do
+  // NOT reliably filter by book, and this page used to accept the FIRST row
+  // whose verse matched — whatever book it belonged to. Worse, commentary state
+  // was never cleared when you switched books (see FIX 2 in load()).
+  // A row is now accepted ONLY if its own book field proves it belongs to THIS
+  // book: book_number / book_id / book name. A row with NO book field is
+  // untrusted and rejected — showing no commentary is correct, showing
+  // another book's commentary is not.
+  const rowHasBookField = (c: any): boolean => {
+    if (!c || typeof c !== 'object') return false;
+    return ['book_number', 'bookNumber', 'book_id', 'bookId', 'book_name', 'bookName', 'book_title', 'bookTitle', 'book'].some(
+      (k) => c[k] !== undefined && c[k] !== null && String(c[k]).trim() !== ''
+    );
+  };
+  const rowBookMatches = (c: any, names: (string | undefined | null)[], idVal: any): boolean => {
+    if (!c || typeof c !== 'object') return false;
+    const norm = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const wantNames = names.filter(Boolean).map((n) => norm(n));
+    for (const f of [c.book_number, c.bookNumber, c.book_id, c.bookId]) {
+      const n = Number(f);
+      if (!Number.isNaN(n) && n > 0 && (n === bookNum || n === Number(idVal))) return true;
+    }
+    for (const f of [c.book_name, c.bookName, c.book_title, c.bookTitle, c.book]) {
+      if (typeof f === 'string' && f.trim() && wantNames.includes(norm(f))) return true;
+    }
+    return false;
+  };
+  const currentBookNames = (): (string | undefined | null)[] => [book?.name_english, book?.name, book?.book_name, book?.name_luganda];
   // ── RESTORED: Highlight / Underline (Mark) — select any text in a verse, prayer passage, or commentary ──
   // Private to this device/browser only: saved in localStorage, never sent to the server.
   // How to use: drag to select words (long-press + drag on phone) → the Mark bar appears at the
@@ -348,6 +378,14 @@ function ChapterContent() {
   useEffect(() => {
     if (!bookNum || !chapterNum) return;
     const load = async () => {
+      // FIX 2: fresh book/chapter = fresh commentary state. Without this,
+      // 3 John's commentary stayed in memory and showed on Genesis/Exodus
+      // verse 1 after navigating, because openCommentary() returns early
+      // when commentary[verseNum] already exists.
+      setCommentary({});
+      setChapterCommentary(null);
+      setSelectedVerse(null);
+      setActivePanel(null);
       setLoading(true);
       try {
         // --- Books ---
@@ -366,7 +404,10 @@ function ChapterContent() {
         try {
           const rr = await fetch(`/api/chapter-commentaries?bookId=${bookId}&chapter=${chapterNum}`);
           const dd = await rr.json().catch(() => null);
-          const row = Array.isArray(dd) ? dd[0] : dd;
+          const candidates = Array.isArray(dd) ? dd : (dd ? [dd] : []);
+          const bNames: (string | undefined | null)[] = [b?.name_english, b?.name, b?.book_name, b?.name_luganda];
+          const row = candidates.find((r: any) => rowBookMatches(r, bNames, bookId))
+            || (candidates.length === 1 && !rowHasBookField(candidates[0]) ? candidates[0] : null);
           if (row && (commHtml(row, false) || commHtml(row, true))) setChapterCommentary(row);
         } catch {}
 
@@ -541,8 +582,10 @@ function ChapterContent() {
       const d = await r.json().catch(() => null);
       const arr = Array.isArray(d) ? d : (d?.commentaries || d?.rows || d?.data || (d ? [d] : []));
       const rowVerse = (c: any) => Number(c?.verse_number ?? c?.verseNumber ?? c?.verse ?? NaN);
-      const match = arr.find((c: any) => rowVerse(c) === verseNum)
-        || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) ? arr[0] : undefined);
+      // FIX 1: verse match alone is NOT enough — the row must ALSO belong to
+      // THIS book. Otherwise 3 John 1:1 wins in Genesis 1:1, Exodus 1:1, ...
+      const match = arr.find((c: any) => rowVerse(c) === verseNum && rowBookMatches(c, currentBookNames(), book?.id ?? bookNum))
+        || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) && rowBookMatches(arr[0], currentBookNames(), book?.id ?? bookNum) ? arr[0] : undefined);
       setCommentary(prev => ({ ...prev, [verseNum]: match || { _none: true } }));
     } catch {
       setCommentary(prev => ({ ...prev, [verseNum]: { _none: true } }));
