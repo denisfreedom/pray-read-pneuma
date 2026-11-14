@@ -440,6 +440,22 @@ function ChapterContent() {
     load();
   }, [bookNum, chapterNum]);
 
+  // FIX (jump to EXACT verse): links from Devotionals / Cross-Refs / Commentary popup /
+  // Verse of the Day carry #verse-N, but verses load AFTER the page mounts, so the
+  // browser never scrolls to the hash. Once verses are loaded, scroll to it.
+  useEffect(() => {
+    if (loading || !verses.length) return;
+    const hash = window.location.hash;
+    if (!hash.startsWith('#verse-')) return;
+    let tries = 0;
+    const go = () => {
+      const el = document.getElementById(hash.slice(1));
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      if (tries++ < 12) setTimeout(go, 150);
+    };
+    go();
+  }, [loading, verses]);
+
   const openPrayer = (verseNum: number) => {
     // Second click on the SAME verse's Prayer button = minimize / close
     if (selectedVerse === verseNum && activePanel === 'prayer') {
@@ -622,7 +638,7 @@ function ChapterContent() {
                     <p className="text-[11px] font-bold tracking-wide uppercase mb-2 flex items-center gap-2">🔗 Cross References · Verse {v.verse} <MarkBtn markKey={`crossref-${v.verse}-EN`} title="Select these cross-references & mark them" /></p>
                     {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                       <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
-                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${v.verse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${v.verse}-EN`)}</span>}</li>
+                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}#verse-${cr.target_verse}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${v.verse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${v.verse}-EN`)}</span>}</li>
                       ))}</ul>
                     )}
                   </div>
@@ -717,7 +733,7 @@ function ChapterContent() {
                 <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
                 {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
                   <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${selectedVerse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${selectedVerse}-EN`)}</span>}</li>
+                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}#verse-${cr.target_verse}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${selectedVerse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${selectedVerse}-EN`)}</span>}</li>
                   ))}</ul>
                 )}
                 <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
