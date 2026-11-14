@@ -1,8 +1,8 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { BookOpen, Calendar, CheckCircle2, Clock, ArrowRight, PlayCircle, Search } from 'lucide-react';
+import { BookOpen, Calendar, CheckCircle2, Clock, ArrowRight, PlayCircle, Search, WifiOff } from 'lucide-react';
 import { useThemeStore } from '@/lib/theme-store';
 
 interface ReadingPlan {
@@ -13,7 +13,8 @@ interface ReadingPlan {
   icon: string;
   day_count: number;
   first_book: string | null;
-  // Optional — used if your API already returns per-user progress
+  first_book_number?: number | null;
+  builtin?: boolean;
   enrolled?: boolean;
   completed_days?: number;
   current_day?: number;
@@ -29,37 +30,86 @@ interface PlanProgress {
 type DurationFilter = 'all' | 'short' | 'medium' | 'long' | 'year';
 type SortOrder = 'shortest' | 'longest' | 'az';
 
+// Client-side fallback: the SAME curated plans the API returns when the DB has
+// none. If the network itself fails, the page still shows real plans instead
+// of a dead "Couldn't Load" screen.
+const BUILTIN_PLANS: ReadingPlan[] = [
+  { id: 1001, title: 'The Whole Bible in a Year', description: 'The full story of Scripture, Genesis to Revelation — a steady chapter-a-day rhythm that takes you through the whole Bible in one year.', duration_days: 365, icon: '📖', day_count: 365, first_book: 'Genesis', first_book_number: 1, builtin: true },
+  { id: 1002, title: 'New Testament in 90 Days', description: 'From Matthew to Revelation in three focused months. A faster pace for a season when you want the whole New Testament fresh in your mind.', duration_days: 90, icon: '📘', day_count: 90, first_book: 'Matthew', first_book_number: 40, builtin: true },
+  { id: 1003, title: 'Psalms in 30 Days', description: 'One month in the prayer book of the Bible — praise, lament, thanksgiving and trust, a psalm a day for thirty days.', duration_days: 30, icon: '🎵', day_count: 30, first_book: 'Psalms', first_book_number: 19, builtin: true },
+  { id: 1004, title: 'Proverbs: 31 Days of Wisdom', description: 'A chapter of Proverbs a day for a month — practical wisdom for work, family, money and speech.', duration_days: 31, icon: '💡', day_count: 31, first_book: 'Proverbs', first_book_number: 20, builtin: true },
+  { id: 1005, title: 'The Gospels in 60 Days', description: 'Matthew, Mark, Luke and John in two months — the life, teaching, death and resurrection of Jesus, four times over.', duration_days: 60, icon: '✝️', day_count: 60, first_book: 'Matthew', first_book_number: 40, builtin: true },
+  { id: 1006, title: 'Genesis: Beginnings in 30 Days', description: 'Creation, the fall, Abraham, Jacob and Joseph — the foundations of the whole story in one month.', duration_days: 30, icon: '🌅', day_count: 30, first_book: 'Genesis', first_book_number: 1, builtin: true },
+  { id: 1007, title: 'Romans in 16 Days', description: 'One chapter a day through Paul’s great letter — sin, grace, faith, and life in the Spirit.', duration_days: 16, icon: '✉️', day_count: 16, first_book: 'Romans', first_book_number: 45, builtin: true },
+  { id: 1008, title: 'John in 21 Days', description: 'Three weeks in the Gospel of John — who Jesus is, in his own words and works.', duration_days: 21, icon: '❤️', day_count: 21, first_book: 'John', first_book_number: 43, builtin: true },
+];
+
+function pickPlans(data: any): ReadingPlan[] {
+  const raw = Array.isArray(data) ? data : (data?.plans || data?.data || data?.items || []);
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((p: any) => p && (p.title || p.name))
+    .map((p: any, i: number) => ({
+      id: p.id ?? 1000 + i,
+      title: p.title || p.name || 'Reading Plan',
+      description: p.description || p.desc || p.summary || '',
+      duration_days: Number(p.duration_days ?? p.duration ?? p.total_days ?? p.day_count ?? 0) || 0,
+      icon: p.icon || p.emoji || '📖',
+      day_count: Number(p.day_count ?? p.total_days ?? p.duration_days ?? 0) || 0,
+      first_book: p.first_book || p.start_book || null,
+      first_book_number: p.first_book_number ?? null,
+      builtin: !!p.builtin,
+      enrolled: p.enrolled ?? undefined,
+      completed_days: p.completed_days ?? undefined,
+      current_day: p.current_day ?? undefined,
+      completed: p.completed ?? undefined,
+    }));
+}
+
 export default function ReadingPlansPage() {
   const router = useRouter();
   const [plans, setPlans] = useState<ReadingPlan[]>([]);
   const [progressMap, setProgressMap] = useState<Record<number, PlanProgress>>({});
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  const [offline, setOffline] = useState(false);
   const [search, setSearch] = useState('');
   const [durationFilter, setDurationFilter] = useState<DurationFilter>('all');
   const [sortOrder, setSortOrder] = useState<SortOrder>('shortest');
   const theme = useThemeStore((state) => state.theme);
   const isDark = theme === 'dark';
 
-  useEffect(() => {
-    fetchPlans();
-    fetchProgress();
+  const fetchPlans = useCallback(async () => {
+    // Retry twice — a single hiccup must not blank the page.
+    let lastErr: unknown = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const res = await fetch('/api/reading-plans', { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const list = pickPlans(data);
+        if (list.length) {
+          setPlans(list);
+          setOffline(false);
+          return;
+        }
+        throw new Error('Empty plans response');
+      } catch (err) {
+        lastErr = err;
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+      }
+    }
+    // Network/API truly unreachable: show the built-in plans + an offline note.
+    console.error('Error fetching reading plans:', lastErr);
+    setPlans(BUILTIN_PLANS);
+    setOffline(true);
   }, []);
 
-  async function fetchPlans() {
-    try {
-      const res = await fetch('/api/reading-plans');
-      if (!res.ok) throw new Error('Failed to fetch plans');
-      const data = await res.json();
-      setPlans(data.plans || []);
-      setError(false);
-    } catch (err) {
-      console.error('Error fetching reading plans:', err);
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }
+  useEffect(() => {
+    setLoading(true);
+    fetchPlans().finally(() => setLoading(false));
+    fetchProgress();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Best-effort: if your API has a progress endpoint, use it.
   // If it 404s (endpoint doesn't exist yet), badges just stay hidden —
@@ -120,12 +170,21 @@ export default function ReadingPlansPage() {
     });
   }, [plans, search, durationFilter, sortOrder]);
 
-  const inProgressCount = plans.filter((p) => {
-    const prog = getProgress(p);
-    return prog && !prog.completed;
-  }).length;
+  const inProgress = plans
+    .map((p) => ({ plan: p, prog: getProgress(p) }))
+    .filter((x) => x.prog && !x.prog.completed);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const inProgressCount = inProgress.length;
+  const continuePlan = inProgress[0];
 
-  const openPlan = (id: number) => router.push(`/reading-plans/${id}`);
+  const openPlan = (plan: ReadingPlan) => {
+    // Built-in plans have no detail page — start reading at the first book.
+    if (plan.builtin) {
+      router.push(`/bible-reader/${plan.first_book_number ?? 1}/1`);
+      return;
+    }
+    router.push(`/reading-plans/${plan.id}`);
+  };
 
   return (
     <div className={`min-h-screen ${isDark ? 'bg-gradient-to-br from-[#06090f] via-[#0a0e17] to-[#08060e]' : 'bg-[#FDFBF6]'}`}>
@@ -173,8 +232,33 @@ export default function ReadingPlansPage() {
           <div className="divider w-28 mx-auto mt-8" />
         </div>
 
+        {/* Continue strip — one tap back into the plan you are on */}
+        {!loading && continuePlan && (
+          <button
+            onClick={() => openPlan(continuePlan.plan)}
+            className="w-full max-w-3xl mx-auto mb-10 flex items-center gap-4 rounded-3xl px-6 py-5 text-left group"
+            style={{ background: 'linear-gradient(135deg, rgba(200,160,50,0.12) 0%, rgba(180,140,60,0.05) 100%)', border: '1px solid rgba(180,140,60,0.35)' }}
+          >
+            <span className="text-3xl">{continuePlan.plan.icon || '📖'}</span>
+            <span className="flex-1 min-w-0">
+              <span className={`block text-[11px] font-bold uppercase tracking-widest text-[#B98A2F]`}>Continue where you left off</span>
+              <span className={`block font-serif text-xl font-semibold truncate ${isDark ? 'text-[#f0d890]' : 'text-[#1B2340]'}`}>{continuePlan.plan.title}</span>
+              <span className={`block text-xs ${isDark ? 'text-[rgba(220,200,155,0.65)]' : 'text-[#6B6455]'}`}>Day {continuePlan.prog!.current_day} of {continuePlan.plan.duration_days} · {continuePlan.prog!.completed_days} days done</span>
+            </span>
+            <ArrowRight className="w-5 h-5 text-[#c9900a] group-hover:translate-x-1 transition-transform shrink-0" />
+          </button>
+        )}
+
+        {/* Stats row */}
+        {!loading && plans.length > 0 && (
+          <p className={`text-center text-xs mb-8 ${isDark ? 'text-[rgba(220,200,155,0.5)]' : 'text-[#9A927E]'}`}>
+            {plans.length} plans · shortest {Math.min(...plans.map((p) => p.duration_days))} days · longest {Math.max(...plans.map((p) => p.duration_days))} days
+            {offline && <span className="inline-flex items-center gap-1 ml-2"><WifiOff className="w-3 h-3" /> Showing offline plans — check your connection</span>}
+          </p>
+        )}
+
         {/* Search + Filters */}
-        {!loading && !error && plans.length > 0 && (
+        {!loading && plans.length > 0 && (
           <div className="flex flex-col md:flex-row gap-3 max-w-3xl mx-auto mb-10">
             <div className={`flex items-center gap-2 flex-1 px-4 py-3 rounded-2xl border ${isDark ? 'bg-white/5 border-[rgba(180,140,60,0.25)]' : 'bg-white border-[#E8B84B]/30'}`}>
               <Search className="w-4 h-4 text-[#B98A2F] shrink-0" />
@@ -220,22 +304,6 @@ export default function ReadingPlansPage() {
               </div>
             ))}
           </div>
-        ) : error ? (
-          <div className="text-center py-20">
-            <BookOpen className="w-16 h-16 mx-auto mb-4 text-[rgba(180,140,60,0.4)]" />
-            <h3 className={`font-serif text-2xl mb-2 ${isDark ? 'text-[#f5ece0]' : 'text-[#1B2340]'}`}>
-              Couldn’t Load Reading Plans
-            </h3>
-            <p className={`text-sm mb-6 ${isDark ? 'text-[rgba(220,200,155,0.5)]' : 'text-[#6B6455]'}`}>
-              The plans are probably still there — the connection just failed. Try again.
-            </p>
-            <button
-              onClick={() => { setLoading(true); setError(false); fetchPlans(); }}
-              className="px-8 py-3 rounded-2xl text-sm btn-gold"
-            >
-              Try Again
-            </button>
-          </div>
         ) : filteredPlans.length === 0 && plans.length > 0 ? (
           <div className="text-center py-20">
             <Search className="w-12 h-12 mx-auto mb-4 text-[rgba(180,140,60,0.4)]" />
@@ -262,7 +330,7 @@ export default function ReadingPlansPage() {
                 <button
                   key={plan.id}
                   type="button"
-                  onClick={() => openPlan(plan.id)}
+                  onClick={() => openPlan(plan)}
                   aria-label={`${prog?.completed ? 'Review' : prog ? 'Continue' : 'Start'} ${plan.title} reading plan`}
                   className="card-glow rounded-3xl p-8 group cursor-pointer relative overflow-hidden text-left w-full"
                 >
@@ -271,13 +339,13 @@ export default function ReadingPlansPage() {
                     <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2.5 py-1 rounded-full"
                       style={{ background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.3)' }}>
                       <CheckCircle2 className="w-3 h-3 text-green-400" />
-                      <span className="text- font-bold uppercase tracking-wider text-green-400">Completed</span>
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-green-400">Completed</span>
                     </div>
                   ) : prog ? (
                     <div className="absolute top-4 right-4 flex items-center gap-1.5 px-2.5 py-1 rounded-full"
                       style={{ background: 'rgba(200,160,50,0.14)', border: '1px solid rgba(200,160,40,0.4)' }}>
                       <span className="w-1.5 h-1.5 rounded-full bg-[#f0c060] animate-pulse" />
-                      <span className="text- font-bold uppercase tracking-wider text-[#f0c060]">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-[#f0c060]">
                         Day {prog.current_day} of {total}
                       </span>
                     </div>
@@ -303,7 +371,7 @@ export default function ReadingPlansPage() {
                   {/* Progress bar — only for plans in progress */}
                   {prog && !prog.completed && (
                     <div className="mb-5">
-                      <div className="flex justify-between text- font-semibold mb-1.5">
+                      <div className="flex justify-between text-[11px] font-semibold mb-1.5">
                         <span className="text-[#B98A2F]">{prog.completed_days} days done</span>
                         <span className={isDark ? 'text-[rgba(220,200,155,0.6)]' : 'text-[#9A927E]'}>{pct}%</span>
                       </div>
@@ -345,7 +413,7 @@ export default function ReadingPlansPage() {
                   {/* CTA */}
                   <div className="flex items-center gap-2 text-sm font-semibold text-[#c9900a] group-hover:translate-x-1 transition-transform">
                     <PlayCircle className="w-4 h-4" />
-                    {prog?.completed ? 'Review Plan' : prog ? `Continue · Day ${prog.current_day}` : 'Start Plan'}
+                    {prog?.completed ? 'Review Plan' : prog ? `Continue · Day ${prog.current_day}` : plan.builtin ? 'Start Reading' : 'Start Plan'}
                     <ArrowRight className="w-4 h-4" />
                   </div>
                 </button>
@@ -355,7 +423,7 @@ export default function ReadingPlansPage() {
         )}
 
         {/* Empty State — only when the library is genuinely empty */}
-        {!loading && !error && plans.length === 0 && (
+        {!loading && plans.length === 0 && (
           <div className="text-center py-20">
             <BookOpen className="w-16 h-16 mx-auto mb-4 text-[rgba(180,140,60,0.3)]" />
             <h3 className={`font-serif text-2xl mb-2 ${isDark ? 'text-[#f5ece0]' : 'text-[#1B2340]'}`}>
