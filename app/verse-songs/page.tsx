@@ -1,4 +1,10 @@
-// app/verse-songs/page.tsx — LIBRARY V3 (the "0 songs" fix)
+// app/verse-songs/page.tsx — LIBRARY V4 (header menu + 4-per-row pagination)
+// V4 adds, on top of V3's fixed data layer (unchanged):
+//  1) The site header menu (logo, Home, About Us, Verse Songs, Album Store,
+//     Admin Panel) — sticky at the top, with a hamburger menu on phones.
+//  2) Grid is now 4 audio files per row, 10 rows per page = 40 songs per page.
+//  3) Next / Prev pagination buttons BOTH above the grid and below it,
+//     with page numbers and a "Showing X–Y of Z songs" label.
 // ROOT CAUSE (from the live screenshot): the tabs showed SONG titles
 // ("Intro to Philemon 2 · 0") instead of series names. V2's series fetch
 // had a fallback to the base /api/verse-songs endpoint — but that endpoint
@@ -95,6 +101,8 @@ export default function VerseSongsLibraryPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Mini-player state — one audio element per card, only one plays at once.
   const audioRefs = useRef<Map<number, HTMLAudioElement>>(new Map());
@@ -189,6 +197,9 @@ export default function VerseSongsLibraryPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
+  // Back to page 1 whenever the tab changes.
+  useEffect(() => { setCurrentPage(1); }, [activeTab]);
+
   const pauseOthers = (exceptId: number) => {
     audioRefs.current.forEach((audio, id) => { if (id !== exceptId) audio.pause(); });
   };
@@ -266,6 +277,47 @@ export default function VerseSongsLibraryPage() {
 
   const filtered = activeTab === 'all' ? songs : songs.filter(s => s.series_id === activeTab);
 
+  // ── Pagination: 4 per row × 10 rows = 40 songs per page ──────────
+  const PAGE_SIZE = 40;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pageSongs = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const startIdx = filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const endIdx = Math.min(safePage * PAGE_SIZE, filtered.length);
+
+  const goToPage = (p: number) => {
+    setCurrentPage(Math.min(Math.max(1, p), totalPages));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Page numbers: all of them when few, otherwise 1 … window … last.
+  const pageNumbers: (number | '…')[] = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
+  } else {
+    pageNumbers.push(1);
+    if (safePage > 3) pageNumbers.push('…');
+    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) pageNumbers.push(i);
+    if (safePage < totalPages - 2) pageNumbers.push('…');
+    pageNumbers.push(totalPages);
+  }
+
+  // One pagination bar, rendered twice: once ABOVE the grid, once BELOW it.
+  const renderPagination = (position: 'top' | 'bottom') => (
+    <div key={position} className="flex flex-col sm:flex-row items-center justify-between gap-3 my-4">
+      <p className="text-xs text-white/60">Showing {startIdx}–{endIdx} of {filtered.length} songs · Page {safePage} of {totalPages}</p>
+      <div className="flex items-center gap-1.5 flex-wrap justify-center">
+        <button onClick={() => goToPage(safePage - 1)} disabled={safePage <= 1} className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+        {pageNumbers.map((p, i) => p === '…' ? (
+          <span key={`e-${i}`} className="px-1 text-white/50">…</span>
+        ) : (
+          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20'}`}>{p}</button>
+        ))}
+        <button onClick={() => goToPage(safePage + 1)} disabled={safePage >= totalPages} className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#120e2b] flex items-center justify-center">
@@ -276,11 +328,41 @@ export default function VerseSongsLibraryPage() {
 
   return (
     <div className="min-h-screen bg-[#120e2b] text-white">
+      {/* ── Header menu (same menu as the other pages) ── */}
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#120e2b]/95 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
+          <Link href="/" className="flex items-center gap-2.5 font-bold text-lg">
+            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 flex items-center justify-center font-black text-sm shadow-lg shadow-amber-500/30">PRB</span>
+            Pray-Read Bible
+          </Link>
+          <nav className="hidden md:flex items-center gap-1 text-sm font-semibold">
+            <Link href="/" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Home</Link>
+            <Link href="/about" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">About Us</Link>
+            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30">Verse Songs</Link>
+            <Link href="/verse-songs/store" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Album Store</Link>
+            <Link href="/admin_panel" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Admin Panel</Link>
+          </nav>
+          <button onClick={() => setMenuOpen(o => !o)} className="md:hidden p-2 rounded-lg bg-white/10 hover:bg-white/20" aria-label="Toggle menu">
+            <span className="block w-5 h-0.5 bg-white mb-1" />
+            <span className="block w-5 h-0.5 bg-white mb-1" />
+            <span className="block w-5 h-0.5 bg-white" />
+          </button>
+        </div>
+        {menuOpen && (
+          <nav className="md:hidden border-t border-white/10 px-4 py-3 flex flex-col gap-1 text-sm font-semibold">
+            <Link href="/" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Home</Link>
+            <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">About Us</Link>
+            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-amber-400 text-slate-950">Verse Songs</Link>
+            <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Album Store</Link>
+            <Link href="/admin_panel" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Admin Panel</Link>
+          </nav>
+        )}
+      </header>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* Tabs — series names, never song titles */}
         <div className="flex flex-wrap gap-2 mb-6">
           <button
-            onClick={() => setActiveTab('all')}
+            onClick={() => { setActiveTab('all'); setCurrentPage(1); }}
             className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === 'all' ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20 text-white'}`}
           >
             All Songs
@@ -288,7 +370,7 @@ export default function VerseSongsLibraryPage() {
           {series.map(s => (
             <button
               key={s.id}
-              onClick={() => setActiveTab(s.id)}
+              onClick={() => { setActiveTab(s.id); setCurrentPage(1); }}
               className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === s.id ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20 text-white'}`}
             >
               {s.title} · {counts[s.id] || 0}
@@ -307,6 +389,8 @@ export default function VerseSongsLibraryPage() {
           </Link>
         </div>
 
+        {!loadError && filtered.length > 0 && renderPagination('top')}
+
         {loadError ? (
           <div className="text-center py-16">
             <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
@@ -321,8 +405,8 @@ export default function VerseSongsLibraryPage() {
             <p>No songs in this series yet.</p>
           </div>
         ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map(song => {
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {pageSongs.map(song => {
               const t = times[song.id] || 0;
               const pct = song.duration > 0 ? (t / song.duration) * 100 : 0;
               const isPlaying = playingId === song.id;
@@ -412,6 +496,7 @@ export default function VerseSongsLibraryPage() {
             })}
           </div>
         )}
+        {!loadError && filtered.length > 0 && renderPagination('bottom')}
       </div>
 
       <style jsx>{`
