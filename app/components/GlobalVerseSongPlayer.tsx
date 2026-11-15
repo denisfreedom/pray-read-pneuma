@@ -1,44 +1,42 @@
-// app/verse-songs/page.tsx — LIBRARY V7 (header: Dashboard instead of Admin Panel)
-// V7 FIX: the series page worked but this page showed 0 songs, because it
-// only tried the per-series detail endpoint as a LAST resort. V7 loads songs
-// the EXACT same way the working series page does — detail endpoint first
-// for every known series — and unwraps deeper response nesting.
-// V4 adds, on top of V3's fixed data layer (unchanged):
-//  1) The site header menu (logo, Home, About Us, Verse Songs, Album Store,
-//     Dashboard) — sticky at the top, with a hamburger menu on phones.
-//  2) Grid is now 4 audio files per row, 10 rows per page = 40 songs per page.
-//  3) Next / Prev pagination buttons BOTH above the grid and below it,
-//     with page numbers and a "Showing X–Y of Z songs" label.
-// ROOT CAUSE (from the live screenshot): the tabs showed SONG titles
-// ("Intro to Philemon 2 · 0") instead of series names. V2's series fetch
-// had a fallback to the base /api/verse-songs endpoint — but that endpoint
-// returns SONGS, not series. So the page filed the 2 songs as "series",
-// the tabs became song titles, and the per-series song lookup (using song
-// ids as series ids) found nothing. 0 songs everywhere — while Admin
-// proves the 2 songs ARE attached to Philemon.
-// V3 fixes the data layer:
-//  1) Series come ONLY from /api/verse-songs/series. Any row shaped like
-//     a song (has mp3_url / audio_url) is filtered OUT of the series list,
-//     so songs can never again masquerade as series.
-//  2) Songs fetch tries /api/verse-songs/songs AND the base /api/verse-songs
-//     (the endpoint that actually returns the songs), plus the userEmail
-//     variant — first non-empty result wins.
-//  3) Songs may carry their series nested ({ series: { id, title } }) —
-//     handled in normalizeSong.
-//  4) Per-series fallback uses REAL series ids only.
-//  5) Tabs derived from songs only if the series endpoint truly returns
-//     nothing — and only from rows with a real series_id.
-// FLOW unchanged: songs stream free here; Download goes to the Album Store.
+// app/components/GlobalVerseSongPlayer.tsx — GLOBAL floating verse-song player
+// V3 FIXES (both made the song restart instead of pausing):
+//  1) playQueue compared queue arrays by REFERENCE (queueRef.current === list).
+//     The pages rebuild `filtered` on every render, so that was never true
+//     and tapping the current song re-queued it from 0:00 instead of pausing.
+//     Now it compares by song ID only.
+//  2) The audio effect compared audio.src (absolute URL) with mp3_url
+//     (which may be relative). That was never equal either, so every
+//     play/pause toggle re-set the source and restarted the song. Now the
+//     loaded URL is tracked in a ref and compared against itself.
+// WHY THIS FILE EXISTS: a player inside the verse-songs page dies the
+// moment you navigate away, because Next.js unmounts the page. This player
+// lives in the ROOT LAYOUT (see the layout snippet at the bottom of this
+// file), so it keeps playing while you move around the whole site.
+// FEATURES:
+//  - Floating: a slim minimized bar, tap to expand to the full player.
+//  - Playlist (queue): Play All, tap any song in the list, Next / Prev.
+//  - Shuffle, Repeat (off / all / one), seek bar, volume.
+//  - Like / Save, Download → Album Store (never a free file).
+//  - Progress saved to the server + play count on finish.
+//  - Keeps playing across page changes (it lives in the layout, not a page).
+//  - Screen-off playback: it uses the browser's plain <audio> element —
+//    the only kind of web audio that keeps playing when a phone screen
+//    locks — plus Media Session, so the lock screen shows the song with
+//    Play / Pause / Next / Prev controls. See "honest limits" below.
+// HONEST LIMITS (no website can override these):
+//  - A full page refresh / closing the tab stops playback.
+//  - An aggressive battery-saver that kills the browser tab stops playback.
+//  - What this file does is the correct setup: real <audio>, no pausing
+//    on tab-hide or screen-off, Media Session lock-screen controls.
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { Play, Pause, Heart, Bookmark, Lock, Music, ChevronRight, RefreshCw } from 'lucide-react';
-import { useVerseSongPlayer } from '../components/GlobalVerseSongPlayer';
+import { Play, Pause, SkipBack, SkipForward, Heart, Bookmark, Lock, X, ChevronUp, ChevronDown, Shuffle, Repeat, Repeat1, Volume2, ListMusic } from 'lucide-react';
 
-interface Series { id: number; title: string; description?: string; thumbnail?: string; }
-interface Song {
+export interface PlayerSong {
   id: number;
   title: string;
   description?: string;
@@ -53,394 +51,480 @@ interface Song {
   user_favorited: boolean;
 }
 
-function normDuration(v: any): number {
-  if (typeof v === 'number') return Number.isNaN(v) ? 0 : v;
-  if (v === null || v === undefined || v === '') return 0;
-  const s = String(v).trim();
-  const m = s.match(/^(?:(\d+):)?(\d+):(\d{2})$/);
-  if (m) return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
-  const n = parseInt(s, 10);
-  return Number.isNaN(n) ? 0 : n;
+type RepeatMode = 'off' | 'all' | 'one';
+
+interface PlayerContextValue {
+  queue: PlayerSong[];
+  currentSong: PlayerSong | null;
+  currentIndex: number;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  volume: number;
+  minimized: boolean;
+  repeatMode: RepeatMode;
+  shuffle: boolean;
+  playQueue: (list: PlayerSong[], start: PlayerSong) => void;
+  playIndex: (index: number) => void;
+  togglePlay: () => void;
+  playNext: (fromEnded?: boolean) => void;
+  playPrev: () => void;
+  seekTo: (seconds: number) => void;
+  setVolume: (v: number) => void;
+  minimizePlayer: () => void;
+  expandPlayer: () => void;
+  closePlayer: () => void;
+  toggleLike: (song: PlayerSong) => Promise<void>;
+  toggleFavorite: (song: PlayerSong) => Promise<void>;
+  updateSongInQueue: (id: number, patch: Partial<PlayerSong>) => void;
+  toggleShuffle: () => void;
+  cycleRepeat: () => void;
 }
+
+const PlayerContext = createContext<PlayerContextValue | null>(null);
+
+// SAFE FALLBACK: if the layout does not have <VerseSongPlayerProvider> yet,
+// the hook returns a harmless no-op player instead of THROWING. Throwing here
+// is what failed the Vercel build: Next.js pre-renders the verse-songs pages,
+// and a thrown error during pre-render fails the whole build. With this
+// fallback the pages always build; playback simply does nothing until the
+// provider is added to app/layout.tsx (see the wiring snippet at the bottom).
+const noopPlayer: PlayerContextValue = {
+  queue: [], currentSong: null, currentIndex: -1, isPlaying: false,
+  currentTime: 0, duration: 0, volume: 1, minimized: true,
+  repeatMode: 'off', shuffle: false,
+  playQueue: () => {}, playIndex: () => {}, togglePlay: () => {},
+  playNext: () => {}, playPrev: () => {}, seekTo: () => {}, setVolume: () => {},
+  minimizePlayer: () => {}, expandPlayer: () => {}, closePlayer: () => {},
+  toggleLike: async () => {}, toggleFavorite: async () => {},
+  updateSongInQueue: () => {}, toggleShuffle: () => {}, cycleRepeat: () => {},
+};
+
+export function useVerseSongPlayer(): PlayerContextValue {
+  const ctx = useContext(PlayerContext);
+  return ctx ?? noopPlayer;
+}
+
 const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
-// Pull an array out of any response shape: [], { songs }, { data }, { items }, { success, data }.
-function asArray(d: any): any[] {
-  if (Array.isArray(d)) return d;
-  if (!d || typeof d !== 'object') return [];
-  if (Array.isArray(d.songs)) return d.songs;
-  if (Array.isArray(d.series)) return d.series;
-  if (Array.isArray(d.data)) return d.data;
-  // Deeper nesting: { data: { songs: [...] } } or { data: { series: [...] } }
-  if (d.data && typeof d.data === 'object') {
-    if (Array.isArray(d.data.songs)) return d.data.songs;
-    if (Array.isArray(d.data.series)) return d.data.series;
-    if (Array.isArray(d.data.data)) return d.data.data;
-  }
-  if (Array.isArray(d.items)) return d.items;
-  if (Array.isArray(d.results)) return d.results;
-  return [];
-}
-
-// A row is a SONG if it carries an audio file. Series never do.
-const isSongRow = (r: any) => !!(r && (r.mp3_url || r.audio_url || r.audioUrl));
-// A row is a SERIES if it is not a song.
-const isSeriesRow = (r: any) => !!r && !isSongRow(r);
-
-function normalizeSong(sg: any, fallbackSeries?: Series): Song {
-  const nested = sg.series && typeof sg.series === 'object' ? sg.series : {};
-  return {
-    id: Number(sg.id),
-    title: sg.title || 'Untitled',
-    description: sg.description || '',
-    thumbnail: sg.thumbnail || sg.thumbnail_url || sg.cover || '',
-    mp3_url: sg.mp3_url || sg.audio_url || sg.audioUrl || sg.url || '',
-    duration: normDuration(sg.duration),
-    series_id: Number(sg.series_id ?? sg.seriesId ?? nested.id ?? fallbackSeries?.id ?? 0),
-    series_title: sg.series_title || sg.seriesTitle || nested.title || fallbackSeries?.title || '',
-    likes_count: Number(sg.likes_count ?? sg.likesCount ?? sg.likes ?? 0) || 0,
-    play_count: Number(sg.play_count ?? sg.playCount ?? sg.plays ?? 0) || 0,
-    user_liked: !!sg.user_liked || !!sg.userLiked || !!sg.liked,
-    user_favorited: !!sg.user_favorited || !!sg.userFavorited || !!sg.favorited,
-  };
-}
-
-export default function VerseSongsLibraryPage() {
-  const [series, setSeries] = useState<Series[]>([]);
-  const [songs, setSongs] = useState<Song[]>([]);
-  const [activeTab, setActiveTab] = useState<number | 'all'>('all');
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(false);
+export function VerseSongPlayerProvider({ children }: { children: ReactNode }) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [queue, setQueue] = useState<PlayerSong[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(-1);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolumeState] = useState(1);
+  const [minimized, setMinimized] = useState(true);
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>('off');
+  const [shuffle, setShuffle] = useState(false);
   const [userEmail, setUserEmail] = useState('');
-  // The floating global player (lives in the root layout, keeps playing
-  // across pages and with the screen off). Cards only tell it what to play.
-  const player = useVerseSongPlayer();
-  const [currentPage, setCurrentPage] = useState(1);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const lastSavedRef = useRef(0);
+  const queueRef = useRef<PlayerSong[]>([]);
+  const indexRef = useRef(-1);
+  // Which URL is currently loaded in the <audio> element. Compared against
+  // itself (never against audio.src, which the browser returns absolute).
+  const loadedSrcRef = useRef('');
+  const repeatRef = useRef<RepeatMode>('off');
+  const shuffleRef = useRef(false);
+  queueRef.current = queue;
+  indexRef.current = currentIndex;
+  repeatRef.current = repeatMode;
+  shuffleRef.current = shuffle;
 
+  const currentSong = currentIndex >= 0 ? queue[currentIndex] : null;
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    setLoadError(false);
-    try {
-      const s = await fetch('/api/auth/session').then(r => r.ok ? r.json() : null).catch(() => null);
+  useEffect(() => {
+    fetch('/api/auth/session').then(r => r.ok ? r.json() : null).then(s => {
       const email = s?.user?.email || s?.email || '';
       if (email) setUserEmail(email);
-
-      // ── Series (tabs) — ONLY from the series endpoint ───────────
-      // NEVER fall back to the base /api/verse-songs endpoint: it returns
-      // SONGS, and V2 mistook them for series (tabs became song titles).
-      // Also drop any song-shaped row, so songs can never masquerade as series.
-      let seriesList: Series[] = [];
-      try {
-        const res = await fetch('/api/verse-songs/series');
-        if (res.ok) {
-          seriesList = asArray(await res.json())
-            .filter(isSeriesRow)
-            .map((r: any) => ({
-              id: Number(r.id), title: r.title || 'Untitled',
-              description: r.description || '', thumbnail: r.thumbnail || r.thumbnail_url || '',
-            }))
-            .filter(r => Number.isFinite(r.id) && r.id > 0);
-        }
-      } catch { /* series fall back to deriving from songs below */ }
-      setSeries(seriesList);
-
-      // ── Songs — detail endpoint FIRST (the proven path) ─────────
-      // This is exactly how the working series page loads its songs:
-      // /api/verse-songs/series/<id> returns that series' songs. The old
-      // library only tried this as a last resort, so when the general
-      // endpoints returned an empty / oddly-shaped result, the page showed
-      // 0 songs even though the songs exist.
-      const fetchSongs = async (url: string, fallback?: Series): Promise<Song[]> => {
-        try {
-          const res = await fetch(url);
-          if (!res.ok) return [];
-          return asArray(await res.json()).filter(isSongRow).map((sg: any) => normalizeSong(sg, fallback));
-        } catch { return []; }
-      };
-      let songList: Song[] = [];
-      // 1) Per-series detail — one call per known series, in parallel.
-      // Rows whose explicit series_id belongs to another series are
-      // dropped here; their own series' call picks them up.
-      if (seriesList.length) {
-        const perSeries = await Promise.all(seriesList.map(async (sr) => {
-          const rows = await fetchSongs(`/api/verse-songs/series/${sr.id}`, sr);
-          return rows.filter(sg =>
-            sg.series_id === sr.id ||
-            (sg.series_title && sr.title && sg.series_title.trim().toLowerCase() === sr.title.trim().toLowerCase())
-          );
-        }));
-        songList = perSeries.flat();
-      }
-      // 2) General songs endpoints, only if the detail calls found nothing.
-      if (!songList.length) {
-        for (const url of ['/api/verse-songs/songs', '/api/verse-songs']) {
-          songList = await fetchSongs(url);
-          if (songList.length) break;
-        }
-      }
-      // 3) With-user variant only to pick up liked/saved state — and only
-      // if it actually returns songs.
-      if (email) {
-        const withUser = await fetchSongs(`/api/verse-songs/songs?userEmail=${encodeURIComponent(email)}`);
-        if (withUser.length) songList = withUser;
-      }
-      // 4) Orphan rescue: a song whose row carries no series_id but whose
-      // series_title matches a known series belongs to that series.
-      if (songList.length && seriesList.length) {
-        songList = songList.map(sg => {
-          if (sg.series_id > 0) return sg;
-          const match = seriesList.find(sr => sr.title && sg.series_title && sr.title.trim().toLowerCase() === sg.series_title.trim().toLowerCase());
-          return match ? { ...sg, series_id: match.id, series_title: match.title } : sg;
-        });
-      }
-      setSongs(songList);
-
-      // Tabs: if the series endpoint truly returned nothing, derive tabs
-      // from the songs — but ONLY from rows with a real series_id, so a
-      // song can never become its own tab again.
-      if (!seriesList.length && songList.length) {
-        const seen = new Map<number, string>();
-        songList.forEach(sg => {
-          if (sg.series_id > 0 && !seen.has(sg.series_id)) {
-            seen.set(sg.series_id, sg.series_title && sg.series_title !== sg.title ? sg.series_title : `Series ${sg.series_id}`);
-          }
-        });
-        setSeries(Array.from(seen.entries()).map(([id, title]) => ({ id, title })));
-      }
-
-      setLoadError(songList.length === 0 && seriesList.length === 0);
-    } catch (e) {
-      console.error('Library load error:', e);
-      setLoadError(true);
-    } finally { setLoading(false); }
+    }).catch(() => {});
   }, []);
 
-  useEffect(() => { loadAll(); }, [loadAll]);
+  const updateSongInQueue = useCallback((id: number, patch: Partial<PlayerSong>) => {
+    setQueue(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s));
+  }, []);
 
-  // Back to page 1 whenever the tab changes.
-  useEffect(() => { setCurrentPage(1); }, [activeTab]);
+  // Drive the single <audio> element from state. This element is the whole
+  // reason screen-off playback works: it is a plain browser audio element,
+  // and we NEVER pause it on tab-hide / screen-off.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !currentSong) return;
+    if (loadedSrcRef.current !== currentSong.mp3_url) {
+      audio.src = currentSong.mp3_url;
+      loadedSrcRef.current = currentSong.mp3_url;
+      setCurrentTime(0);
+    }
+    if (isPlaying) audio.play().catch(() => setIsPlaying(false));
+    else audio.pause();
+  }, [currentSong, isPlaying]);
 
-  const handleLike = (song: Song) => {
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (audio) audio.volume = volume;
+  }, [volume]);
+
+  const saveProgress = useCallback(async (song: PlayerSong, seconds: number, completed: boolean) => {
+    if (!userEmail) return;
+    const now = Date.now();
+    if (!completed && now - lastSavedRef.current < 5000) return;
+    lastSavedRef.current = now;
+    try {
+      await fetch('/api/verse-songs/progress', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verseSongId: song.id, userEmail, last_position_seconds: Math.floor(seconds), completed }),
+      });
+    } catch { /* progress is best-effort */ }
+  }, [userEmail]);
+
+  const playNext = useCallback((fromEnded = false) => {
+    const q = queueRef.current;
+    const idx = indexRef.current;
+    if (!q.length || idx < 0) return;
+    if (repeatRef.current === 'one' && fromEnded) {
+      const audio = audioRef.current;
+      if (audio) { audio.currentTime = 0; audio.play().catch(() => {}); }
+      return;
+    }
+    let next = idx + 1;
+    if (shuffleRef.current && q.length > 1) {
+      do { next = Math.floor(Math.random() * q.length); } while (next === idx);
+    } else if (next >= q.length) {
+      if (repeatRef.current === 'all') next = 0;
+      else { setIsPlaying(false); return; }
+    }
+    setCurrentIndex(next);
+    setIsPlaying(true);
+  }, []);
+
+  const handleEnded = useCallback(() => {
+    const song = queueRef.current[indexRef.current];
+    if (song) {
+      saveProgress(song, song.duration, true);
+      fetch('/api/verse-songs/play', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verseSongId: song.id, userEmail }),
+      }).catch(() => {});
+      updateSongInQueue(song.id, { play_count: song.play_count + 1 });
+    }
+    playNext(true);
+  }, [saveProgress, userEmail, playNext, updateSongInQueue]);
+
+  const playQueue = useCallback((list: PlayerSong[], start: PlayerSong) => {
+    if (!list.length) return;
+    const idx = list.findIndex(s => s.id === start.id);
+    const at = idx >= 0 ? idx : 0;
+    // Tapping the song that is already current just toggles play/pause.
+    // Compare by SONG ID only: the pages rebuild their `filtered` array on
+    // every render, so comparing array references would never match.
+    if (queueRef.current.length && queueRef.current[indexRef.current]?.id === start.id) {
+      setIsPlaying(p => !p);
+      return;
+    }
+    setQueue(list);
+    setCurrentIndex(at);
+    setIsPlaying(true);
+    setMinimized(false);
+  }, []);
+
+  const playIndex = useCallback((index: number) => {
+    if (index < 0 || index >= queueRef.current.length) return;
+    setCurrentIndex(index);
+    setIsPlaying(true);
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    if (currentIndex < 0) return;
+    setIsPlaying(p => !p);
+  }, [currentIndex]);
+
+  const playPrev = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio && audio.currentTime > 3) { audio.currentTime = 0; setCurrentTime(0); return; }
+    const q = queueRef.current;
+    const idx = indexRef.current;
+    if (!q.length || idx < 0) return;
+    setCurrentIndex(idx <= 0 ? q.length - 1 : idx - 1);
+    setIsPlaying(true);
+  }, []);
+
+  const seekTo = useCallback((seconds: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = seconds;
+    setCurrentTime(seconds);
+  }, []);
+
+  const setVolume = useCallback((v: number) => setVolumeState(Math.min(1, Math.max(0, v))), []);
+
+  const closePlayer = useCallback(() => {
+    const audio = audioRef.current;
+    if (audio) {
+      audio.pause();
+      audio.removeAttribute('src');
+      audio.load();
+    }
+    loadedSrcRef.current = '';
+    setIsPlaying(false);
+    setQueue([]);
+    setCurrentIndex(-1);
+    setCurrentTime(0);
+    setMinimized(true);
+  }, []);
+
+  const toggleLike = useCallback(async (song: PlayerSong) => {
     const liked = !song.user_liked;
-    setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_liked: liked, likes_count: Math.max(0, s.likes_count + (liked ? 1 : -1)) } : s));
-    player.toggleLike(song);
-  };
+    updateSongInQueue(song.id, { user_liked: liked, likes_count: Math.max(0, song.likes_count + (liked ? 1 : -1)) });
+    if (!userEmail) return;
+    try {
+      const res = await fetch('/api/verse-songs/likes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verseSongId: song.id, userEmail, liked }),
+      });
+      if (!res.ok) throw new Error('like failed');
+    } catch {
+      updateSongInQueue(song.id, { user_liked: !liked, likes_count: Math.max(0, song.likes_count + (liked ? -1 : 1)) });
+    }
+  }, [userEmail, updateSongInQueue]);
 
-  const handleFavorite = (song: Song) => {
+  const toggleFavorite = useCallback(async (song: PlayerSong) => {
     const favorited = !song.user_favorited;
-    setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_favorited: favorited } : s));
-    player.toggleFavorite(song);
+    updateSongInQueue(song.id, { user_favorited: favorited });
+    if (!userEmail) return;
+    try {
+      const res = await fetch('/api/verse-songs/favorites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verseSongId: song.id, userEmail, favorited }),
+      });
+      if (!res.ok) throw new Error('favorite failed');
+    } catch {
+      updateSongInQueue(song.id, { user_favorited: !favorited });
+    }
+  }, [userEmail, updateSongInQueue]);
+
+  // Lock-screen / notification controls (Media Session). This is what puts
+  // the song on the phone's lock screen with working buttons.
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !('mediaSession' in navigator) || !currentSong) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentSong.title,
+        artist: currentSong.series_title || 'Pray-Read Bible',
+        album: 'Verse Songs',
+        artwork: currentSong.thumbnail ? [{ src: currentSong.thumbnail, sizes: '512x512', type: 'image/jpeg' }] : [],
+      });
+      navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
+      navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
+      navigator.mediaSession.setActionHandler('previoustrack', () => playPrev());
+      navigator.mediaSession.setActionHandler('nexttrack', () => playNext());
+      navigator.mediaSession.setActionHandler('seekto', (d) => { if (d.seekTime !== undefined) seekTo(d.seekTime); });
+    } catch { /* Media Session not supported on this browser */ }
+  }, [currentSong, playPrev, playNext, seekTo]);
+
+  const value: PlayerContextValue = {
+    queue, currentSong, currentIndex, isPlaying, currentTime, duration, volume,
+    minimized, repeatMode, shuffle,
+    playQueue, playIndex, togglePlay, playNext, playPrev, seekTo, setVolume,
+    minimizePlayer: () => setMinimized(true),
+    expandPlayer: () => setMinimized(false),
+    closePlayer, toggleLike, toggleFavorite, updateSongInQueue,
+    toggleShuffle: () => setShuffle(s => !s),
+    cycleRepeat: () => setRepeatMode(m => m === 'off' ? 'all' : m === 'all' ? 'one' : 'off'),
   };
 
-  const counts = useMemo(() => {
-    const c: Record<number, number> = {};
-    songs.forEach(s => { c[s.series_id] = (c[s.series_id] || 0) + 1; });
-    return c;
-  }, [songs]);
-
-  const filtered = activeTab === 'all' ? songs : songs.filter(s => s.series_id === activeTab);
-
-  // ── Pagination: 4 per row × 10 rows = 40 songs per page ──────────
-  const PAGE_SIZE = 40;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const safePage = Math.min(currentPage, totalPages);
-  const pageSongs = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-  const startIdx = filtered.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const endIdx = Math.min(safePage * PAGE_SIZE, filtered.length);
-
-  const goToPage = (p: number) => {
-    setCurrentPage(Math.min(Math.max(1, p), totalPages));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // Page numbers: all of them when few, otherwise 1 … window … last.
-  const pageNumbers: (number | '…')[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pageNumbers.push(i);
-  } else {
-    pageNumbers.push(1);
-    if (safePage > 3) pageNumbers.push('…');
-    for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) pageNumbers.push(i);
-    if (safePage < totalPages - 2) pageNumbers.push('…');
-    pageNumbers.push(totalPages);
-  }
-
-  // One pagination bar, rendered twice: once ABOVE the grid, once BELOW it.
-  const renderPagination = (position: 'top' | 'bottom') => (
-    <div key={position} className="flex flex-col sm:flex-row items-center justify-between gap-3 my-4">
-      <p className="text-xs text-white/60">Showing {startIdx}–{endIdx} of {filtered.length} songs · Page {safePage} of {totalPages}</p>
-      <div className="flex items-center gap-1.5 flex-wrap justify-center">
-        <button onClick={() => goToPage(safePage - 1)} disabled={safePage <= 1} className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
-        {pageNumbers.map((p, i) => p === '…' ? (
-          <span key={`e-${i}`} className="px-1 text-white/50">…</span>
-        ) : (
-          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20'}`}>{p}</button>
-        ))}
-        <button onClick={() => goToPage(safePage + 1)} disabled={safePage >= totalPages} className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
-      </div>
-    </div>
+  return (
+    <PlayerContext.Provider value={value}>
+      {children}
+      {/* The ONE audio element for the whole site. Plain <audio>, no controls,
+          no pause-on-hide: this is what keeps playing when the screen locks. */}
+      <audio
+        ref={audioRef}
+        preload="metadata"
+        playsInline
+        className="hidden"
+        onPlay={() => setIsPlaying(true)}
+        onTimeUpdate={(e) => {
+          const cur = e.currentTarget.currentTime;
+          setCurrentTime(cur);
+          const song = queueRef.current[indexRef.current];
+          if (song) saveProgress(song, cur, false);
+        }}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+        onEnded={handleEnded}
+      />
+    </PlayerContext.Provider>
   );
+}
 
-  if (loading) {
+// ── The floating player UI ────────────────────────────────────────────
+export function FloatingPlayer() {
+  const p = useVerseSongPlayer();
+  const song = p.currentSong;
+  if (!song) return null;
+  const pct = p.duration > 0 ? (p.currentTime / p.duration) * 100 : 0;
+
+  // ── Minimized: slim bar pinned to the bottom ──
+  if (p.minimized) {
     return (
-      <div className="min-h-screen bg-[#120e2b] flex items-center justify-center">
-        <p className="text-white/60">Loading verse songs…</p>
+      <div className="fixed bottom-0 inset-x-0 z-50 border-t border-amber-400/40 bg-[#1d1840]/95 backdrop-blur shadow-2xl">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-2 flex items-center gap-3">
+          <button onClick={p.expandPlayer} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+            <span className="relative w-11 h-11 shrink-0 rounded-lg overflow-hidden bg-slate-800">
+              {song.thumbnail ? (
+                <Image src={song.thumbnail} alt={song.title} fill className="object-cover" sizes="44px" />
+              ) : (
+                <span className="absolute inset-0 flex items-center justify-center text-lg">🎵</span>
+              )}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-bold text-sm text-white truncate">{song.title}</span>
+              <span className="block text-xs text-white/60 truncate">{song.series_title || 'Verse Songs'} · {fmt(p.currentTime)} / {fmt(p.duration)}</span>
+            </span>
+          </button>
+          <button onClick={p.togglePlay} className="shrink-0 p-2.5 rounded-full bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/40 transition hover:scale-110 active:scale-95" aria-label={p.isPlaying ? 'Pause' : 'Play'}>
+            {p.isPlaying ? <Pause className="w-4 h-4" fill="currentColor" /> : <Play className="w-4 h-4 ml-0.5" fill="currentColor" />}
+          </button>
+          <button onClick={() => p.playNext()} className="shrink-0 p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition" aria-label="Next">
+            <SkipForward className="w-4 h-4" fill="currentColor" />
+          </button>
+          <button onClick={p.expandPlayer} className="shrink-0 p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition" aria-label="Maximize player">
+            <ChevronUp className="w-4 h-4" />
+          </button>
+          <button onClick={p.closePlayer} className="shrink-0 p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition" aria-label="Close player">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        {/* Thin progress line */}
+        <div className="h-1 bg-white/10">
+          <div className="h-full bg-gradient-to-r from-amber-300 to-yellow-600 transition-all" style={{ width: `${pct}%` }} />
+        </div>
       </div>
     );
   }
 
+  // ── Maximized: full player + playlist ──
   return (
-    <div className="min-h-screen bg-[#120e2b] text-white">
-      {/* ── Header menu (same menu as the other pages) ── */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#120e2b]/95 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
-          <Link href="/" className="flex items-center gap-2.5 font-bold text-lg">
-            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 flex items-center justify-center font-black text-sm shadow-lg shadow-amber-500/30">PRB</span>
-            Pray-Read Bible
-          </Link>
-          <nav className="hidden md:flex items-center gap-1 text-sm font-semibold">
-            <Link href="/" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Home</Link>
-            <Link href="/about" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">About Us</Link>
-            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30">Verse Songs</Link>
-            <Link href="/verse-songs/store" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Album Store</Link>
-            <Link href="/dashboard" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Dashboard</Link>
-          </nav>
-          <button onClick={() => setMenuOpen(o => !o)} className="md:hidden p-2 rounded-lg bg-white/10 hover:bg-white/20" aria-label="Toggle menu">
-            <span className="block w-5 h-0.5 bg-white mb-1" />
-            <span className="block w-5 h-0.5 bg-white mb-1" />
-            <span className="block w-5 h-0.5 bg-white" />
-          </button>
-        </div>
-        {menuOpen && (
-          <nav className="md:hidden border-t border-white/10 px-4 py-3 flex flex-col gap-1 text-sm font-semibold">
-            <Link href="/" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Home</Link>
-            <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">About Us</Link>
-            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-amber-400 text-slate-950">Verse Songs</Link>
-            <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Album Store</Link>
-            <Link href="/dashboard" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Dashboard</Link>
-          </nav>
-        )}
-      </header>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        {/* Tabs — series names, never song titles */}
-        <div className="flex flex-wrap gap-2 mb-6">
-          <button
-            onClick={() => { setActiveTab('all'); setCurrentPage(1); }}
-            className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === 'all' ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-          >
-            All Songs
-          </button>
-          {series.map(s => (
-            <button
-              key={s.id}
-              onClick={() => { setActiveTab(s.id); setCurrentPage(1); }}
-              className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === s.id ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20 text-white'}`}
-            >
-              {s.title} · {counts[s.id] || 0}
+    <div className="fixed bottom-0 inset-x-0 z-50 border-t border-amber-400/40 bg-[#1d1840]/98 backdrop-blur shadow-2xl max-h-[85vh] overflow-y-auto">
+      <div className="max-w-3xl mx-auto px-4 py-4">
+        <div className="flex items-center justify-between mb-3">
+          <span className="flex items-center gap-1.5 text-xs font-bold text-amber-300 uppercase tracking-wide">
+            <ListMusic size={14} /> Now Playing · Verse Songs
+          </span>
+          <span className="flex gap-1.5">
+            <button onClick={p.minimizePlayer} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition" aria-label="Minimize player">
+              <ChevronDown className="w-4 h-4" />
             </button>
-          ))}
-        </div>
-
-        {/* Play All — loads this tab's songs into the floating player */}
-        {filtered.length > 0 && (
-          <button onClick={() => player.playQueue(filtered, filtered[0])} className="mb-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-400 text-slate-950 text-sm font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95">
-            <Play className="w-4 h-4" fill="currentColor" /> Play All · {filtered.length} songs
-          </button>
-        )}
-
-        {/* Store banner — streaming free, downloads paid */}
-        <div className="mb-8 flex flex-col sm:flex-row sm:items-center gap-3 justify-between rounded-2xl border border-amber-400/30 bg-gradient-to-r from-amber-400/15 via-amber-400/5 to-transparent px-5 py-4">
-          <p className="text-sm text-amber-100">
-            <span className="font-bold text-amber-300">Streaming is free.</span>{' '}
-            Buy the album or the full book to download any song for offline listening.
-          </p>
-          <Link href="/verse-songs/store" className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 text-sm font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95">
-            <Lock className="w-4 h-4" /> Album Store
-          </Link>
-        </div>
-
-        {!loadError && filtered.length > 0 && renderPagination('top')}
-
-        {loadError ? (
-          <div className="text-center py-16">
-            <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p className="text-white/70 mb-4">Couldn&apos;t load the songs. Check your connection and try again.</p>
-            <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-400 text-slate-950 text-sm font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105">
-              <RefreshCw className="w-4 h-4" /> Retry
+            <button onClick={p.closePlayer} className="p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition" aria-label="Close player">
+              <X className="w-4 h-4" />
             </button>
+          </span>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="relative w-full sm:w-40 aspect-square shrink-0 rounded-2xl overflow-hidden bg-slate-800 shadow-xl mx-auto">
+            {song.thumbnail ? (
+              <Image src={song.thumbnail} alt={song.title} fill className="object-cover" sizes="160px" />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700 text-5xl">🎵</div>
+            )}
           </div>
-        ) : filtered.length === 0 ? (
-          <div className="text-center py-16 text-white/50">
-            <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>No songs in this series yet.</p>
+          <div className="flex-1 min-w-0">
+            <h3 className="font-bold text-lg leading-snug text-white">{song.title}</h3>
+            {song.series_title && <p className="text-amber-300 text-sm font-semibold">{song.series_title}</p>}
+            {song.description && <p className="text-white/60 text-sm line-clamp-2 mt-1">{song.description}</p>}
+
+            {/* Seek bar */}
+            <div className="flex items-center gap-2 mt-3">
+              <span className="text-xs font-medium tabular-nums text-white/70 w-11">{fmt(p.currentTime)}</span>
+              <input
+                type="range" min="0" max={p.duration || 0} value={p.currentTime}
+                onChange={(e) => p.seekTo(parseFloat(e.target.value))}
+                className="flex-1 h-1.5 bg-white/15 rounded-full appearance-none cursor-pointer slider-gold"
+                style={{ background: `linear-gradient(to right, #fbbf24 0%, #f59e0b ${pct}%, rgba(255,255,255,0.15) ${pct}%, rgba(255,255,255,0.15) 100%)` }}
+                aria-label="Seek"
+              />
+              <span className="text-xs font-medium tabular-nums text-white/70 w-11 text-right">{fmt(p.duration)}</span>
+            </div>
+
+            {/* Transport controls */}
+            <div className="flex items-center justify-center gap-2 sm:gap-3 mt-3">
+              <button onClick={p.toggleShuffle} className={`p-2.5 rounded-full transition ${p.shuffle ? 'bg-amber-400 text-slate-950' : 'bg-white/10 hover:bg-white/20 text-white'}`} aria-label="Shuffle" title="Shuffle">
+                <Shuffle className="w-4 h-4" />
+              </button>
+              <button onClick={p.playPrev} className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition" aria-label="Previous">
+                <SkipBack className="w-5 h-5" fill="currentColor" />
+              </button>
+              <button onClick={p.togglePlay} className="p-4 rounded-full bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/40 transition hover:scale-110 active:scale-95" aria-label={p.isPlaying ? 'Pause' : 'Play'}>
+                {p.isPlaying ? <Pause className="w-6 h-6" fill="currentColor" /> : <Play className="w-6 h-6 ml-0.5" fill="currentColor" />}
+              </button>
+              <button onClick={() => p.playNext()} className="p-3 rounded-full bg-white/10 hover:bg-white/20 text-white transition" aria-label="Next">
+                <SkipForward className="w-5 h-5" fill="currentColor" />
+              </button>
+              <button onClick={p.cycleRepeat} className={`p-2.5 rounded-full transition ${p.repeatMode !== 'off' ? 'bg-amber-400 text-slate-950' : 'bg-white/10 hover:bg-white/20 text-white'}`} aria-label="Repeat" title={p.repeatMode === 'one' ? 'Repeat one' : p.repeatMode === 'all' ? 'Repeat all' : 'Repeat off'}>
+                {p.repeatMode === 'one' ? <Repeat1 className="w-4 h-4" /> : <Repeat className="w-4 h-4" />}
+              </button>
+            </div>
+
+            {/* Like / Save / Download / Volume */}
+            <div className="flex items-center gap-2 mt-3 flex-wrap">
+              <button onClick={() => p.toggleLike(song)} className={`py-2 px-3 rounded-full text-xs font-semibold flex items-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                <Heart size={13} fill={song.user_liked ? 'white' : 'none'} /> {song.user_liked ? 'Liked' : 'Like'} · {song.likes_count}
+              </button>
+              <button onClick={() => p.toggleFavorite(song)} className={`py-2 px-3 rounded-full text-xs font-semibold flex items-center gap-1 transition ${song.user_favorited ? 'bg-amber-400 text-slate-950' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                <Bookmark size={13} fill={song.user_favorited ? 'currentColor' : 'none'} /> {song.user_favorited ? 'Saved' : 'Save'}
+              </button>
+              <Link href={`/verse-songs/store?album=${song.series_id}`} className="py-2 px-3 rounded-full text-xs font-bold flex items-center gap-1 bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105" title="Buy the album to download this song">
+                <Lock size={13} /> Download
+              </Link>
+              <span className="flex items-center gap-1.5 ml-auto">
+                <Volume2 size={15} className="text-white/60" />
+                <input
+                  type="range" min="0" max="1" step="0.01" value={p.volume}
+                  onChange={(e) => p.setVolume(parseFloat(e.target.value))}
+                  className="w-20 h-1.5 bg-white/15 rounded-full appearance-none cursor-pointer slider-gold"
+                  aria-label="Volume"
+                />
+              </span>
+            </div>
           </div>
-        ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {pageSongs.map(song => {
-              const isCurrent = player.currentSong?.id === song.id;
-              const isPlaying = isCurrent && player.isPlaying;
+        </div>
+
+        {/* Playlist */}
+        <div className="mt-4 border-t border-white/10 pt-3">
+          <p className="text-xs font-bold text-white/60 uppercase tracking-wide mb-2">Playlist · {p.queue.length} songs</p>
+          <div className="max-h-56 overflow-y-auto space-y-1 pr-1">
+            {p.queue.map((s, i) => {
+              const isCurrent = i === p.currentIndex;
               return (
-                <article key={song.id} className="group bg-[#1d1840] rounded-3xl overflow-hidden border border-white/10 shadow-xl hover:shadow-2xl hover:border-amber-400/30 transition-all">
-                  <div className="relative w-full aspect-video bg-slate-800 overflow-hidden">
-                    {song.thumbnail ? (
-                      <Image src={song.thumbnail} alt={song.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" />
+                <button
+                  key={s.id}
+                  onClick={() => p.playIndex(i)}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-left transition ${isCurrent ? 'bg-amber-400/15 border border-amber-400/40' : 'hover:bg-white/5 border border-transparent'}`}
+                >
+                  <span className="relative w-10 h-10 shrink-0 rounded-lg overflow-hidden bg-slate-800">
+                    {s.thumbnail ? (
+                      <Image src={s.thumbnail} alt={s.title} fill className="object-cover" sizes="40px" />
                     ) : (
-                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700">
-                        <Music size={64} strokeWidth={1.5} className="text-white opacity-60" />
-                      </div>
+                      <span className="absolute inset-0 flex items-center justify-center text-sm">🎵</span>
                     )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
-                    {song.series_title && (
-                      <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-amber-400 text-slate-950 text-xs font-bold shadow">{song.series_title}</span>
-                    )}
-                  </div>
-
-                  <div className="p-4">
-                    <h3 className="font-bold text-lg leading-snug mb-1 line-clamp-1">{song.title}</h3>
-                    {song.description && <p className="text-white/60 text-sm line-clamp-2 mb-3">{song.description}</p>}
-
-                    {/* Play row — audio comes from the floating global player, not this card */}
-                    <div className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2.5 mb-3 flex items-center gap-3">
-                      <button
-                        onClick={() => player.playQueue(filtered, song)}
-                        className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/40' : 'bg-white text-slate-950'}`}
-                        aria-label={isPlaying ? 'Pause' : 'Play'}
-                      >
-                        {isPlaying ? <Pause className="w-4 h-4" fill="currentColor" /> : <Play className="w-4 h-4 ml-0.5" fill="currentColor" />}
-                      </button>
-                      <span className="text-xs font-medium text-white/70">{isCurrent ? (isPlaying ? 'Now playing — see the player below' : 'Paused — tap play to resume') : 'Play in the floating player'}</span>
-                      <span className="ml-auto text-xs font-medium tabular-nums text-white/70">{fmt(song.duration)}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-white/60 mb-3">
-                      <span>Duration {fmt(song.duration)} · ❤ {song.likes_count}</span>
-                      {song.user_favorited && <span className="text-amber-300 font-semibold">★ Saved</span>}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handleLike(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
-                        <Heart size={13} fill={song.user_liked ? 'white' : 'none'} /> {song.user_liked ? 'Liked' : 'Like'}
-                      </button>
-                      <button onClick={() => handleFavorite(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_favorited ? 'bg-amber-400 text-slate-950' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
-                        <Bookmark size={13} fill={song.user_favorited ? 'currentColor' : 'none'} /> {song.user_favorited ? 'Saved' : 'Save'}
-                      </button>
-                      {/* Buy / Download — goes to the Album Store, not a free file */}
-                      <Link href={`/verse-songs/store?album=${song.series_id}`} className="flex-1 py-2 px-2 rounded-full text-xs font-bold flex items-center justify-center gap-1 bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
-                        <Lock size={13} /> Download
-                      </Link>
-                    </div>
-
-                    <Link href={`/verse-songs/${song.series_id}`} className="mt-4 flex items-center justify-between text-sm text-amber-300 hover:text-amber-200 font-semibold">
-                      Open Series <ChevronRight size={16} />
-                    </Link>
-                  </div>
-                </article>
+                  </span>
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-sm font-semibold truncate ${isCurrent ? 'text-amber-300' : 'text-white'}`}>{s.title}</span>
+                    <span className="block text-xs text-white/50 truncate">{s.series_title || ''} · {fmt(s.duration)}</span>
+                  </span>
+                  {isCurrent && p.isPlaying && (
+                    <span className="flex gap-0.5 items-end h-4 shrink-0" aria-hidden>
+                      <span className="w-1 bg-amber-400 rounded-full animate-pulse h-4" />
+                      <span className="w-1 bg-amber-400 rounded-full animate-pulse h-2" />
+                      <span className="w-1 bg-amber-400 rounded-full animate-pulse h-3" />
+                    </span>
+                  )}
+                </button>
               );
             })}
           </div>
-        )}
-        {!loadError && filtered.length > 0 && renderPagination('bottom')}
+        </div>
       </div>
 
       <style jsx>{`
@@ -459,3 +543,21 @@ export default function VerseSongsLibraryPage() {
     </div>
   );
 }
+
+// ── LAYOUT WIRING (do this once in app/layout.tsx) ─────────────────────
+// import { VerseSongPlayerProvider, FloatingPlayer } from './components/GlobalVerseSongPlayer';
+//
+// export default function RootLayout({ children }: { children: React.ReactNode }) {
+//   return (
+//     <html lang="en">
+//       <body>
+//         <VerseSongPlayerProvider>
+//           {children}
+//           <FloatingPlayer />
+//         </VerseSongPlayerProvider>
+//       </body>
+//     </html>
+//   );
+// }
+// If your components folder is at the project root (not inside app/),
+// use '@/components/GlobalVerseSongPlayer' instead of the relative path.
