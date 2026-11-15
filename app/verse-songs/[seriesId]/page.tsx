@@ -1,4 +1,10 @@
-// app/verse-songs/[id]/page.tsx — SERIES DETAIL V2 (All Episodes: 6×6 pagination)
+// app/verse-songs/[seriesId]/page.tsx — SERIES DETAIL V3 (All Episodes: 6×6 pagination)
+// BUG FIX: the file pasted before was the [id] version, which reads params.id.
+// In a [seriesId] folder params.id is empty, so the page thought the series
+// id was 0 and sat on "Loading series..." forever. V3 reads EITHER param
+// name, so it works in a [seriesId] folder AND in an [id] folder.
+// It also never hangs: a missing id now shows the error screen instead of
+// loading forever. Keep ONE folder only ([seriesId] OR [id]), never both.
 // Layout: 6 audio files per row, 6 rows per page = 36 songs per page,
 // with Next / Prev pagination buttons BOTH above the grid and below it.
 // Also carries the same header menu as the library page
@@ -75,7 +81,8 @@ function normalizeSong(sg: any, fallbackSeries?: Series): Song {
 
 export default function VerseSongsSeriesPage() {
   const params = useParams();
-  const seriesId = Number(params.id) || 0;
+  // Works in a [seriesId] folder AND in an [id] folder.
+  const seriesId = Number((params as any).seriesId ?? (params as any).id) || 0;
   const [series, setSeries] = useState<Series | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +98,13 @@ export default function VerseSongsSeriesPage() {
   const lastSavedRef = useRef<Record<number, number>>({});
 
   const loadAll = useCallback(async () => {
-    if (!seriesId) return;
+    if (!seriesId) {
+      // No id in the URL (wrong folder/param name) — show the error
+      // screen instead of sitting on "Loading series..." forever.
+      setLoading(false);
+      setLoadError(true);
+      return;
+    }
     setLoading(true);
     setLoadError(false);
     setCurrentPage(1);
