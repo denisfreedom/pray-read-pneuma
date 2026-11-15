@@ -74,10 +74,26 @@ interface PlayerContextValue {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
+// SAFE FALLBACK: if the layout does not have <VerseSongPlayerProvider> yet,
+// the hook returns a harmless no-op player instead of THROWING. Throwing here
+// is what failed the Vercel build: Next.js pre-renders the verse-songs pages,
+// and a thrown error during pre-render fails the whole build. With this
+// fallback the pages always build; playback simply does nothing until the
+// provider is added to app/layout.tsx (see the wiring snippet at the bottom).
+const noopPlayer: PlayerContextValue = {
+  queue: [], currentSong: null, currentIndex: -1, isPlaying: false,
+  currentTime: 0, duration: 0, volume: 1, minimized: true,
+  repeatMode: 'off', shuffle: false,
+  playQueue: () => {}, playIndex: () => {}, togglePlay: () => {},
+  playNext: () => {}, playPrev: () => {}, seekTo: () => {}, setVolume: () => {},
+  minimizePlayer: () => {}, expandPlayer: () => {}, closePlayer: () => {},
+  toggleLike: async () => {}, toggleFavorite: async () => {},
+  updateSongInQueue: () => {}, toggleShuffle: () => {}, cycleRepeat: () => {},
+};
+
 export function useVerseSongPlayer(): PlayerContextValue {
   const ctx = useContext(PlayerContext);
-  if (!ctx) throw new Error('useVerseSongPlayer must be used inside <VerseSongPlayerProvider>');
-  return ctx;
+  return ctx ?? noopPlayer;
 }
 
 const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
