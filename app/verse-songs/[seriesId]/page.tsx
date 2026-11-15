@@ -17,11 +17,12 @@
 // shape (array, { songs }, { data }) is accepted.
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import { Play, Pause, Heart, Bookmark, Lock, Music, ChevronLeft, RefreshCw } from 'lucide-react';
+import { useVerseSongPlayer } from '../../../components/GlobalVerseSongPlayer';
 
 interface Series { id: number; title: string; description?: string; thumbnail?: string; }
 interface Song {
@@ -88,14 +89,12 @@ export default function VerseSongsSeriesPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+  // The floating global player (lives in the root layout, keeps playing
+  // across pages and with the screen off). Cards only tell it what to play.
+  const player = useVerseSongPlayer();
   const [currentPage, setCurrentPage] = useState(1);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Per-card mini-player — one audio element per card, only one plays at once.
-  const audioRefs = useRef<Map<number, HTMLAudioElement>>(new Map());
-  const [playingId, setPlayingId] = useState<number | null>(null);
-  const [times, setTimes] = useState<Record<number, number>>({});
-  const lastSavedRef = useRef<Record<number, number>>({});
 
   const loadAll = useCallback(async () => {
     if (!seriesId) {
@@ -169,73 +168,16 @@ export default function VerseSongsSeriesPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  const pauseOthers = (exceptId: number) => {
-    audioRefs.current.forEach((audio, id) => { if (id !== exceptId) audio.pause(); });
-  };
-
-  const togglePlay = (song: Song) => {
-    const audio = audioRefs.current.get(song.id);
-    if (!audio) return;
-    if (playingId === song.id) { audio.pause(); setPlayingId(null); return; }
-    pauseOthers(song.id);
-    audio.play().catch(() => {});
-    setPlayingId(song.id);
-  };
-
-  const saveProgress = async (song: Song, seconds: number, completed: boolean) => {
-    if (!userEmail) return;
-    const now = Date.now();
-    if (!completed && now - (lastSavedRef.current[song.id] || 0) < 5000) return;
-    lastSavedRef.current[song.id] = now;
-    try {
-      await fetch('/api/verse-songs/progress', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verseSongId: song.id, userEmail, last_position_seconds: Math.floor(seconds), completed }),
-      });
-    } catch { /* progress is best-effort */ }
-  };
-
-  const handleEnded = async (song: Song) => {
-    setPlayingId(null);
-    setTimes(t => ({ ...t, [song.id]: 0 }));
-    await saveProgress(song, normDuration(song.duration), true);
-    try {
-      await fetch('/api/verse-songs/play', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verseSongId: song.id, userEmail }),
-      });
-      setSongs(prev => prev.map(s => s.id === song.id ? { ...s, play_count: s.play_count + 1 } : s));
-    } catch { /* play count is best-effort */ }
-  };
-
-  const handleLike = async (song: Song) => {
+  const handleLike = (song: Song) => {
     const liked = !song.user_liked;
     setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_liked: liked, likes_count: Math.max(0, s.likes_count + (liked ? 1 : -1)) } : s));
-    if (!userEmail) return;
-    try {
-      const res = await fetch('/api/verse-songs/likes', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verseSongId: song.id, userEmail, liked }),
-      });
-      if (!res.ok) throw new Error('like failed');
-    } catch {
-      setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_liked: !liked, likes_count: Math.max(0, s.likes_count + (liked ? -1 : 1)) } : s));
-    }
+    player.toggleLike(song);
   };
 
-  const handleFavorite = async (song: Song) => {
+  const handleFavorite = (song: Song) => {
     const favorited = !song.user_favorited;
     setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_favorited: favorited } : s));
-    if (!userEmail) return;
-    try {
-      const res = await fetch('/api/verse-songs/favorites', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ verseSongId: song.id, userEmail, favorited }),
-      });
-      if (!res.ok) throw new Error('favorite failed');
-    } catch {
-      setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_favorited: !favorited } : s));
-    }
+    player.toggleFavorite(song);
   };
 
   // ── Pagination: 6 per row × 6 rows = 36 songs per page ───────────
@@ -339,6 +281,11 @@ export default function VerseSongsSeriesPage() {
             <h1 className="text-2xl sm:text-4xl font-bold leading-tight">{series?.title || 'Series'}</h1>
             {series?.description && <p className="text-white/60 mt-1.5 text-sm sm:text-base">{series.description}</p>}
             <span className="inline-block mt-3 px-3 py-1 rounded-full bg-purple-600 text-white text-xs font-bold shadow">🎵 {songs.length} Songs</span>
+            {songs.length > 0 && (
+              <button onClick={() => player.playQueue(songs, songs[0])} className="ml-2 mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-amber-400 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95">
+                <Play className="w-3.5 h-3.5" fill="currentColor" /> Play All
+              </button>
+            )}
           </div>
         </div>
 
@@ -363,9 +310,8 @@ export default function VerseSongsSeriesPage() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
             {pageSongs.map(song => {
-              const t = times[song.id] || 0;
-              const pct = song.duration > 0 ? (t / song.duration) * 100 : 0;
-              const isPlaying = playingId === song.id;
+              const isCurrent = player.currentSong?.id === song.id;
+              const isPlaying = isCurrent && player.isPlaying;
               return (
                 <article key={song.id} className="group bg-[#1d1840] rounded-2xl overflow-hidden border border-white/10 shadow-xl hover:shadow-2xl hover:border-amber-400/30 transition-all">
                   {/* Cover — tap the play button to play */}
@@ -378,7 +324,7 @@ export default function VerseSongsSeriesPage() {
                       </div>
                     )}
                     <button
-                      onClick={() => togglePlay(song)}
+                      onClick={() => player.playQueue(songs, song)}
                       className={`absolute inset-0 m-auto w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/50' : 'bg-purple-600 text-white shadow-lg shadow-purple-600/50'}`}
                       aria-label={isPlaying ? 'Pause' : 'Play'}
                     >
@@ -390,38 +336,18 @@ export default function VerseSongsSeriesPage() {
                     <h3 className="font-bold text-sm leading-snug mb-1 line-clamp-1">{song.title}</h3>
                     {song.description && <p className="text-white/60 text-xs line-clamp-2 mb-2">{song.description}</p>}
 
-                    {/* Mini-player (custom — NO native controls, NO browser Download menu) */}
-                    <div className="rounded-xl bg-black/30 border border-white/10 px-2 py-2 mb-2">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[11px] font-medium tabular-nums text-white/70 w-8">{fmt(t)}</span>
-                        <input
-                          type="range" min="0" max={song.duration || 0} value={t}
-                          onChange={(e) => {
-                            const audio = audioRefs.current.get(song.id);
-                            const v = parseFloat(e.target.value);
-                            if (audio) audio.currentTime = v;
-                            setTimes(prev => ({ ...prev, [song.id]: v }));
-                          }}
-                          className="flex-1 h-1.5 bg-white/15 rounded-full appearance-none cursor-pointer slider-gold"
-                          style={{ background: `linear-gradient(to right, #fbbf24 0%, #f59e0b ${pct}%, rgba(255,255,255,0.15) ${pct}%, rgba(255,255,255,0.15) 100%)` }}
-                          aria-label="Seek"
-                        />
-                        <span className="text-[11px] font-medium tabular-nums text-white/70 w-8 text-right">{fmt(song.duration)}</span>
-                      </div>
-                      {/* Hidden audio — NO controls attribute, so the browser never shows its own player or Download menu. */}
-                      <audio
-                        ref={(el) => { if (el) audioRefs.current.set(song.id, el); else audioRefs.current.delete(song.id); }}
-                        src={song.mp3_url}
-                        preload="metadata"
-                        onTimeUpdate={(e) => {
-                          const cur = e.currentTarget.currentTime;
-                          setTimes(prev => ({ ...prev, [song.id]: cur }));
-                          saveProgress(song, cur, false);
-                        }}
-                        onEnded={() => handleEnded(song)}
-                      />
+                    {/* Play row — audio comes from the floating global player, not this card */}
+                    <div className="rounded-xl bg-black/30 border border-white/10 px-2 py-2 mb-2 flex items-center gap-2">
+                      <button
+                        onClick={() => player.playQueue(songs, song)}
+                        className={`shrink-0 p-2 rounded-full transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950' : 'bg-white text-slate-950'}`}
+                        aria-label={isPlaying ? 'Pause' : 'Play'}
+                      >
+                        {isPlaying ? <Pause className="w-3 h-3" fill="currentColor" /> : <Play className="w-3 h-3 ml-0.5" fill="currentColor" />}
+                      </button>
+                      <span className="text-[11px] font-medium text-white/70 truncate">{isCurrent ? (isPlaying ? 'Now playing' : 'Paused') : 'Play'}</span>
+                      <span className="ml-auto text-[11px] font-medium tabular-nums text-white/70 shrink-0">{fmt(song.duration)}</span>
                     </div>
-
                     <p className="text-[11px] text-white/60 mb-2">Duration {fmt(song.duration)} · ❤ {song.likes_count}</p>
 
                     <div className="flex items-center gap-1.5 mb-1.5">
