@@ -1,4 +1,8 @@
-// app/verse-songs/page.tsx — LIBRARY V5 (header: Dashboard instead of Admin Panel)
+// app/verse-songs/page.tsx — LIBRARY V7 (header: Dashboard instead of Admin Panel)
+// V7 FIX: the series page worked but this page showed 0 songs, because it
+// only tried the per-series detail endpoint as a LAST resort. V7 loads songs
+// the EXACT same way the working series page does — detail endpoint first
+// for every known series — and unwraps deeper response nesting.
 // V4 adds, on top of V3's fixed data layer (unchanged):
 //  1) The site header menu (logo, Home, About Us, Verse Songs, Album Store,
 //     Dashboard) — sticky at the top, with a hamburger menu on phones.
@@ -67,6 +71,12 @@ function asArray(d: any): any[] {
   if (Array.isArray(d.songs)) return d.songs;
   if (Array.isArray(d.series)) return d.series;
   if (Array.isArray(d.data)) return d.data;
+  // Deeper nesting: { data: { songs: [...] } } or { data: { series: [...] } }
+  if (d.data && typeof d.data === 'object') {
+    if (Array.isArray(d.data.songs)) return d.data.songs;
+    if (Array.isArray(d.data.series)) return d.data.series;
+    if (Array.isArray(d.data.data)) return d.data.data;
+  }
   if (Array.isArray(d.items)) return d.items;
   if (Array.isArray(d.results)) return d.results;
   return [];
@@ -136,41 +146,54 @@ export default function VerseSongsLibraryPage() {
       } catch { /* series fall back to deriving from songs below */ }
       setSeries(seriesList);
 
-      // ── Songs — try every endpoint that can return them ──────────
-      // The base /api/verse-songs endpoint returns the songs list, so it
-      // is a first-class candidate — NOT a series fallback.
-      const fetchSongs = async (url: string): Promise<Song[]> => {
+      // ── Songs — detail endpoint FIRST (the proven path) ─────────
+      // This is exactly how the working series page loads its songs:
+      // /api/verse-songs/series/<id> returns that series' songs. The old
+      // library only tried this as a last resort, so when the general
+      // endpoints returned an empty / oddly-shaped result, the page showed
+      // 0 songs even though the songs exist.
+      const fetchSongs = async (url: string, fallback?: Series): Promise<Song[]> => {
         try {
           const res = await fetch(url);
           if (!res.ok) return [];
-          return asArray(await res.json()).filter(isSongRow).map((sg: any) => normalizeSong(sg));
+          return asArray(await res.json()).filter(isSongRow).map((sg: any) => normalizeSong(sg, fallback));
         } catch { return []; }
       };
       let songList: Song[] = [];
-      for (const url of ['/api/verse-songs/songs', '/api/verse-songs']) {
-        songList = await fetchSongs(url);
-        if (songList.length) break;
+      // 1) Per-series detail — one call per known series, in parallel.
+      // Rows whose explicit series_id belongs to another series are
+      // dropped here; their own series' call picks them up.
+      if (seriesList.length) {
+        const perSeries = await Promise.all(seriesList.map(async (sr) => {
+          const rows = await fetchSongs(`/api/verse-songs/series/${sr.id}`, sr);
+          return rows.filter(sg =>
+            sg.series_id === sr.id ||
+            (sg.series_title && sr.title && sg.series_title.trim().toLowerCase() === sr.title.trim().toLowerCase())
+          );
+        }));
+        songList = perSeries.flat();
       }
-      // With-user variant only to pick up liked/saved state — and only
+      // 2) General songs endpoints, only if the detail calls found nothing.
+      if (!songList.length) {
+        for (const url of ['/api/verse-songs/songs', '/api/verse-songs']) {
+          songList = await fetchSongs(url);
+          if (songList.length) break;
+        }
+      }
+      // 3) With-user variant only to pick up liked/saved state — and only
       // if it actually returns songs.
       if (email) {
         const withUser = await fetchSongs(`/api/verse-songs/songs?userEmail=${encodeURIComponent(email)}`);
         if (withUser.length) songList = withUser;
       }
-      // Per-series fallback — uses REAL series ids only.
-      if (!songList.length && seriesList.length) {
-        const perSeries = await Promise.all(seriesList.map(async (sr) => {
-          for (const url of [`/api/verse-songs/series/${sr.id}`, `/api/verse-songs/songs?seriesId=${sr.id}`, `/api/verse-songs/songs?series_id=${sr.id}`]) {
-            try {
-              const res = await fetch(url);
-              if (!res.ok) continue;
-              const rows = asArray(await res.json()).filter(isSongRow);
-              if (rows.length) return rows.map((sg: any) => normalizeSong(sg, sr));
-            } catch { /* try next */ }
-          }
-          return [];
-        }));
-        songList = perSeries.flat();
+      // 4) Orphan rescue: a song whose row carries no series_id but whose
+      // series_title matches a known series belongs to that series.
+      if (songList.length && seriesList.length) {
+        songList = songList.map(sg => {
+          if (sg.series_id > 0) return sg;
+          const match = seriesList.find(sr => sr.title && sg.series_title && sr.title.trim().toLowerCase() === sg.series_title.trim().toLowerCase());
+          return match ? { ...sg, series_id: match.id, series_title: match.title } : sg;
+        });
       }
       setSongs(songList);
 
