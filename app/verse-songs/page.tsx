@@ -1,7 +1,7 @@
-// app/verse-songs/page.tsx — LIBRARY V4 (header menu + 4-per-row pagination)
+// app/verse-songs/page.tsx — LIBRARY V5 (header: Dashboard instead of Admin Panel)
 // V4 adds, on top of V3's fixed data layer (unchanged):
 //  1) The site header menu (logo, Home, About Us, Verse Songs, Album Store,
-//     Admin Panel) — sticky at the top, with a hamburger menu on phones.
+//     Dashboard) — sticky at the top, with a hamburger menu on phones.
 //  2) Grid is now 4 audio files per row, 10 rows per page = 40 songs per page.
 //  3) Next / Prev pagination buttons BOTH above the grid and below it,
 //     with page numbers and a "Showing X–Y of Z songs" label.
@@ -340,7 +340,7 @@ export default function VerseSongsLibraryPage() {
             <Link href="/about" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">About Us</Link>
             <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30">Verse Songs</Link>
             <Link href="/verse-songs/store" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Album Store</Link>
-            <Link href="/admin_panel" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Admin Panel</Link>
+            <Link href="/dashboard" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Dashboard</Link>
           </nav>
           <button onClick={() => setMenuOpen(o => !o)} className="md:hidden p-2 rounded-lg bg-white/10 hover:bg-white/20" aria-label="Toggle menu">
             <span className="block w-5 h-0.5 bg-white mb-1" />
@@ -354,7 +354,7 @@ export default function VerseSongsLibraryPage() {
             <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">About Us</Link>
             <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-amber-400 text-slate-950">Verse Songs</Link>
             <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Album Store</Link>
-            <Link href="/admin_panel" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Admin Panel</Link>
+            <Link href="/dashboard" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Dashboard</Link>
           </nav>
         )}
       </header>
