@@ -22,7 +22,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
 import { Play, Pause, Heart, Bookmark, Lock, Music, ChevronLeft, RefreshCw } from 'lucide-react';
-import { useVerseSongPlayer } from '../../../components/GlobalVerseSongPlayer';
+import { useVerseSongPlayer } from '../../components/GlobalVerseSongPlayer';
 
 interface Series { id: number; title: string; description?: string; thumbnail?: string; }
 interface Song {
