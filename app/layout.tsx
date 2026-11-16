@@ -78,7 +78,6 @@ export default function RootLayout({
             <InstallPrompt />
           </ThemeProvider>
         </AppGenProvider>
-        <Script src="https://unpkg.com/@phosphor-icons/web" strategy="afterInteractive" />
         <Script id="register-sw" strategy="afterInteractive">
           {`
             if ('serviceWorker' in navigator) {
