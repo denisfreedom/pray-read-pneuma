@@ -1,10 +1,33 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { ArrowRight, BookOpen, Eye, EyeOff, Heart, ShieldCheck, Sparkles } from 'lucide-react';
 import VisitorMap from '../components/VisitorMap';
 
-const LOGO = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
+// app/signup/page.tsx — REDESIGNED to match the web app (ivory + emerald + gold)
+// BUGS FIXED vs old file:
+// 1) React.FormEvent used without importing React -> now `type FormEvent` imported. Build-safe.
+// 2) Tailwind classes gold-600 / gold-500 / gold-700 do NOT exist -> replaced with real hex #a9852e / #e9c981.
+// 3) Blue -> purple -> pink gradient behind the card did NOT match the app -> replaced with ivory + emerald panel.
+// 4) Header "Sign Up" was a <button> that did nothing -> now a real link + Prayer Library link added.
+// 5) After signup the front page still showed "Get started" because nothing saved userEmail ->
+//    now saves localStorage userEmail + userName on success (front page reads userEmail).
+// 6) Open-redirect: redirect=?https://evil.com could bounce users off-site -> now only allows same-site paths starting with single /.
+// 7) No confirm-password + no show/hide password -> added both, plus mismatch check.
+// 8) window/localStorage accessed without guards -> guarded with typeof window checks.
+
+const LOGO = '/assets/PrayRead-logo.png';
+const LOGO_FALLBACK = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
+const LANDSCAPE = 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=85&w=1600&auto=format&fit=crop';
+
+function safeRedirect(raw: string | null): string {
+  if (!raw) return '/dashboard';
+  if (!raw.startsWith('/') || raw.startsWith('//')) return '/dashboard';
+  if (['/user-login', '/signup', '/login'].includes(raw.split('?')[0])) return '/dashboard';
+  return raw;
+}
 
 export default function SignupPage() {
   const router = useRouter();
@@ -13,8 +36,12 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loginHref, setLoginHref] = useState('/user-login');
+  const [logoSrc, setLogoSrc] = useState(LOGO);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
     const msg = params.get('message');
     if (msg) setMessage(msg);
@@ -22,7 +49,7 @@ export default function SignupPage() {
     if (redirect) setLoginHref(`/user-login?redirect=${encodeURIComponent(redirect)}&message=Please+sign+in+to+access+this+feature`);
   }, []);
 
-  const handleSignupSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSignupSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -30,23 +57,21 @@ export default function SignupPage() {
     const name = String(formData.get('name') || '').trim();
     const email = String(formData.get('email') || '').trim().toLowerCase();
     const password = String(formData.get('password') || '');
-    // Client-side checks so the server is never hit with obviously bad data
+    const confirm = String(formData.get('confirmPassword') || '');
     if (!name) { setError('Full name is required.'); setLoading(false); return; }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setError('Enter a valid email address.'); setLoading(false); return; }
     if (password.length < 6) { setError('Password must be at least 6 characters.'); setLoading(false); return; }
+    if (password !== confirm) { setError('Passwords do not match. Please type the same password twice.'); setLoading(false); return; }
     try {
       const response = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, email, password }),
       });
-      // FIX: old code did `await response.json()` directly. If the API 500s and returns HTML,
-      // that throws and the user only sees "An error occurred". Read as text first, then parse.
       const raw = await response.text();
       let data: any = {};
       try { data = JSON.parse(raw); } catch { data = { success: false, message: `Server returned ${response.status} (not JSON). ${raw.slice(0, 120)}` }; }
       if (!response.ok || !data.success) {
-        // 409 = email already exists -> send them to Sign In, don't leave them stuck
         if (response.status === 409) {
           setError(data.message || 'An account with this email already exists. Please Sign In instead.');
         } else {
@@ -54,17 +79,26 @@ export default function SignupPage() {
         }
         return;
       }
+      // FIX: persist login identity so header/dashboard recognise the user immediately
+      try {
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem('userEmail', email);
+          window.localStorage.setItem('userName', name);
+          if (data?.user?.email) window.localStorage.setItem('userEmail', String(data.user.email).toLowerCase());
+        }
+      } catch {}
       await new Promise((resolve) => setTimeout(resolve, 300));
-      const params = new URLSearchParams(window.location.search);
-      const rawRedirect = params.get('redirect') || '/dashboard';
-      const safeRedirect = (rawRedirect === '/user-login' || rawRedirect === '/signup' || rawRedirect === '/login') ? '/dashboard' : rawRedirect;
-      const isInIframe = window.self !== window.top;
+      const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams();
+      const safe = safeRedirect(params.get('redirect'));
+      const isInIframe = typeof window !== 'undefined' && window.self !== window.top;
       if (isInIframe) {
-        try { window.parent.postMessage({ type: 'AUTH_SUCCESS', redirect: safeRedirect, user: data.user }, '*'); } catch (_) {}
+        try { window.parent.postMessage({ type: 'AUTH_SUCCESS', redirect: safe, user: data.user }, '*'); } catch {}
       }
-      window.location.replace(safeRedirect);
+      // Use router when possible (keeps SPA state), fall back to full replace
+      try { router.replace(safe); } catch { window.location.replace(safe); }
+      // Safety net: if router.replace does not navigate (e.g. blocked), hard navigate after a beat
+      setTimeout(() => { if (typeof window !== 'undefined' && window.location.pathname === '/signup') window.location.replace(safe); }, 1500);
     } catch (err: any) {
-      // Network failure (offline / CORS / server down) — say so, don't hide it
       setError('Could not reach the server. Check your connection and try again. (' + (err?.message || 'network error') + ')');
     } finally {
       setLoading(false);
@@ -72,65 +106,54 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="bg-stone-50 text-stone-800 font-sans selection:bg-gold-500/20 selection:text-gold-700 antialiased flex flex-col min-h-screen">
-      <style jsx global>{`
-        .glass { background: rgba(255,255,255,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-        input:-webkit-autofill, input:-webkit-autofill:hover, input:-webkit-autofill:focus, input:-webkit-autofill:active { -webkit-box-shadow: 0 0 0 30px white inset !important; }
-      `}</style>
-      <header className="fixed top-0 left-0 right-0 z-50 glass border-b border-stone-200">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-3"><img src={LOGO} alt="Pray-Read Bible Logo" className="h-14 w-auto" /></Link>
-          <nav className="hidden md:flex items-center gap-8">
-            <Link href="/" className="text-stone-500 hover:text-stone-900">Home</Link>
-            <Link href="/about" className="text-stone-500 hover:text-stone-900">About Us</Link>
-            <Link href="/verse-songs" className="text-stone-500 hover:text-stone-900">Verse-Songs</Link>
+    <div className="min-h-screen bg-[#faf8f2] text-[#22382f] antialiased">
+      <div className="bg-[#1d4035] text-center text-[11px] font-medium uppercase tracking-[0.18em] text-[#e9c981] py-2 px-4">Scripture &nbsp;·&nbsp; Prayer &nbsp;·&nbsp; Community</div>
+      <header className="sticky top-0 z-40 border-b border-[#ece4d0] bg-[#faf8f2]/90 backdrop-blur-md">
+        <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between gap-3 px-5 sm:px-8">
+          <Link href="/" className="flex items-center gap-3">
+            <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-[#e9c981] bg-white shadow-sm sm:h-12 sm:w-12"><Image src={logoSrc} alt="Pray-Read Bible Logo" width={48} height={48} priority className="object-contain" onError={() => { if (logoSrc !== LOGO_FALLBACK) setLogoSrc(LOGO_FALLBACK); }} /></span>
+            <span className="leading-none"><span className="block font-serif text-lg font-bold text-[#1d4035] sm:text-xl">Pray-Read <span className="text-[#a9852e]">Bible</span></span><span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.22em] text-[#8a927f]">Meet the Word · Live it daily</span></span>
+          </Link>
+          <nav className="hidden items-center gap-1 md:flex">
+            <Link href="/" className="rounded-full px-3 py-2 text-sm font-medium text-[#3d5247] transition hover:bg-[#efe9d8] hover:text-[#1d4035]">Home</Link>
+            <Link href="/about" className="rounded-full px-3 py-2 text-sm font-medium text-[#3d5247] transition hover:bg-[#efe9d8] hover:text-[#1d4035]">About</Link>
+            <Link href="/verse-songs" className="rounded-full px-3 py-2 text-sm font-medium text-[#3d5247] transition hover:bg-[#efe9d8] hover:text-[#1d4035]">Verse-Songs</Link>
+            <Link href="/prayer-library" className="rounded-full border border-[#e9c981]/70 bg-[#fdf6e3] px-4 py-2 text-sm font-semibold text-[#1d4035] transition hover:bg-[#f5ead0]">🙏 Prayer Library</Link>
           </nav>
-          <div className="hidden md:flex items-center gap-4">
-            <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="px-5 py-2.5 bg-gold-600 text-white rounded-lg text-sm font-medium">Donate</a>
-            <button className="px-5 py-2.5 bg-stone-900 text-white rounded-lg text-sm font-medium ring-2 ring-stone-900 ring-offset-2">Sign Up</button>
+          <div className="hidden items-center gap-3 md:flex">
+            <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-full border border-[#1d4035]/20 px-4 py-2 text-sm font-medium text-[#1d4035] transition hover:bg-white"><Heart className="h-4 w-4 text-[#a9852e]" /> Donate</a>
+            <Link href={loginHref} className="rounded-full bg-[#1d4035] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#285445]">Sign In</Link>
           </div>
-          <button className="md:hidden text-stone-800 p-2" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>☰</button>
+          <button type="button" aria-label="Toggle menu" className="rounded-full border border-[#e8dfc8] bg-white px-3 py-2 text-[#1d4035] md:hidden" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>☰</button>
         </div>
-        <div className={`${mobileMenuOpen ? 'block' : 'hidden'} md:hidden bg-white border-t border-stone-200 shadow-lg`}>
-          <nav className="px-6 py-4 space-y-3">
-            <Link href="/" className="block py-3 px-4 text-stone-700 hover:bg-stone-50 rounded-lg">Home</Link>
-            <Link href="/about" className="block py-3 px-4 text-stone-700 hover:bg-stone-50 rounded-lg">About Us</Link>
-            <Link href="/verse-songs" className="block py-3 px-4 text-stone-700 hover:bg-stone-50 rounded-lg">Verse-Songs</Link>
-          </nav>
-        </div>
+        {mobileMenuOpen && (<nav className="border-t border-[#ece4d0] bg-white px-5 py-4 md:hidden"><Link href="/" className="block rounded-xl px-4 py-3 text-[#3d5247] hover:bg-[#faf8f2]">Home</Link><Link href="/about" className="block rounded-xl px-4 py-3 text-[#3d5247] hover:bg-[#faf8f2]">About Us</Link><Link href="/verse-songs" className="block rounded-xl px-4 py-3 text-[#3d5247] hover:bg-[#faf8f2]">Verse-Songs</Link><Link href="/prayer-library" className="block rounded-xl px-4 py-3 font-semibold text-[#1d4035] hover:bg-[#fdf6e3]">🙏 Prayer Library</Link><Link href={loginHref} className="mt-2 block rounded-full bg-[#1d4035] px-4 py-3 text-center font-semibold text-white">Sign In</Link></nav>)}
       </header>
-      <main className="flex-grow pt-20 flex items-center justify-center relative px-4 py-12 overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-500/90 via-purple-600/90 to-pink-500/90"></div>
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-stone-100 p-8 md:p-10 relative z-10">
-          <div className="text-center mb-8">
-            <img src={LOGO} alt="Pray-Read Bible" className="h-20 w-auto mx-auto mb-6" />
-            <h2 className="text-3xl font-bold text-stone-900 mb-2">Join the Community</h2>
-            <p className="text-stone-500">Create a free account to access the Bible, Q&amp;A, Devotionals, and all features.</p>
-          </div>
-          <form className="space-y-5" onSubmit={handleSignupSubmit}>
-            {message && <div className="bg-blue-50 border border-blue-200 text-blue-700 px-4 py-3 rounded-xl text-sm">{message}</div>}
-            {error && <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">{error}</div>}
-            <div className="space-y-2">
-              <label htmlFor="name" className="block text-sm font-medium text-stone-700">Full Name</label>
-              <input type="text" id="name" name="name" placeholder="John Doe" className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl outline-none" required disabled={loading} />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="email" className="block text-sm font-medium text-stone-700">Email Address</label>
-              <input type="email" id="email" name="email" placeholder="john@example.com" className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl outline-none" required disabled={loading} />
-            </div>
-            <div className="space-y-2">
-              <label htmlFor="password" className="block text-sm font-medium text-stone-700">Password</label>
-              <input type="password" id="password" name="password" placeholder="••••••••" className="w-full px-4 py-3 bg-stone-50 border border-stone-200 rounded-xl outline-none" required disabled={loading} />
-              <p className="text-xs text-stone-400">At least 6 characters.</p>
-            </div>
-            <div className="bg-stone-50 rounded-lg p-3 border border-stone-100"><p className="text-xs text-stone-500 leading-relaxed">By creating an account, you will have <strong className="text-stone-700">Frontend User</strong> access, allowing you to read scripture and use offline features.</p></div>
-            <button type="submit" disabled={loading} className="w-full py-3.5 bg-stone-900 text-white rounded-xl font-medium disabled:opacity-50">{loading ? 'Creating Account...' : 'Sign Up →'}</button>
+
+      <main className="mx-auto grid max-w-6xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:gap-12 lg:py-14">
+        {/* Left — welcome panel */}
+        <section className="relative overflow-hidden rounded-[2rem] bg-[#1d4035] text-white shadow-[0_30px_70px_-30px_rgba(29,64,53,0.6)]">
+          <div className="relative h-56 sm:h-64 lg:h-full lg:min-h-[560px]"><Image src={LANDSCAPE} alt="Mountains at sunrise" width={1200} height={800} className="h-full w-full object-cover" priority /><div className="absolute inset-0 bg-gradient-to-t from-[#1d4035] via-[#1d4035]/55 to-transparent" /><div className="absolute inset-x-0 bottom-0 p-7 sm:p-9"><p className="inline-flex items-center gap-2 rounded-full border border-[#e9c981]/40 bg-black/20 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#e9c981]"><Sparkles className="h-3.5 w-3.5" /> Join the community</p><h2 className="mt-4 font-serif text-3xl leading-tight sm:text-4xl">Begin your daily<br />walk in the Word.</h2><p className="mt-3 max-w-md text-sm leading-7 text-white/80">Create a free account to access the Bible, Q&amp;A, Devotionals, Prayer Library, and all features — in English and Luganda.</p><div className="mt-6 space-y-3 text-sm"><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><BookOpen className="h-4 w-4" /></span> Read, reflect, respond — one passage a day</p><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><Heart className="h-4 w-4" /></span> Prayers for every season of life</p><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><ShieldCheck className="h-4 w-4" /></span> Free forever — no card required</p></div></div></div>
+        </section>
+
+        {/* Right — form card */}
+        <section className="rounded-[2rem] border border-[#e8dfc8] bg-white p-6 shadow-[0_24px_60px_-30px_rgba(29,64,53,0.25)] sm:p-9">
+          <div className="text-center sm:text-left"><p className="text-[11px] font-bold uppercase tracking-[0.24em] text-[#a9852e]">Create your free account</p><h1 className="mt-3 font-serif text-3xl text-[#1d4035] sm:text-4xl">Join the Community</h1><p className="mt-2 text-sm leading-6 text-[#6b7a6e]">It takes less than a minute. You will be taken straight to your dashboard.</p></div>
+          <form className="mt-7 space-y-5" onSubmit={handleSignupSubmit} noValidate={false}>
+            {message && <div role="status" className="rounded-2xl border border-[#d8e8d5] bg-[#eef3ea] px-4 py-3 text-sm text-[#2f5a3a]">{message}</div>}
+            {error && <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}{error.toLowerCase().includes('already exists') && (<span> <Link href={loginHref} className="font-bold underline">Sign in here →</Link></span>)}</div>}
+            <div><label htmlFor="name" className="mb-2 block text-sm font-semibold text-[#1d4035]">Full Name</label><input type="text" id="name" name="name" placeholder="John Doe" autoComplete="name" className="w-full rounded-2xl border border-[#e8dfc8] bg-[#faf8f2] px-4 py-3.5 text-sm text-[#22382f] outline-none transition placeholder:text-[#a0a99c] focus:border-[#a9852e] focus:bg-white focus:ring-2 focus:ring-[#e9c981]/50" required disabled={loading} /></div>
+            <div><label htmlFor="email" className="mb-2 block text-sm font-semibold text-[#1d4035]">Email Address</label><input type="email" id="email" name="email" placeholder="john@example.com" autoComplete="email" className="w-full rounded-2xl border border-[#e8dfc8] bg-[#faf8f2] px-4 py-3.5 text-sm text-[#22382f] outline-none transition placeholder:text-[#a0a99c] focus:border-[#a9852e] focus:bg-white focus:ring-2 focus:ring-[#e9c981]/50" required disabled={loading} /></div>
+            <div><label htmlFor="password" className="mb-2 block text-sm font-semibold text-[#1d4035]">Password</label><div className="relative"><input type={showPassword ? 'text' : 'password'} id="password" name="password" placeholder="••••••••" autoComplete="new-password" className="w-full rounded-2xl border border-[#e8dfc8] bg-[#faf8f2] px-4 py-3.5 pr-12 text-sm text-[#22382f] outline-none transition placeholder:text-[#a0a99c] focus:border-[#a9852e] focus:bg-white focus:ring-2 focus:ring-[#e9c981]/50" required disabled={loading} /><button type="button" aria-label={showPassword ? 'Hide password' : 'Show password'} onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-[#6b7a6e] hover:bg-[#efe9d8]">{showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div><p className="mt-1.5 text-xs text-[#8a927f]">At least 6 characters.</p></div>
+            <div><label htmlFor="confirmPassword" className="mb-2 block text-sm font-semibold text-[#1d4035]">Confirm Password</label><div className="relative"><input type={showConfirm ? 'text' : 'password'} id="confirmPassword" name="confirmPassword" placeholder="••••••••" autoComplete="new-password" className="w-full rounded-2xl border border-[#e8dfc8] bg-[#faf8f2] px-4 py-3.5 pr-12 text-sm text-[#22382f] outline-none transition placeholder:text-[#a0a99c] focus:border-[#a9852e] focus:bg-white focus:ring-2 focus:ring-[#e9c981]/50" required disabled={loading} /><button type="button" aria-label={showConfirm ? 'Hide confirm password' : 'Show confirm password'} onClick={() => setShowConfirm(!showConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-[#6b7a6e] hover:bg-[#efe9d8]">{showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button></div></div>
+            <div className="rounded-2xl border border-[#e8dfc8] bg-[#faf8f2] p-4"><p className="text-xs leading-relaxed text-[#6b7a6e]">By creating an account, you will have <strong className="text-[#1d4035]">Frontend User</strong> access, allowing you to read scripture and use offline features.</p></div>
+            <button type="submit" disabled={loading} className="group flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-[#1d4035] px-7 text-base font-semibold text-white shadow-[0_16px_35px_-18px_rgba(29,64,53,0.6)] transition hover:bg-[#285445] disabled:opacity-50">{loading ? 'Creating Account…' : <>Sign Up <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>}</button>
           </form>
-          <div className="relative my-8"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-stone-200"></div></div><div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-stone-400">Already a member?</span></div></div>
-          <div className="text-center"><Link href={loginHref} className="w-full py-3.5 border border-stone-200 text-stone-700 rounded-xl block">Sign In to Community</Link></div>
-        </div>
+          <div className="relative my-7"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#e8dfc8]"></div></div><div className="relative flex justify-center text-sm"><span className="bg-white px-3 text-[#8a927f]">Already a member?</span></div></div>
+          <Link href={loginHref} className="flex min-h-12 items-center justify-center rounded-full border border-[#1d4035]/25 bg-white px-6 text-sm font-semibold text-[#1d4035] transition hover:border-[#a9852e] hover:bg-[#fdf6e3]">Sign In to Community</Link>
+          <p className="mt-5 text-center text-xs leading-5 text-[#8a927f]">Having trouble? <Link href="/user-login" className="font-semibold text-[#1d4035] underline">Try signing in</Link> if you already have an account.</p>
+        </section>
       </main>
-      <footer className="bg-stone-950 text-stone-400 py-16 relative z-20"><div className="max-w-7xl mx-auto px-6"><p className="text-xs">&copy; 2026 Pneuma Freedom Experience Ministry. All rights reserved.</p><VisitorMap /></div></footer>
+      <footer className="border-t border-[#ece4d0] bg-white py-10"><div className="mx-auto max-w-7xl px-6"><p className="text-xs text-[#8a927f]">&copy; 2026 Pneuma Freedom Experience Ministry. All rights reserved.</p><VisitorMap /></div></footer>
     </div>
   );
 }
