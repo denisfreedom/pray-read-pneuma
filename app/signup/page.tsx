@@ -4,7 +4,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, BookOpen, Eye, EyeOff, Heart, ShieldCheck, Sparkles } from 'lucide-react';
-import VisitorMap from '../components/VisitorMap';
 
 // app/signup/page.tsx — REDESIGNED to match the web app (ivory + emerald + gold)
 // BUGS FIXED vs old file:
@@ -106,7 +105,7 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#faf8f2] text-[#22382f] antialiased">
+    <div className="flex min-h-screen flex-col bg-[#faf8f2] text-[#22382f] antialiased lg:h-screen lg:overflow-hidden">
       <div className="bg-[#1d4035] text-center text-[11px] font-medium uppercase tracking-[0.18em] text-[#e9c981] py-2 px-4">Scripture &nbsp;·&nbsp; Prayer &nbsp;·&nbsp; Community</div>
       <header className="sticky top-0 z-40 border-b border-[#ece4d0] bg-[#faf8f2]/90 backdrop-blur-md">
         <div className="mx-auto flex h-[72px] max-w-7xl items-center justify-between gap-3 px-5 sm:px-8">
@@ -129,16 +128,16 @@ export default function SignupPage() {
         {mobileMenuOpen && (<nav className="border-t border-[#ece4d0] bg-white px-5 py-4 md:hidden"><Link href="/" className="block rounded-xl px-4 py-3 text-[#3d5247] hover:bg-[#faf8f2]">Home</Link><Link href="/about" className="block rounded-xl px-4 py-3 text-[#3d5247] hover:bg-[#faf8f2]">About Us</Link><Link href="/verse-songs" className="block rounded-xl px-4 py-3 text-[#3d5247] hover:bg-[#faf8f2]">Verse-Songs</Link><Link href="/prayer-library" className="block rounded-xl px-4 py-3 font-semibold text-[#1d4035] hover:bg-[#fdf6e3]">🙏 Prayer Library</Link><Link href={loginHref} className="mt-2 block rounded-full bg-[#1d4035] px-4 py-3 text-center font-semibold text-white">Sign In</Link></nav>)}
       </header>
 
-      <main className="mx-auto grid max-w-6xl gap-8 px-5 py-10 sm:px-8 lg:grid-cols-[0.95fr_1.05fr] lg:gap-12 lg:py-14">
+      <main className="mx-auto grid w-full max-w-6xl flex-1 gap-6 px-5 py-5 sm:px-8 lg:min-h-0 lg:grid-cols-[0.95fr_1.05fr] lg:gap-8 lg:py-6">
         {/* Left — welcome panel */}
         <section className="relative overflow-hidden rounded-[2rem] bg-[#1d4035] text-white shadow-[0_30px_70px_-30px_rgba(29,64,53,0.6)]">
-          <div className="relative h-56 sm:h-64 lg:h-full lg:min-h-[560px]"><Image src={LANDSCAPE} alt="Mountains at sunrise" width={1200} height={800} className="h-full w-full object-cover" priority /><div className="absolute inset-0 bg-gradient-to-t from-[#1d4035] via-[#1d4035]/55 to-transparent" /><div className="absolute inset-x-0 bottom-0 p-7 sm:p-9"><p className="inline-flex items-center gap-2 rounded-full border border-[#e9c981]/40 bg-black/20 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#e9c981]"><Sparkles className="h-3.5 w-3.5" /> Join the community</p><h2 className="mt-4 font-serif text-3xl leading-tight sm:text-4xl">Begin your daily<br />walk in the Word.</h2><p className="mt-3 max-w-md text-sm leading-7 text-white/80">Create a free account to access the Bible, Q&amp;A, Devotionals, Prayer Library, and all features — in English and Luganda.</p><div className="mt-6 space-y-3 text-sm"><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><BookOpen className="h-4 w-4" /></span> Read, reflect, respond — one passage a day</p><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><Heart className="h-4 w-4" /></span> Prayers for every season of life</p><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><ShieldCheck className="h-4 w-4" /></span> Free forever — no card required</p></div></div></div>
+          <div className="relative h-56 sm:h-64 lg:h-full lg:min-h-0"><Image src={LANDSCAPE} alt="Mountains at sunrise" width={1200} height={800} className="h-full w-full object-cover" priority /><div className="absolute inset-0 bg-gradient-to-t from-[#1d4035] via-[#1d4035]/55 to-transparent" /><div className="absolute inset-x-0 bottom-0 p-6 sm:p-7"><p className="inline-flex items-center gap-2 rounded-full border border-[#e9c981]/40 bg-black/20 px-3 py-1.5 text-[11px] font-bold uppercase tracking-[0.18em] text-[#e9c981]"><Sparkles className="h-3.5 w-3.5" /> Join the community</p><h2 className="mt-4 font-serif text-3xl leading-tight sm:text-4xl">Begin your daily<br />walk in the Word.</h2><p className="mt-3 max-w-md text-sm leading-7 text-white/80">Create a free account to access the Bible, Q&amp;A, Devotionals, Prayer Library, and all features — in English and Luganda.</p><div className="mt-4 space-y-2 text-sm"><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><BookOpen className="h-4 w-4" /></span> Read, reflect, respond — one passage a day</p><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><Heart className="h-4 w-4" /></span> Prayers for every season of life</p><p className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#e9c981]/15 text-[#e9c981]"><ShieldCheck className="h-4 w-4" /></span> Free forever — no card required</p></div></div></div>
         </section>
 
         {/* Right — form card */}
-        <section className="rounded-[2rem] border border-[#e8dfc8] bg-white p-6 shadow-[0_24px_60px_-30px_rgba(29,64,53,0.25)] sm:p-9">
+        <section className="flex flex-col justify-center rounded-[2rem] border border-[#e8dfc8] bg-white p-6 shadow-[0_24px_60px_-30px_rgba(29,64,53,0.25)] sm:p-7 lg:min-h-0 lg:overflow-y-auto">
           <div className="text-center sm:text-left"><p className="text-[11px] font-bold uppercase tracking-[0.24em] text-[#a9852e]">Create your free account</p><h1 className="mt-3 font-serif text-3xl text-[#1d4035] sm:text-4xl">Join the Community</h1><p className="mt-2 text-sm leading-6 text-[#6b7a6e]">It takes less than a minute. You will be taken straight to your dashboard.</p></div>
-          <form className="mt-7 space-y-5" onSubmit={handleSignupSubmit} noValidate={false}>
+          <form className="mt-5 space-y-4" onSubmit={handleSignupSubmit} noValidate={false}>
             {message && <div role="status" className="rounded-2xl border border-[#d8e8d5] bg-[#eef3ea] px-4 py-3 text-sm text-[#2f5a3a]">{message}</div>}
             {error && <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}{error.toLowerCase().includes('already exists') && (<span> <Link href={loginHref} className="font-bold underline">Sign in here →</Link></span>)}</div>}
             <div><label htmlFor="name" className="mb-2 block text-sm font-semibold text-[#1d4035]">Full Name</label><input type="text" id="name" name="name" placeholder="John Doe" autoComplete="name" className="w-full rounded-2xl border border-[#e8dfc8] bg-[#faf8f2] px-4 py-3.5 text-sm text-[#22382f] outline-none transition placeholder:text-[#a0a99c] focus:border-[#a9852e] focus:bg-white focus:ring-2 focus:ring-[#e9c981]/50" required disabled={loading} /></div>
@@ -148,12 +147,11 @@ export default function SignupPage() {
             <div className="rounded-2xl border border-[#e8dfc8] bg-[#faf8f2] p-4"><p className="text-xs leading-relaxed text-[#6b7a6e]">By creating an account, you will have <strong className="text-[#1d4035]">Frontend User</strong> access, allowing you to read scripture and use offline features.</p></div>
             <button type="submit" disabled={loading} className="group flex min-h-14 w-full items-center justify-center gap-2 rounded-full bg-[#1d4035] px-7 text-base font-semibold text-white shadow-[0_16px_35px_-18px_rgba(29,64,53,0.6)] transition hover:bg-[#285445] disabled:opacity-50">{loading ? 'Creating Account…' : <>Sign Up <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></>}</button>
           </form>
-          <div className="relative my-7"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#e8dfc8]"></div></div><div className="relative flex justify-center text-sm"><span className="bg-white px-3 text-[#8a927f]">Already a member?</span></div></div>
+          <div className="relative my-4"><div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#e8dfc8]"></div></div><div className="relative flex justify-center text-sm"><span className="bg-white px-3 text-[#8a927f]">Already a member?</span></div></div>
           <Link href={loginHref} className="flex min-h-12 items-center justify-center rounded-full border border-[#1d4035]/25 bg-white px-6 text-sm font-semibold text-[#1d4035] transition hover:border-[#a9852e] hover:bg-[#fdf6e3]">Sign In to Community</Link>
-          <p className="mt-5 text-center text-xs leading-5 text-[#8a927f]">Having trouble? <Link href="/user-login" className="font-semibold text-[#1d4035] underline">Try signing in</Link> if you already have an account.</p>
+          <p className="mt-4 text-center text-xs leading-5 text-[#8a927f]">Having trouble? <Link href="/user-login" className="font-semibold text-[#1d4035] underline">Try signing in</Link> if you already have an account.</p>
         </section>
       </main>
-      <footer className="border-t border-[#ece4d0] bg-white py-10"><div className="mx-auto max-w-7xl px-6"><p className="text-xs text-[#8a927f]">&copy; 2026 Pneuma Freedom Experience Ministry. All rights reserved.</p><VisitorMap /></div></footer>
     </div>
   );
 }
