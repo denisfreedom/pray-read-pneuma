@@ -54,27 +54,53 @@ export default function PrayerLibraryAdmin() {
   const load = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/prayer-library');
-      if (res.ok) { const d = await res.json(); setPrayers(Array.isArray(d) ? d : d.prayers || []); }
+      const local: Prayer[] = JSON.parse(localStorage.getItem('prayer-library') || '[]');
+      const res = await fetch('/api/prayer-library', { cache: 'no-store' });
+      const raw = await res.text();
+      let fromApi: Prayer[] = [];
+      try { const d = JSON.parse(raw); fromApi = Array.isArray(d) ? d : d.prayers || []; } catch { fromApi = []; }
+      // Server file is the source of truth when it has prayers; otherwise use browser-saved prayers.
+      // Merge: browser prayers not yet exported to GitHub must NOT disappear on refresh.
+      const byId = new Map<string, Prayer>();
+      [...fromApi, ...local].forEach((p) => { if (p?.id) byId.set(String(p.id), p); });
+      setPrayers(Array.from(byId.values()));
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
   };
   useEffect(() => { load(); }, []);
 
-  const flash = (m: string) => { setMessage(m); setTimeout(() => setMessage(''), 3000); };
+  const flash = (m: string) => { setMessage(m); const isErr = m.startsWith('❌') || m.startsWith('⚠️'); setTimeout(() => setMessage(''), isErr ? 12000 : 4000); };
 
   const save = async () => {
     if (!form.title.trim() || !form.english_text.trim()) return flash('❌ Please enter a title and English prayer text');
     setSaving(true);
     try {
-      const payload = { ...form, id: editingId || undefined };
-      const res = await fetch('/api/prayer-library', {
-        method: editingId ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const d = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(d.error || `Failed: ${res.status}`);
+      const now = new Date().toISOString();
+      const prayer: Prayer = { ...form, id: editingId || `local-${Date.now()}`, created_at: form.created_at || now };
+      // 1) ALWAYS save in this browser first — so Save never looks dead.
+      const local: Prayer[] = JSON.parse(localStorage.getItem('prayer-library') || '[]');
+      const idx = local.findIndex((p) => String(p.id) === String(prayer.id));
+      if (idx >= 0) local[idx] = prayer; else local.unshift(prayer);
+      localStorage.setItem('prayer-library', JSON.stringify(local));
+      setPrayers((prev) => { const i = prev.findIndex((p) => String(p.id) === String(prayer.id)); if (i >= 0) { const c = [...prev]; c[i] = prayer; return c; } return [prayer, ...prev]; });
+      // 2) Try the server too (works locally; on Vercel the file system is read-only, so this may fail).
+      try {
+        const res = await fetch('/api/prayer-library', {
+          method: editingId && !String(editingId).startsWith('local-') ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(prayer),
+        });
+        const raw = await res.text();
+        let d: any = {};
+        try { d = JSON.parse(raw); } catch { d = { error: `Server returned ${res.status} (not JSON)` }; }
+        if (!res.ok) throw new Error(d.error || d.message || `Server returned ${res.status}`);
+      } catch (serverErr) {
+        // Server could not persist (expected on Vercel). Prayer is still saved in THIS browser.
+        // Tell the user the one extra step instead of pretending it failed.
+        flash('⚠️ Saved in this browser only — server cannot write files on Vercel. Click “⬇ Export JSON” below, then paste it into data/prayer-library.json in GitHub to make it live for everyone.');
+        setForm(emptyPrayer); setEditingId(null);
+        return;
+      }
       flash(editingId ? '✅ Prayer updated!' : '✅ Prayer saved!');
       setForm(emptyPrayer); setEditingId(null); await load();
     } catch (e) { flash('❌ Error: ' + (e instanceof Error ? e.message : String(e))); }
@@ -85,11 +111,14 @@ export default function PrayerLibraryAdmin() {
   const cancel = () => { setForm(emptyPrayer); setEditingId(null); };
   const del = async (id: string) => {
     if (!confirm('Delete this prayer?')) return;
+    const local: Prayer[] = JSON.parse(localStorage.getItem('prayer-library') || '[]').filter((p: Prayer) => String(p.id) !== String(id));
+    localStorage.setItem('prayer-library', JSON.stringify(local));
+    setPrayers((prev) => prev.filter((p) => String(p.id) !== String(id)));
     try {
       const res = await fetch(`/api/prayer-library?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(`Failed: ${res.status}`);
-      flash('✅ Prayer deleted!'); await load();
-    } catch (e) { flash('❌ Error: ' + (e instanceof Error ? e.message : String(e))); }
+      if (!res.ok) throw new Error(`Server delete returned ${res.status} — removed from this browser; re-export JSON to GitHub to make it permanent.`);
+      flash('✅ Prayer deleted!');
+    } catch (e) { flash('⚠️ ' + (e instanceof Error ? e.message : String(e))); }
   };
 
   const filtered = prayers.filter((p) => {
@@ -120,6 +149,10 @@ export default function PrayerLibraryAdmin() {
         <div className="flex gap-3"><button onClick={save} disabled={saving} className="flex-1 bg-amber-600 text-white py-3 px-6 rounded-lg font-semibold hover:bg-amber-700 disabled:bg-gray-400">{saving ? '💾 Saving...' : editingId ? '✏ Update Prayer' : '💾 Save Prayer'}</button>{editingId && <button onClick={cancel} className="px-6 py-3 border rounded-lg hover:bg-gray-50 font-semibold">Cancel</button>}</div>
       </div>
 
+      <div className="flex flex-wrap gap-3 mb-4">
+        <button onClick={() => { const blob = new Blob([JSON.stringify(prayers, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'prayer-library.json'; a.click(); }} className="bg-gray-800 text-white px-4 py-2 rounded-lg font-semibold">⬇ Export JSON — REQUIRED: paste this into data/prayer-library.json in GitHub</button>
+        <label className="bg-white border px-4 py-2 rounded-lg font-semibold cursor-pointer">⬆ Import JSON<input type="file" accept=".json" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (!f) return; try { const t = await f.text(); const d = JSON.parse(t); const list = Array.isArray(d) ? d : d.prayers || []; setPrayers(list); localStorage.setItem('prayer-library', JSON.stringify(list)); flash(`✅ Imported ${list.length} prayers`); } catch { flash('❌ Invalid JSON file'); } }} /></label>
+      </div>
       <div className="flex flex-wrap gap-3 mb-4">
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search prayers..." className="flex-1 min-w-[200px] px-3 py-2 border rounded-lg" />
         <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} className="px-3 py-2 border rounded-lg"><option value="all">All categories</option>{PRAYER_CATEGORIES.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}</select>
