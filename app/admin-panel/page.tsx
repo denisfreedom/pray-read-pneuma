@@ -1,5 +1,6 @@
 'use client';
 import DevotionalAdminTab from '@/app/components/DevotionalAdminTab';
+import PrayerLibraryAdmin from '@/app/components/PrayerLibraryAdmin';
 import { useState, useEffect } from 'react';
 import AdminNavbar from '../components/AdminNavbar';
 
