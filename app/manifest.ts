@@ -1,18 +1,21 @@
 {
   "name": "Pray-Read Bible",
   "short_name": "Pray-Read",
-  "description": "A Digital Sanctuary \u2014 Pray, Read, and Live the Word daily, in English and Luganda.",
+  "description": "A Digital Sanctuary - Pray, Read, and Live the Word daily, in English and Luganda.",
+  "id": "/",
+  "lang": "en",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#faf8f2",
   "theme_color": "#1d4035",
-  "orientation": "portrait",
+  "categories": [
+    "books",
+    "education",
+    "lifestyle"
+  ],
   "icons": [
-    {
-      "src": "/icon-72x72.png",
-      "sizes": "72x72",
-      "type": "image/png"
-    },
     {
       "src": "/icon-192x192.png",
       "sizes": "192x192",
@@ -20,10 +23,10 @@
       "purpose": "any"
     },
     {
-      "src": "/icon-192x192.png",
-      "sizes": "192x192",
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
       "type": "image/png",
-      "purpose": "maskable"
+      "purpose": "any"
     }
   ]
 }
