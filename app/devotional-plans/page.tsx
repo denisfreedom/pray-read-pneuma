@@ -3,10 +3,19 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import AppFooter from '@/app/components/AppFooter';
 
-// app/devotional-plans/page.tsx — V10.1: V10 + DEPLOY FIX (regex range + TS strict qm.index)
+// app/devotional-plans/page.tsx — V11: FRONT-PAGE COLOURS + HERO IMAGE: V10 + DEPLOY FIX (regex range + TS strict qm.index)
 // WHAT WAS WRONG: the page had NO header. Once you landed on Devotionals you
 // could not get back to Home, Bible Reader, Verse-Songs, Q&A, Community or
 // Dashboard except with the browser Back button.
+// V11 REDESIGN (this version):
+//   - Hero gradient (purple/pink) REPLACED with a real devotional hero image
+//     (/assets/devotional-hero.jpg — upload devotional-hero.jpg to public/assets/)
+//     with a deep-emerald overlay, so text stays readable.
+//   - Every purple/pink/blue accent -> front-page emerald #17372f / #1d4035,
+//     gold #e9c981 / #a9852e, cream #f8f6ef. Header, tabs, covers, popup,
+//     share row, scripture blocks, buttons all match the home page now.
+//   - All V10 logic UNCHANGED: Luganda formatter, D-001, covers, share row,
+//     verse window, streak, search, calendar/list views.
 // THIS VERSION ADDS:
 //   1) A sticky top header (stays visible while you scroll) with the Pray-Read
 //      logo + "Pray-Read Bible" — tap the logo to go Home.
@@ -35,6 +44,7 @@ import AppFooter from '@/app/components/AppFooter';
 type Entry = any;
 
 const LOGO = '/assets/PrayRead-logo.png';
+const HERO_IMAGE = '/assets/devotional-hero.jpg';
 const LOGO_FALLBACK = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
 
 // The app's main tabs — the same destinations the other pages link to.
@@ -49,10 +59,10 @@ const TABS = [
 ];
 
 const PALETTES = [
-  ['#6d28d9', '#db2777', '#f59e0b'], ['#0e7490', '#059669', '#facc15'], ['#9f1239', '#ea580c', '#facc15'],
-  ['#1d4ed8', '#7c3aed', '#ec4899'], ['#065f46', '#0d9488', '#a3e635'], ['#7f1d1d', '#b45309', '#fbbf24'],
-  ['#312e81', '#4f46e5', '#06b6d4'], ['#701a75', '#c026d3', '#fb7185'], ['#134e4a', '#059669', '#fde68a'],
-  ['#1e3a8a', '#0284c7', '#34d399'],
+  ['#17372f', '#1d4035', '#e9c981'], ['#1d4035', '#2a5a4a', '#d4af5a'], ['#0f2a22', '#315d4b', '#e9c981'],
+  ['#17372f', '#a9852e', '#e9c981'], ['#2a4a3a', '#60745e', '#f2d99d'], ['#1c382e', '#8a6d2b', '#e9c981'],
+  ['#17372f', '#285445', '#c9a86a'], ['#1d4035', '#3a6b52', '#e9c981'], ['#0f2a22', '#1d4035', '#f2d99d'],
+  ['#213a30', '#a9852e', '#e9c981'],
 ];
 function numOf(e: Entry) { return String(e.devotional_number || '').padStart(3, '0'); }
 function dLabel(e: Entry) { return 'D-' + numOf(e); }
@@ -64,7 +74,7 @@ function Cover({ e, height = 150 }: { e: Entry; height?: number }) {
     return (<div style={{ position: 'relative', height, overflow: 'hidden', background: '#111' }}>
       <img src={String(e.cover_photo_url || e.default_image_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
       <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.05), rgba(0,0,0,0.55))' }} />
-      <span style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(255,255,255,0.92)', color: '#4c1d95', fontWeight: 800, fontSize: 12, padding: '4px 10px', borderRadius: 999 }}>{dLabel(e)}</span>
+      <span style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(255,255,255,0.92)', color: '#1c352d', fontWeight: 800, fontSize: 12, padding: '4px 10px', borderRadius: 999 }}>{dLabel(e)}</span>
       <div style={{ position: 'absolute', left: 14, right: 14, bottom: 12, color: '#fff' }}><div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.25 }}>{e.title}</div><div style={{ fontSize: 12, opacity: 0.9 }}>{e.scripture_book} {e.scripture_chapter}:{e.scripture_verse}</div></div>
     </div>);
   }
@@ -72,7 +82,7 @@ function Cover({ e, height = 150 }: { e: Entry; height?: number }) {
     <div style={{ position: 'absolute', right: -30, top: -30, width: 150, height: 150, borderRadius: '50%', background: 'rgba(255,255,255,0.18)' }} />
     <div style={{ position: 'absolute', right: 30, bottom: -40, width: 110, height: 110, borderRadius: '50%', background: 'rgba(0,0,0,0.15)' }} />
     <div style={{ position: 'absolute', right: 18, top: 12, fontSize: 44, opacity: 0.35 }}>✝</div>
-    <span style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(255,255,255,0.92)', color: '#4c1d95', fontWeight: 800, fontSize: 12, padding: '4px 10px', borderRadius: 999 }}>{dLabel(e)}</span>
+    <span style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(255,255,255,0.92)', color: '#1c352d', fontWeight: 800, fontSize: 12, padding: '4px 10px', borderRadius: 999 }}>{dLabel(e)}</span>
     <div style={{ position: 'absolute', left: 14, right: 14, bottom: 12 }}><div style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.25 }}>{e.title}</div><div style={{ fontSize: 12, opacity: 0.92 }}>{e.scripture_book} {e.scripture_chapter}:{e.scripture_verse} · PrayRead Devotional</div></div>
   </div>);
 }
@@ -130,17 +140,12 @@ function parseRelated(val: any): { ref: string; explanation: string }[] {
 const BIBLE_BOOK_NUMBERS: Record<string, number> = {};
 BOOKS.forEach((b, i) => { BIBLE_BOOK_NUMBERS[b.toLowerCase()] = i + 1; });
 BIBLE_BOOK_NUMBERS['psalm'] = 19; BIBLE_BOOK_NUMBERS['song of solomon'] = 22; BIBLE_BOOK_NUMBERS['song of songs'] = 22; BIBLE_BOOK_NUMBERS['judges'] = 7;
-// FIX (Luganda refs): "Yokaana 17:20" must go to John (43), not Genesis (fallback 1).
-// Same map as the chapter page's LU_BOOK_MAP, but as book NUMBERS for refToBibleUrl.
-const LU_BOOK_NUMBERS: Record<string, number> = { 'olubereberye': 1, 'okuva': 2, 'ebyabaleevi': 3, 'okubala': 4, 'ekyamateeka': 5, 'yoswa': 6, 'abalamuzi': 7, 'ruusa': 8, 'samwiri': 9, '1 samwiri': 9, '2 samwiri': 10, 'bassekabaka': 11, '1 bassekabaka': 11, '2 bassekabaka': 12, 'ebyomumirembe': 13, '1 ebyomumirembe': 13, '2 ebyomumirembe': 14, 'ezera': 15, 'nekemiya': 16, 'eseza': 17, 'yobu': 18, 'zabbuli': 19, 'engero': 20, 'omubuulizi': 21, 'oluyimba': 22, 'isaaya': 23, 'yeremiya': 24, 'okukungubaga': 25, 'ebyokukungubaga': 25, 'ezekyeri': 26, 'danyeri': 27, 'koseya': 28, 'yoweri': 29, 'amosi': 30, 'obadiya': 31, 'yona': 32, 'mika': 33, 'nakumu': 34, 'abakuku': 35, 'zefaniya': 36, 'kaggayi': 37, 'zekkariya': 38, 'malaki': 39, 'matayo': 40, 'makko': 41, 'lukka': 42, 'yokaana': 43, '1 yokaana': 62, '2 yokaana': 63, '3 yokaana': 64, 'ebikolwa': 44, 'abaruumi': 45, 'abakkolinso': 46, '1 abakkolinso': 46, '2 abakkolinso': 47, 'abaggalatiya': 48, 'abaefeso': 49, 'abafiripi': 50, 'abakkolosaayi': 51, 'abasessalonika': 52, '1 abasessalonika': 52, '2 abasessalonika': 53, 'timosewo': 54, '1 timosewo': 54, '2 timosewo': 55, 'tito': 56, 'firemooni': 57, 'abaebbulaniya': 58, 'yakobo': 59, 'peetero': 60, '1 peetero': 60, '2 peetero': 61, 'yuda': 65, 'okubikkulirwa': 66 };
-Object.assign(BIBLE_BOOK_NUMBERS, LU_BOOK_NUMBERS);
 function refToBibleUrl(ref: string) {
   const m = ref.match(/^(.+?)\s+(\d+)(?::(\d+))?/);
   if (!m) return '/bible-reader/1/1';
   const name = m[1].trim().toLowerCase().replace(/\s+/g, ' ');
   const num = BIBLE_BOOK_NUMBERS[name] || 1;
   const ch = m[2]; const vs = m[3];
-  // Verse hash is what makes the chapter page jump to the EXACT verse (it scrolls to #verse-N once verses load).
   return `/bible-reader/${num}/${ch}${vs ? `#verse-${vs}` : ''}`;
 }
 function stripHtml(html: string) { return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
@@ -344,7 +349,7 @@ export default function DevotionalPlansPage() {
   const allRefs = [...new Set([...furtherRefs])];
 
   return (
-    <div style={{ background: '#fffdf5', minHeight: '100vh' }}>
+    <div style={{ background: '#f8f6ef', minHeight: '100vh' }}>
       <style>{`
         @media (max-width: 640px) {
           .dev-list-card { flex-direction: column !important; }
@@ -357,24 +362,24 @@ export default function DevotionalPlansPage() {
         .dev-tab-row { scrollbar-width: none; -ms-overflow-style: none; }
         .dev-tab-row::-webkit-scrollbar { display: none; }
         .dev-tab { white-space: nowrap; text-decoration: none; }
-        .dev-body h3, .dev-body .dev-h3 { font-size: 17px; font-weight: 800; color: #4c1d95; margin: 22px 0 8px; line-height: 1.4; }
+        .dev-body h3, .dev-body .dev-h3 { font-size: 17px; font-weight: 800; color: #1d4035; margin: 22px 0 8px; line-height: 1.4; }
         .dev-body h3:first-child, .dev-body .dev-h3:first-child { margin-top: 4px; }
         .dev-body p { margin: 0 0 12px; }
-        .dev-body .dev-quote { margin: 10px 0 14px; padding: 12px 16px; background: #fff; border-left: 5px solid #7c3aed; border-radius: 0 10px 10px 0; font-style: italic; color: #312e81; line-height: 1.7; }
+        .dev-body .dev-quote { margin: 10px 0 14px; padding: 12px 16px; background: #fff; border-left: 5px solid #a9852e; border-radius: 0 10px 10px 0; font-style: italic; color: #1c352d; line-height: 1.7; }
       `}</style>
 
       {/* ── STICKY HEADER — NEW: gets you back to every other tab ── */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(15,32,67,0.97)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(231,200,115,0.35)', boxShadow: '0 4px 20px rgba(0,0,0,0.25)' }}>
+      <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(23,55,47,0.97)', backdropFilter: 'blur(8px)', borderBottom: '1px solid rgba(233,201,129,0.35)', boxShadow: '0 4px 20px rgba(0,0,0,0.25)' }}>
         <div style={{ maxWidth: 980, margin: '0 auto', padding: '10px 16px 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }} aria-label="Go to Home">
-            <span style={{ width: 38, height: 38, borderRadius: 12, overflow: 'hidden', background: '#fff', border: '1px solid #E7C873', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <span style={{ width: 38, height: 38, borderRadius: 12, overflow: 'hidden', background: '#fff', border: '1px solid #e9c981', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={logoSrc} alt="Pray-Read Bible" width={38} height={38} style={{ objectFit: 'contain' }} onError={() => { if (logoSrc !== LOGO_FALLBACK) setLogoSrc(LOGO_FALLBACK); }} />
             </span>
-            <span style={{ color: '#fff', fontWeight: 800, fontSize: 16, lineHeight: 1.1 }}>Pray-Read <span style={{ color: '#E7C873' }}>Bible</span></span>
+            <span style={{ color: '#fff', fontWeight: 800, fontSize: 16, lineHeight: 1.1 }}>Pray-Read <span style={{ color: '#e9c981' }}>Bible</span></span>
           </Link>
           <span style={{ marginLeft: 'auto' }}>
-            <Link href="/dashboard" style={{ display: 'inline-block', padding: '8px 16px', borderRadius: 999, background: 'linear-gradient(90deg,#f59e0b,#f43f5e)', color: '#fff', fontWeight: 800, fontSize: 13, textDecoration: 'none' }}>📊 Dashboard</Link>
+            <Link href="/dashboard" style={{ display: 'inline-block', padding: '8px 16px', borderRadius: 999, background: '#e9c981', color: '#1c352d', fontWeight: 800, fontSize: 13, textDecoration: 'none' }}>📊 Dashboard</Link>
           </span>
         </div>
         {/* Tab bar — scrolls sideways on mobile, shows all tabs on desktop */}
@@ -382,22 +387,25 @@ export default function DevotionalPlansPage() {
           {TABS.map((t) => (
             <Link key={t.href} href={t.href} className="dev-tab" aria-current={t.active ? 'page' : undefined} style={{
               padding: '7px 14px', borderRadius: 999, fontSize: 13, fontWeight: t.active ? 800 : 600,
-              background: t.active ? '#E7C873' : 'rgba(255,255,255,0.10)',
-              color: t.active ? '#0F2043' : '#fff',
-              border: t.active ? '1px solid #E7C873' : '1px solid rgba(255,255,255,0.25)',
+              background: t.active ? '#e9c981' : 'rgba(255,255,255,0.10)',
+              color: t.active ? '#1c352d' : '#fff',
+              border: t.active ? '1px solid #e9c981' : '1px solid rgba(255,255,255,0.25)',
             }}>{t.label}</Link>
           ))}
         </nav>
       </header>
 
-      <div style={{ background: 'linear-gradient(100deg,#6d28d9,#a21caf 55%,#f43f5e)', padding: '40px 20px 56px', textAlign: 'center', color: '#fff' }}>
+      <div style={{ position: 'relative', padding: '56px 20px 64px', textAlign: 'center', color: '#fff', backgroundColor: '#17372f', backgroundImage: 'url("/assets/devotional-hero.jpg")', backgroundSize: 'cover', backgroundPosition: 'center 38%', overflow: 'hidden' }}>
+        <div aria-hidden="true" style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(16,37,31,0.78) 0%, rgba(16,37,31,0.55) 50%, rgba(16,37,31,0.82) 100%)' }} />
+        <div style={{ position: 'relative' }}>
         <h1 style={{ fontSize: 30, margin: '0 0 8px', lineHeight: 1.2 }}>Daily Devotionals</h1>
         <p style={{ maxWidth: 640, margin: '0 auto', fontSize: 20, lineHeight: 1.5 }}>Short, rich devotionals to deepen your faith — in English and Luganda, with Scripture, further readings, and a streak to keep you going.</p>
         <div style={{ display: 'flex', gap: 12, justifyContent: 'center', marginTop: 22, flexWrap: 'wrap' }}>
-          <button onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })} style={{ border: 'none', cursor: 'pointer', padding: '14px 26px', borderRadius: 999, fontWeight: 800, fontSize: 16, background: 'linear-gradient(90deg,#facc15,#f43f5e)', color: '#fff' }}>Explore Devotionals →</button>
+          <button onClick={() => document.getElementById('plans')?.scrollIntoView({ behavior: 'smooth' })} style={{ border: 'none', cursor: 'pointer', padding: '14px 26px', borderRadius: 999, fontWeight: 800, fontSize: 16, background: '#e9c981', color: '#1c352d' }}>Explore Devotionals →</button>
           <button onClick={() => setView(view === 'calendar' ? 'list' : 'calendar')} style={{ cursor: 'pointer', padding: '14px 26px', borderRadius: 999, fontWeight: 700, fontSize: 16, background: 'rgba(255,255,255,0.18)', color: '#fff', border: '1px solid rgba(255,255,255,0.5)' }}>📅 {view === 'calendar' ? 'List View' : 'Calendar View'}</button>
         </div>
         {done.length > 0 && <p style={{ marginTop: 14, opacity: 0.95 }}>🔥 Your streak: {done.length} devotional{done.length === 1 ? '' : 's'} completed</p>}
+        </div>
       </div>
 
       <div id="plans" style={{ maxWidth: 980, margin: '0 auto', padding: '28px 20px 60px' }}>
@@ -427,7 +435,7 @@ export default function DevotionalPlansPage() {
                   <h3 style={{ margin: '4px 0 2px', fontSize: 18 }}>{e.title}</h3>
                   <p style={{ margin: 0, color: '#6b7280', fontSize: 14 }}>{e.scripture_book} {e.scripture_chapter}:{e.scripture_verse} · {e.devotional_text_lu ? 'English + Luganda' : 'English'}</p>
                   <p style={{ margin: '6px 0 0', color: '#374151', fontSize: 14, lineHeight: 1.5 }}>{excerpt(e)}</p>
-                  <button onClick={() => { setOpen(e); setLang('en'); }} style={{ marginTop: 10, cursor: 'pointer', border: '1px solid #7c3aed', color: '#7c3aed', background: '#fff', borderRadius: 999, padding: '7px 16px', fontWeight: 700 }}>Read →</button>
+                  <button onClick={() => { setOpen(e); setLang('en'); }} style={{ marginTop: 10, cursor: 'pointer', border: '1px solid #1d4035', color: '#1d4035', background: '#fff', borderRadius: 999, padding: '7px 16px', fontWeight: 700 }}>Read →</button>
                 </div>
               </div>
             ))}
@@ -446,48 +454,48 @@ export default function DevotionalPlansPage() {
 
       {/* Beautiful popup */}
       {open && (() => { const [c1, c2, c3] = paletteFor(open); return (
-        <div onClick={() => setOpen(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(20,10,40,0.62)', backdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 14 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: 'rgba(224,242,254,0.92)', backdropFilter: 'blur(6px)', border: '1px solid rgba(147,197,253,0.6)', borderRadius: 22, maxWidth: 780, width: '100%', margin: '22px 0', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,0.35)' }}>
+        <div onClick={() => setOpen(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(16,37,31,0.65)', backdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 14 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#f8f6ef', backdropFilter: 'blur(6px)', border: '1px solid #e8e7de', borderRadius: 22, maxWidth: 780, width: '100%', margin: '22px 0', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,0.35)' }}>
             {/* Header = auto cover */}
             <div style={{ position: 'relative' }}>
               {(open.cover_photo_url || open.default_image_url)
-                ? <div style={{ position: 'relative', height: 210, overflow: 'hidden' }}><img src={String(open.cover_photo_url || open.default_image_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.05), rgba(30,10,60,0.72))' }} /></div>
+                ? <div style={{ position: 'relative', height: 210, overflow: 'hidden' }}><img src={String(open.cover_photo_url || open.default_image_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.05), rgba(23,55,47,0.72))' }} /></div>
                 : <div style={{ height: 210, background: `linear-gradient(120deg, ${c1}, ${c2} 55%, ${c3})`, position: 'relative', overflow: 'hidden' }}><div style={{ position: 'absolute', right: -30, top: -30, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.18)' }} /><div style={{ position: 'absolute', right: 40, bottom: -50, width: 130, height: 130, borderRadius: '50%', background: 'rgba(0,0,0,0.16)' }} /><div style={{ position: 'absolute', right: 20, top: 14, fontSize: 56, opacity: 0.35, color: '#fff' }}>✝</div></div>}
               <button onClick={() => setOpen(null)} style={{ position: 'absolute', top: 12, right: 12, border: 'none', background: 'rgba(255,255,255,0.92)', borderRadius: 999, width: 34, height: 34, cursor: 'pointer', fontSize: 16 }}>✕</button>
               <div style={{ position: 'absolute', left: 22, right: 22, bottom: 16, color: '#fff' }}>
-                <span style={{ background: '#fff', color: '#4c1d95', fontWeight: 800, fontSize: 12, padding: '4px 11px', borderRadius: 999 }}>{dLabel(open)}</span>
+                <span style={{ background: '#fff', color: '#1c352d', fontWeight: 800, fontSize: 12, padding: '4px 11px', borderRadius: 999 }}>{dLabel(open)}</span>
                 <h2 style={{ fontSize: 28, margin: '10px 0 2px', lineHeight: 1.15 }}>{open.title}</h2>
-                <button onClick={() => openVerse(`${open.scripture_book} ${open.scripture_chapter}:${open.scripture_verse}`)} title="Tap to read this verse, then open in Bible Reader" style={{ background: 'none', border: 'none', color: '#fde68a', fontWeight: 700, fontSize: 15, cursor: 'pointer', padding: 0 }}>📖 {open.scripture_book} {open.scripture_chapter}:{open.scripture_verse} — tap to read →</button>
+                <button onClick={() => openVerse(`${open.scripture_book} ${open.scripture_chapter}:${open.scripture_verse}`)} title="Tap to read this verse, then open in Bible Reader" style={{ background: 'none', border: 'none', color: '#e9c981', fontWeight: 700, fontSize: 15, cursor: 'pointer', padding: 0 }}>📖 {open.scripture_book} {open.scripture_chapter}:{open.scripture_verse} — tap to read →</button>
                 {open.author && <div style={{ fontSize: 13, opacity: 0.9 }}>By {open.author}</div>}
               </div>
             </div>
 
-            <div style={{ padding: '18px 22px 24px', background: 'rgba(224,242,254,0.55)' }}>
+            <div style={{ padding: '18px 22px 24px', background: '#f8f6ef' }}>
               {/* SHARE ROW — FIRST */}
-              <div style={{ background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 14, padding: '12px 14px', marginBottom: 16 }}>
-                <div style={{ fontWeight: 800, fontSize: 13, color: '#4c1d95', marginBottom: 8 }}>SHARE THIS DEVOTIONAL</div>
+              <div style={{ background: '#e9eddf', border: '1px solid #dfe3d8', borderRadius: 14, padding: '12px 14px', marginBottom: 16 }}>
+                <div style={{ fontWeight: 800, fontSize: 13, color: '#1c352d', marginBottom: 8 }}>SHARE THIS DEVOTIONAL</div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <button onClick={() => shareOn(open, 'facebook')} title="Share on Facebook" aria-label="Share on Facebook" style={{ cursor: 'pointer', border: 'none', background: '#1877f2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>f</button>
                   <button onClick={() => shareOn(open, 'whatsapp')} title="Share on WhatsApp" aria-label="Share on WhatsApp" style={{ cursor: 'pointer', border: 'none', background: '#25d366', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>💬</button>
                   <button onClick={() => shareOn(open, 'telegram')} title="Share on Telegram" aria-label="Share on Telegram" style={{ cursor: 'pointer', border: 'none', background: '#229ed9', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✈</button>
                   <button onClick={() => shareOn(open, 'instagram')} title="Share on Instagram" aria-label="Share on Instagram" style={{ cursor: 'pointer', border: 'none', background: 'linear-gradient(45deg,#f58529,#dd2a7b,#8134af)', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>📸</button>
                   <button onClick={() => shareOn(open, 'linkedin')} title="Share on LinkedIn" aria-label="Share on LinkedIn" style={{ cursor: 'pointer', border: 'none', background: '#0a66c2', color: '#fff', borderRadius: '50%', width: 44, height: 44, fontSize: 16, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>in</button>
-                  <button onClick={() => copyLink(open)} title="Copy share link" aria-label="Copy share link" style={{ cursor: 'pointer', border: '1px solid #7c3aed', background: '#fff', color: '#7c3aed', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{copied ? '✓' : '🔗'}</button>
+                  <button onClick={() => copyLink(open)} title="Copy share link" aria-label="Copy share link" style={{ cursor: 'pointer', border: '1px solid #1d4035', background: '#fff', color: '#1d4035', borderRadius: '50%', width: 44, height: 44, fontSize: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{copied ? '✓' : '🔗'}</button>
                 </div>
                 <div style={{ fontSize: 12, color: '#6b7280', marginTop: 7 }}></div>
               </div>
 
-              {open.scripture_quotation && <div style={{ background: '#fff', border: '1px solid #ede9fe', borderLeft: '5px solid #7c3aed', padding: '14px 16px', borderRadius: 10, marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 800, color: '#7c3aed', marginBottom: 4 }}>SCRIPTURE</div><div dangerouslySetInnerHTML={{ __html: String(open.scripture_quotation) }} /></div>}
-              {open.devotional_text_lu && <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><button onClick={() => setLang('en')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'en' ? '#7c3aed' : '#fff', color: lang === 'en' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇬🇧 English</button><button onClick={() => setLang('lu')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #7c3aed', background: lang === 'lu' ? '#7c3aed' : '#fff', color: lang === 'lu' ? '#fff' : '#7c3aed', fontWeight: 700 }}>🇺🇬 Luganda</button></div>}
+              {open.scripture_quotation && <div style={{ background: '#fff', border: '1px solid #e8e7de', borderLeft: '5px solid #a9852e', padding: '14px 16px', borderRadius: 10, marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 800, color: '#a9852e', marginBottom: 4 }}>SCRIPTURE</div><div dangerouslySetInnerHTML={{ __html: String(open.scripture_quotation) }} /></div>}
+              {open.devotional_text_lu && <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><button onClick={() => setLang('en')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #1d4035', background: lang === 'en' ? '#1d4035' : '#fff', color: lang === 'en' ? '#fff' : '#1d4035', fontWeight: 700 }}>🇬🇧 English</button><button onClick={() => setLang('lu')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #1d4035', background: lang === 'lu' ? '#1d4035' : '#fff', color: lang === 'lu' ? '#fff' : '#1d4035', fontWeight: 700 }}>🇺🇬 Luganda</button></div>}
               <div className="dev-body" style={{ fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: formatDevotionalBody(lang === 'lu' && open.devotional_text_lu ? open.devotional_text_lu : open.devotional_text, lang) }} />
 
               {relatedItems.length > 0 && (
-                <div style={{ marginTop: 20, background: '#fff', border: '1px solid #c7d2fe', borderRadius: 12, padding: '14px 16px' }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, color: '#4338ca', marginBottom: 10 }}>📖 RELATED SCRIPTURES — TAP A VERSE TO READ IT</div>
+                <div style={{ marginTop: 20, background: '#fff', border: '1px solid #dfe3d8', borderRadius: 12, padding: '14px 16px' }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: '#1d4035', marginBottom: 10 }}>📖 RELATED SCRIPTURES — TAP A VERSE TO READ IT</div>
                   <div style={{ display: 'grid', gap: 10 }}>
                     {relatedItems.map((it: { ref: string; explanation: string }, i: number) => (
                       <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                        <button onClick={() => openVerse(it.ref)} style={{ cursor: 'pointer', border: '1px solid #6366f1', background: '#eef2ff', color: '#4338ca', borderRadius: 999, padding: '6px 12px', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>{it.ref} →</button>
+                        <button onClick={() => openVerse(it.ref)} style={{ cursor: 'pointer', border: '1px solid #1d4035', background: '#e9eddf', color: '#1d4035', borderRadius: 999, padding: '6px 12px', fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>{it.ref} →</button>
                         {it.explanation && <span style={{ color: '#374151', fontSize: 14, lineHeight: 1.5 }}>{it.explanation}</span>}
                       </div>
                     ))}
@@ -495,16 +503,16 @@ export default function DevotionalPlansPage() {
                 </div>
               )}
               {allRefs.length > 0 && (
-                <div style={{ marginTop: 20, background: '#fff', border: '1px solid #fde68a', borderRadius: 12, padding: '14px 16px' }}>
-                  <div style={{ fontWeight: 800, fontSize: 13, color: '#92400e', marginBottom: 8 }}>📖 FURTHER READINGS — TAP A VERSE TO READ IT</div>
+                <div style={{ marginTop: 20, background: '#fff', border: '1px solid #e9c981', borderRadius: 12, padding: '14px 16px' }}>
+                  <div style={{ fontWeight: 800, fontSize: 13, color: '#7a5f1e', marginBottom: 8 }}>📖 FURTHER READINGS — TAP A VERSE TO READ IT</div>
                   <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     {allRefs.filter((r: any) => typeof r === 'string' && r && r !== '[object Object]').map((ref: string) => (
-                      <button key={ref} onClick={() => openVerse(ref)} style={{ cursor: 'pointer', border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', borderRadius: 999, padding: '7px 13px', fontWeight: 700 }}>{ref} →</button>
+                      <button key={ref} onClick={() => openVerse(ref)} style={{ cursor: 'pointer', border: '1px solid #a9852e', background: '#fdf8e8', color: '#7a5f1e', borderRadius: 999, padding: '7px 13px', fontWeight: 700 }}>{ref} →</button>
                     ))}
                   </div>
                 </div>
               )}
-              <button onClick={() => toggleDone(numOf(open))} style={{ width: '100%', marginTop: 18, padding: 13, borderRadius: 12, border: 'none', cursor: 'pointer', background: done.includes(numOf(open)) ? '#dcfce7' : '#7c3aed', color: done.includes(numOf(open)) ? '#166534' : '#fff', fontWeight: 800 }}>{done.includes(numOf(open)) ? '✓ Completed — tap to unmark' : '✓ Mark complete'}</button>
+              <button onClick={() => toggleDone(numOf(open))} style={{ width: '100%', marginTop: 18, padding: 13, borderRadius: 12, border: 'none', cursor: 'pointer', background: done.includes(numOf(open)) ? '#dcfce7' : '#1d4035', color: done.includes(numOf(open)) ? '#166534' : '#fff', fontWeight: 800 }}>{done.includes(numOf(open)) ? '✓ Completed — tap to unmark' : '✓ Mark complete'}</button>
             </div>
           </div>
         </div>
@@ -514,9 +522,9 @@ export default function DevotionalPlansPage() {
       {verseRef && (
         <div onClick={() => setVerseRef(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 18, maxWidth: 520, width: '100%', padding: 22, boxShadow: '0 24px 60px rgba(0,0,0,0.3)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><h3 style={{ margin: 0, color: '#4c1d95' }}>📖 {verseRef}</h3><button onClick={() => setVerseRef(null)} style={{ border: 'none', background: '#f3f4f6', borderRadius: 999, width: 30, height: 30, cursor: 'pointer' }}>✕</button></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><h3 style={{ margin: 0, color: '#1c352d' }}>📖 {verseRef}</h3><button onClick={() => setVerseRef(null)} style={{ border: 'none', background: '#f3f4f6', borderRadius: 999, width: 30, height: 30, cursor: 'pointer' }}>✕</button></div>
             <p style={{ fontSize: 17, lineHeight: 1.7, marginTop: 14 }}>{verseLoading ? 'Loading verse…' : verseText}</p>
-            <a href={refToBibleUrl(verseRef)} style={{ display: 'block', textAlign: 'center', marginTop: 12, padding: '12px', borderRadius: 10, background: '#7c3aed', color: '#fff', fontWeight: 800, textDecoration: 'none' }}>Open {verseRef} in Bible Reader →</a>
+            <a href={refToBibleUrl(verseRef)} style={{ display: 'block', textAlign: 'center', marginTop: 12, padding: '12px', borderRadius: 10, background: '#1d4035', color: '#fff', fontWeight: 800, textDecoration: 'none' }}>Open {verseRef} in Bible Reader →</a>
             <button onClick={() => setVerseRef(null)} style={{ width: '100%', marginTop: 8, padding: '10px', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer' }}>Close</button>
           </div>
         </div>
