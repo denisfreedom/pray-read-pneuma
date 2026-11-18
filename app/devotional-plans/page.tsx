@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppFooter from '@/app/components/AppFooter';
-// app/devotional-plans/page.tsx — V12: V11 + PER-USER HIGHLIGHT/UNDERLINE + BOOKMARK TO DASHBOARD
+// app/devotional-plans/page.tsx — V14 (V13 + ALWAYS-VISIBLE HIGHLIGHT BAR + selectionchange + execCommand fallback): V11 + PER-USER HIGHLIGHT/UNDERLINE + BOOKMARK TO DASHBOARD
 // WHAT'S NEW IN V12 (everything from V11 is unchanged):
 //  1) HIGHLIGHT / UNDERLINE in the reader popup:
 //     - Select any words in the devotional text -> a small toolbar appears:
@@ -127,20 +127,62 @@ function formatLugandaBody(raw: string): string {
   return out;
 }
 function formatDevotionalBody(raw: any, lang: 'en' | 'lu'): string { const html = String(raw || '').replace(/emanna\.com/gi, ''); if (lang === 'lu') return formatLugandaBody(html); return html; }
-// ── APPLY SAVED MARKS: wrap each saved phrase in <mark> / <u> inside the HTML ──
-function escapeReg(s: string) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
-function applyMarks(html: string, marks: Mark[]): string {
-  let out = html;
+// ── APPLY SAVED MARKS — DOM version (V13 FIX) ──
+// V12 BUG: it did a string replace on the HTML. That fails when the selected
+// text spans a line break, has different spacing in the HTML, contains an
+// apostrophe/quote entity, or crosses a <p>/<h3> boundary — i.e. most real
+// selections. So nothing appeared to save.
+// V13: after the HTML is rendered, walk the REAL text nodes in the reader div,
+// find the saved phrase inside a single text node, split that node and wrap
+// just that part in <mark> / <u>. This is what the browser actually shows.
+function unwrapMarks(root: HTMLElement) {
+  root.querySelectorAll('mark.pr-mark-hl, u.pr-mark-u').forEach((el: any) => {
+    const parent = el.parentNode; if (!parent) return;
+    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    parent.removeChild(el);
+  });
+  try { root.normalize(); } catch {}
+}
+function applyMarksDOM(root: HTMLElement | null, marks: Mark[]) {
+  if (!root) return;
+  unwrapMarks(root);
+  if (!marks.length) return;
   for (const mk of marks) {
-    const needle = (mk.text || '').trim(); if (!needle) continue;
-    // Don't double-wrap text already inside a mark/u
-    const re = new RegExp(escapeReg(escapeHtml(needle)) + '|' + escapeReg(needle), 'g');
-    out = out.replace(re, (match) => {
-      if (mk.kind === 'underline') return `<u class="pr-mark-u">${match}</u>`;
-      return `<mark class="pr-mark-hl">${match}</mark>`;
-    });
+    const needle = (mk.text || '').trim().replace(/\s+/g, ' ');
+    if (!needle || needle.length < 2) continue;
+    // Collect text nodes FIRST — we mutate the tree while wrapping.
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    const nodes: Text[] = []; let n: any;
+    while ((n = walker.nextNode())) nodes.push(n as Text);
+    let done = false;
+    for (const node of nodes) {
+      if (done) continue;
+      // Skip text already inside a mark (we unwrapped, but be safe)
+      const parent: any = node.parentElement;
+      if (parent && (parent.closest && parent.closest('mark.pr-mark-hl, u.pr-mark-u'))) continue;
+      const hay = (node.nodeValue || '').replace(/\s+/g, ' ');
+      // Try exact match first, then case-insensitive match
+      let idx = hay.indexOf(needle);
+      if (idx === -1) idx = hay.toLowerCase().indexOf(needle.toLowerCase());
+      if (idx === -1) continue;
+      // Map the collapsed-space index back is hard — in practice the reader
+      // HTML has single spaces, so use the raw node value for the split:
+      const raw = node.nodeValue || '';
+      let rawIdx = raw.indexOf(mk.text.trim());
+      if (rawIdx === -1) rawIdx = raw.toLowerCase().indexOf(mk.text.trim().toLowerCase());
+      if (rawIdx === -1) rawIdx = idx; // fall back to collapsed index
+      const len = mk.text.trim().length;
+      try {
+        const after = node.splitText(rawIdx + len);
+        const middle = node.splitText(rawIdx);
+        const wrap = document.createElement(mk.kind === 'underline' ? 'u' : 'mark');
+        wrap.className = mk.kind === 'underline' ? 'pr-mark-u' : 'pr-mark-hl';
+        wrap.appendChild(middle);
+        (node.parentNode as any)?.insertBefore(wrap, after);
+        done = true;
+      } catch {}
+    }
   }
-  return out;
 }
 
 export default function DevotionalPlansPage() {
@@ -203,36 +245,86 @@ export default function DevotionalPlansPage() {
   }
   // ── MARKS ──
   function saveMark(kind: 'highlight' | 'underline') {
-    if (!open || !selText.trim()) return;
-    const text = selText.trim().slice(0, 400);
+    if (!open) return;
+    let text = '';
+    try { text = (window.getSelection()?.toString() || '').trim(); } catch {}
+    if (!text) text = selText.trim();
+    if (!text) { setMarkSaved('⚠️ Select some words first — drag over the words, then tap Highlight / Underline.'); setTimeout(() => setMarkSaved(''), 3000); return; }
+    text = text.slice(0, 400);
     const num = numOf(open);
+    let painted = false;
+    // 1) Paint it in the DOM RIGHT NOW.
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0 && bodyRef.current && sel.anchorNode && bodyRef.current.contains(sel.anchorNode)) {
+        const range = sel.getRangeAt(0);
+        if (!range.collapsed) {
+          const wrap = document.createElement(kind === 'underline' ? 'u' : 'mark');
+          wrap.className = kind === 'underline' ? 'pr-mark-u' : 'pr-mark-hl';
+          try { range.surroundContents(wrap); painted = true; } catch {
+            // Selection spans tags — use execCommand fallback (works across nodes)
+            try {
+              if (kind === 'highlight') { (document as any).execCommand('hiliteColor', false, '#fde68a'); }
+              else { (document as any).execCommand('underline', false, undefined); }
+              painted = true;
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+    // 2) Save per-user so it survives refresh / reopen — even if painting failed,
+    //    the saved text will be painted by applyMarksDOM on the next render.
     setMarks(prev => {
-      if (prev.some(m => m.num === num && m.lang === lang && m.text === text && m.kind === kind)) return prev;
+      if (prev.some(m => m.num === num && m.lang === lang && m.text.replace(/\s+/g, ' ') === text.replace(/\s+/g, ' ') && m.kind === kind)) return prev;
       const next = [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, num, lang, text, kind, at: new Date().toISOString() }];
       writeJSON(`pr_highlights_${userKey()}`, next);
       return next;
     });
-    setMarkSaved(kind === 'highlight' ? '✅ Highlight saved — just for you' : '✅ Underline saved — just for you');
+    setMarkSaved(painted ? (kind === 'highlight' ? '✅ Highlight saved — just for you' : '✅ Underline saved — just for you') : (kind === 'highlight' ? '✅ Highlight saved — reopen to see it' : '✅ Underline saved — reopen to see it'));
     setSelText(''); setSelPos(null);
     try { window.getSelection()?.removeAllRanges(); } catch {}
-    setTimeout(() => setMarkSaved(''), 2600);
+    setTimeout(() => setMarkSaved(''), 3000);
   }
+  // Keep toolbar / action bar in sync while the user drags a selection (desktop + mobile).
+  // onMouseUp alone misses touch selections — selectionchange catches both.
+  useEffect(() => {
+    if (!open) return;
+    const onChange = () => {
+      try {
+        const sel = window.getSelection(); const t = (sel?.toString() || '').trim();
+        if (!t || t.length < 2) return; // don't clear here — mouseup handler clears when selection is gone
+        const node = sel?.anchorNode as Node | null;
+        const el = node ? (node.nodeType === 3 ? (node as Text).parentElement : (node as Element)) : null;
+        if (!el || !bodyRef.current?.contains(el)) return;
+        let x = window.innerWidth / 2, y = 140;
+        try { const r = sel!.getRangeAt(0).getBoundingClientRect(); if (r && r.top > 0) { x = r.left + r.width / 2; y = r.top; } } catch {}
+        setSelText(t); setSelPos({ x, y });
+      } catch {}
+    };
+    document.addEventListener('selectionchange', onChange);
+    return () => document.removeEventListener('selectionchange', onChange);
+  }, [open]);
   function deleteMark(id: string) { setMarks(prev => { const next = prev.filter(m => m.id !== id); writeJSON(`pr_highlights_${userKey()}`, next); return next; }); }
   function clearMarksForOpen() { if (!open) return; const num = numOf(open); setMarks(prev => { const next = prev.filter(m => !(m.num === num && m.lang === lang)); writeJSON(`pr_highlights_${userKey()}`, next); return next; }); }
   function onSelectText() {
-    try {
-      const sel = window.getSelection(); const t = (sel?.toString() || '').trim();
-      if (!t || t.length < 2) { setSelText(''); setSelPos(null); return; }
-      // Only when the selection is inside the devotional body
-      const node = sel?.anchorNode as Node | null;
-      const el = node ? (node.nodeType === 3 ? (node as Text).parentElement : (node as Element)) : null;
-      if (!el || !bodyRef.current?.contains(el)) { setSelText(''); setSelPos(null); return; }
-      const r = sel!.getRangeAt(0).getBoundingClientRect();
-      setSelText(t); setSelPos({ x: r.left + r.width / 2, y: r.top });
-    } catch { setSelText(''); setSelPos(null); }
+    // Wait a tick: on touch devices the selection is not ready inside mouseup/touchend.
+    setTimeout(() => {
+      try {
+        const sel = window.getSelection(); const t = (sel?.toString() || '').trim();
+        if (!t || t.length < 2) { setSelText(''); setSelPos(null); return; }
+        const node = sel?.anchorNode as Node | null;
+        const el = node ? (node.nodeType === 3 ? (node as Text).parentElement : (node as Element)) : null;
+        if (!el || !bodyRef.current?.contains(el)) { setSelText(''); setSelPos(null); return; }
+        let x = window.innerWidth / 2, y = 120;
+        try { const r = sel!.getRangeAt(0).getBoundingClientRect(); if (r && r.top > 0) { x = r.left + r.width / 2; y = r.top; } } catch {}
+        setSelText(t); setSelPos({ x, y });
+      } catch { setSelText(''); setSelPos(null); }
+    }, 60);
   }
   const openMarks = open ? marks.filter(m => m.num === numOf(open) && m.lang === lang) : [];
-  const openBodyHtml = open ? applyMarks(formatDevotionalBody(lang === 'lu' && open.devotional_text_lu ? open.devotional_text_lu : open.devotional_text, lang), openMarks) : '';
+  const openBodyHtml = open ? formatDevotionalBody(lang === 'lu' && open.devotional_text_lu ? open.devotional_text_lu : open.devotional_text, lang) : '';
+  // V13: apply saved marks to the REAL DOM after every render / language switch / marks change
+  useEffect(() => { if (open) { const t = setTimeout(() => applyMarksDOM(bodyRef.current, openMarks), 30); return () => clearTimeout(t); } }, [open, lang, marks, openBodyHtml]);
 
   async function openVerse(ref: string) { setVerseRef(ref); setVerseText(''); setVerseLoading(true); try { const r = await fetch(`https://bible-api.com/${encodeURIComponent(ref)}?translation=kjv`); const j = await r.json().catch(() => ({})); setVerseText(j.text ? String(j.text).trim() : 'Verse text could not be loaded. Tap “Open in Bible Reader” below to read it in the app.'); } catch { setVerseText('Verse text could not be loaded offline. Tap “Open in Bible Reader” below to read it in the app.'); } setVerseLoading(false); }
   function shareUrl(e: Entry) { try { return `${window.location.origin}/devotional-plans?devotional=${dLabel(e)}`; } catch { return `/devotional-plans?devotional=${dLabel(e)}`; } }
@@ -356,8 +448,18 @@ export default function DevotionalPlansPage() {
               </div>
               {open.scripture_quotation && <div style={{ background: '#fff', border: '1px solid #e8e7de', borderLeft: '5px solid #a9852e', padding: '14px 16px', borderRadius: 10, marginBottom: 14 }}><div style={{ fontSize: 12, fontWeight: 800, color: '#a9852e', marginBottom: 4 }}>SCRIPTURE</div><div dangerouslySetInnerHTML={{ __html: String(open.scripture_quotation) }} /></div>}
               {open.devotional_text_lu && <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}><button onClick={() => setLang('en')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #1d4035', background: lang === 'en' ? '#1d4035' : '#fff', color: lang === 'en' ? '#fff' : '#1d4035', fontWeight: 700 }}>🇬🇧 English</button><button onClick={() => setLang('lu')} style={{ padding: '7px 16px', borderRadius: 999, cursor: 'pointer', border: '1px solid #1d4035', background: lang === 'lu' ? '#1d4035' : '#fff', color: lang === 'lu' ? '#fff' : '#1d4035', fontWeight: 700 }}>🇺🇬 Luganda</button></div>}
+              {/* ALWAYS-VISIBLE HIGHLIGHT BAR — V14 FIX: does NOT depend on the floating toolbar.
+                  If the floating bubble never appears on your phone/browser, use THESE buttons:
+                  1) drag / long-press over words in the text below until they are selected
+                  2) tap Highlight or Underline here — it saves instantly. */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: '#fff', border: '1px solid #e9c981', borderRadius: 12, padding: '10px 12px', marginBottom: 12 }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#1d4035' }}>🖍 Mark selected words:</span>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => saveMark('highlight')} style={{ cursor: 'pointer', border: 'none', background: '#e9c981', color: '#1c352d', borderRadius: 999, padding: '9px 16px', fontWeight: 800, fontSize: 13 }}>🖍 Highlight</button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => saveMark('underline')} style={{ cursor: 'pointer', border: '1px solid #1d4035', background: '#fff', color: '#1d4035', borderRadius: 999, padding: '9px 16px', fontWeight: 700, fontSize: 13 }}><u>Underline</u></button>
+                <span style={{ fontSize: 12, color: selText ? '#166534' : '#6b7280' }}>{selText ? `Selected: “${selText.slice(0, 50)}${selText.length > 50 ? '…' : ''}” — now tap a button` : 'No words selected yet — drag over words below first'}</span>
+              </div>
               {/* READER BODY — selection here triggers the Highlight/Underline toolbar */}
-              <div ref={bodyRef} onMouseUp={onSelectText} onTouchEnd={onSelectText} className="dev-body" style={{ fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: openBodyHtml }} />
+              <div ref={bodyRef} onMouseUp={onSelectText} onTouchEnd={onSelectText} className="dev-body" style={{ userSelect: "text", WebkitUserSelect: "text", fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: openBodyHtml }} />
               {/* MY MARKS ON THIS DEVOTIONAL */}
               {openMarks.length > 0 && (
                 <div style={{ marginTop: 20, background: '#fff', border: '1px solid #e9c981', borderRadius: 12, padding: '14px 16px' }}>
@@ -370,12 +472,15 @@ export default function DevotionalPlansPage() {
               <button onClick={() => toggleDone(numOf(open))} style={{ width: '100%', marginTop: 18, padding: 13, borderRadius: 12, border: 'none', cursor: 'pointer', background: done.includes(numOf(open)) ? '#dcfce7' : '#1d4035', color: done.includes(numOf(open)) ? '#166534' : '#fff', fontWeight: 800 }}>{done.includes(numOf(open)) ? '✓ Completed — tap to unmark' : '✓ Mark complete'}</button>
             </div>
           </div>
-          {/* FLOATING HIGHLIGHT / UNDERLINE TOOLBAR — appears on text selection */}
+          {/* FLOATING HIGHLIGHT / UNDERLINE TOOLBAR — V13: onMouseDown prevents losing the selection */}
           {selText && selPos && (
-            <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', left: Math.max(12, Math.min(selPos.x - 110, window.innerWidth - 240)), top: Math.max(8, selPos.y - 56), zIndex: 90, background: '#17372f', color: '#fff', borderRadius: 999, padding: '6px 8px', display: 'flex', gap: 6, boxShadow: '0 12px 30px rgba(0,0,0,0.4)', alignItems: 'center' }}>
-              <button onClick={() => saveMark('highlight')} style={{ cursor: 'pointer', border: 'none', background: '#e9c981', color: '#1c352d', borderRadius: 999, padding: '7px 12px', fontWeight: 800, fontSize: 13 }}>🖍 Highlight</button>
-              <button onClick={() => saveMark('underline')} style={{ cursor: 'pointer', border: '1px solid rgba(255,255,255,0.5)', background: 'transparent', color: '#fff', borderRadius: 999, padding: '7px 12px', fontWeight: 700, fontSize: 13 }}><u>Underline</u></button>
-              <button onClick={() => { setSelText(''); setSelPos(null); }} style={{ cursor: 'pointer', border: 'none', background: 'transparent', color: '#fff', fontSize: 14, padding: '4px 6px' }}>✕</button>
+            <div onClick={e => e.stopPropagation()} onMouseDown={e => e.preventDefault()} style={{ position: 'fixed', left: Math.max(12, Math.min(selPos.x - 140, window.innerWidth - 300)), top: Math.max(8, selPos.y - 72), zIndex: 90, background: '#17372f', color: '#fff', borderRadius: 14, padding: '8px', display: 'flex', flexDirection: 'column', gap: 6, boxShadow: '0 12px 30px rgba(0,0,0,0.4)', maxWidth: 300 }}>
+              <div style={{ fontSize: 12, color: '#e9c981', padding: '0 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>“{selText.slice(0, 60)}{selText.length > 60 ? '…' : ''}”</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => saveMark('highlight')} style={{ cursor: 'pointer', border: 'none', background: '#e9c981', color: '#1c352d', borderRadius: 999, padding: '8px 14px', fontWeight: 800, fontSize: 13, whiteSpace: 'nowrap' }}>🖍 Highlight</button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => saveMark('underline')} style={{ cursor: 'pointer', border: '1px solid rgba(255,255,255,0.5)', background: 'transparent', color: '#fff', borderRadius: 999, padding: '8px 14px', fontWeight: 700, fontSize: 13, whiteSpace: 'nowrap' }}><u>Underline</u></button>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => { setSelText(''); setSelPos(null); }} style={{ cursor: 'pointer', border: 'none', background: 'transparent', color: '#fff', fontSize: 14, padding: '4px 8px' }}>✕</button>
+              </div>
             </div>
           )}
         </div>
