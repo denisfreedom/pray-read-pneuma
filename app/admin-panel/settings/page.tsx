@@ -1,10 +1,18 @@
-'use client';
+"use client";
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Users, Globe, MessageSquare, TrendingUp, ChevronUp, ChevronDown, ArrowLeft } from 'lucide-react';
 import AdminNavbar from '@/app/components/AdminNavbar';
+
+// Admin Settings — REDESIGNED, front-page colours
+// Ivory #faf8f2 / emerald #1d4035 / #17372f / gold #e9c981 / #a9852e
+// LOGIC UNCHANGED: same endpoints, same live-stream config, same password
+// handler (sends { email, currentPassword, newPassword } to
+// /api/auth/update-password), same message status PATCH, same 30s refresh.
+// Paste into the SAME file this came from (the standalone settings page),
+// NOT into app/admin-panel/page.tsx.
 
 interface DashboardStats {
   totalUsers: number;
@@ -136,16 +144,16 @@ export default function AdminSettings() {
       case 'unread':
         return 'bg-red-100 text-red-700';
       case 'read':
-        return 'bg-yellow-100 text-yellow-700';
+        return 'bg-[#faf8f2] text-[#a9852e] border border-[#e9c981]';
       case 'replied':
-        return 'bg-green-100 text-green-700';
+        return 'bg-[#e7f4ec] text-[#1d4035]';
       default:
         return 'bg-gray-100 text-gray-700';
     }
   }
 
-  const filteredMessages = messageFilter === 'all' 
-    ? messages 
+  const filteredMessages = messageFilter === 'all'
+    ? messages
     : messages.filter(msg => msg.status === messageFilter);
 
   async function handlePasswordUpdate() {
@@ -181,25 +189,29 @@ export default function AdminSettings() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center">
-        <div className="text-xl text-gray-600">Loading settings...</div>
+      <div className="min-h-screen bg-[#faf8f2] flex items-center justify-center">
+        <div className="text-center">
+          <img src="/assets/PrayRead-logo.png" alt="Pray-Read Bible" width={72} height={72} className="mx-auto mb-4 object-contain" />
+          <div className="text-lg text-[#1d4035] font-semibold">Loading settings...</div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-[#faf8f2] text-[#22382f]">
       <AdminNavbar />
       <div className="container mx-auto px-4 pt-24 pb-8">
         {/* Header with Back Button */}
         <div className="mb-8 flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">⚙️ Settings & Dashboard</h1>
-            <p className="text-gray-600 mt-2">Manage metrics, user data, and support messages</p>
+            <p className="text-[11px] font-bold tracking-[2px] text-[#a9852e] uppercase">Pray-Read Bible &middot; Admin</p>
+            <h1 className="text-3xl font-bold text-[#1d4035]">⚙ Settings &amp; Dashboard</h1>
+            <p className="text-[#5a6a61] mt-2">Manage metrics, user data, and support messages</p>
           </div>
           <Link
             href="/admin-panel"
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition font-medium"
+            className="flex items-center gap-2 px-4 py-2 bg-[#1d4035] text-white rounded-lg hover:bg-[#17372f] transition font-medium"
           >
             <ArrowLeft size={20} />
             Back to Editor
@@ -207,9 +219,9 @@ export default function AdminSettings() {
         </div>
 
         {/* 🔴 Live Streaming Control */}
-        <div className="bg-white rounded-lg shadow p-6 mb-8 border-l-4 border-red-500">
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">🔴 Live Streaming Control</h2>
-          <p className="text-sm text-gray-500 mb-6">Toggle the live stream on/off and update the title shown to viewers.</p>
+        <div className="bg-white rounded-lg shadow border border-[#ece4d0] p-6 mb-8 border-l-4 border-l-red-500">
+          <h2 className="text-2xl font-bold text-[#1d4035] mb-1">🔴 Live Streaming Control</h2>
+          <p className="text-sm text-[#5a6a61] mb-6">Toggle the live stream on/off and update the title shown to viewers.</p>
 
           <div className="flex items-center gap-4 mb-6">
             <label className="relative inline-flex items-center cursor-pointer">
@@ -232,14 +244,14 @@ export default function AdminSettings() {
               value={streamConfig.stream_title}
               onChange={e => setStreamConfig({ ...streamConfig, stream_title: e.target.value })}
               placeholder="Stream title"
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-400 focus:border-transparent text-sm"
+              className="w-full px-3 py-2 border border-[#e5dcc3] rounded focus:ring-2 focus:ring-red-400 focus:border-transparent text-sm bg-[#faf8f2]"
             />
             <textarea
               value={streamConfig.stream_description}
               onChange={e => setStreamConfig({ ...streamConfig, stream_description: e.target.value })}
               placeholder="Stream description (optional)"
               rows={2}
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-red-400 focus:border-transparent text-sm resize-none"
+              className="w-full px-3 py-2 border border-[#e5dcc3] rounded focus:ring-2 focus:ring-red-400 focus:border-transparent text-sm resize-none bg-[#faf8f2]"
             />
           </div>
 
@@ -254,12 +266,12 @@ export default function AdminSettings() {
         </div>
 
         {/* Security Settings Section */}
-        <div className="bg-white rounded-lg shadow p-6 mb-8">
+        <div className="bg-white rounded-lg shadow border border-[#ece4d0] p-6 mb-8">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold text-gray-900">🔐 Security Settings</h2>
+            <h2 className="text-2xl font-bold text-[#1d4035]">🔐 Security Settings</h2>
             <button
               onClick={() => setShowPasswordSection(!showPasswordSection)}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+              className="flex items-center gap-2 px-4 py-2 bg-[#faf8f2] border border-[#ece4d0] rounded hover:bg-[#f3eedd]"
             >
               {showPasswordSection ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
             </button>
@@ -267,32 +279,32 @@ export default function AdminSettings() {
 
           {showPasswordSection && (
             <div>
-              <p className="text-sm text-gray-600 mb-4">Admin Email: <span className="font-semibold">{adminEmail}</span></p>
+              <p className="text-sm text-[#5a6a61] mb-4">Admin Email: <span className="font-semibold text-[#1d4035]">{adminEmail}</span></p>
               <input
                 type="password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 placeholder="Current password"
-                className="w-full px-3 py-2 border border-gray-300 rounded mb-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[#e5dcc3] rounded mb-3 focus:ring-2 focus:ring-[#1d4035] focus:border-transparent bg-[#faf8f2]"
               />
               <input
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder="New password"
-                className="w-full px-3 py-2 border border-gray-300 rounded mb-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[#e5dcc3] rounded mb-3 focus:ring-2 focus:ring-[#1d4035] focus:border-transparent bg-[#faf8f2]"
               />
               <input
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="Confirm new password"
-                className="w-full px-3 py-2 border border-gray-300 rounded mb-3 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full px-3 py-2 border border-[#e5dcc3] rounded mb-3 focus:ring-2 focus:ring-[#1d4035] focus:border-transparent bg-[#faf8f2]"
               />
               <button
                 onClick={handlePasswordUpdate}
                 disabled={updatingPassword}
-                className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:bg-gray-400 font-bold transition"
+                className="w-full bg-[#1d4035] text-white py-2 rounded hover:bg-[#17372f] disabled:bg-gray-400 font-bold transition"
               >
                 {updatingPassword ? 'Updating...' : 'Update Password'}
               </button>
@@ -308,83 +320,83 @@ export default function AdminSettings() {
         {/* Metrics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           {/* Message Count Card */}
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 rounded-lg p-6">
+          <div className="bg-white border-2 border-[#ece4d0] rounded-lg p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-600 text-sm font-medium">Messages Sent</p>
-                <p className="text-3xl font-bold text-blue-600 mt-2">{messages.length}</p>
-                <p className="text-xs text-gray-500 mt-2">{messages.filter(m => m.status === 'unread').length} unread</p>
+                <p className="text-[#5a6a61] text-sm font-medium">Messages Sent</p>
+                <p className="text-3xl font-bold text-[#1d4035] mt-2">{messages.length}</p>
+                <p className="text-xs text-[#5a6a61] mt-2">{messages.filter(m => m.status === 'unread').length} unread</p>
               </div>
-              <MessageSquare size={40} className="text-blue-400 opacity-50" />
+              <MessageSquare size={40} className="text-[#e9c981]" />
             </div>
           </div>
 
           {/* Users Card */}
-          <div className="bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-200 rounded-lg p-6">
+          <div className="bg-white border-2 border-[#ece4d0] rounded-lg p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-600 text-sm font-medium">Total Users</p>
-                <p className="text-3xl font-bold text-green-600 mt-2">{stats?.totalUsers || 0}</p>
-                <p className="text-xs text-gray-500 mt-2">{stats?.todaySignups || 0} new today</p>
+                <p className="text-[#5a6a61] text-sm font-medium">Total Users</p>
+                <p className="text-3xl font-bold text-[#1d4035] mt-2">{stats?.totalUsers || 0}</p>
+                <p className="text-xs text-[#5a6a61] mt-2">{stats?.todaySignups || 0} new today</p>
               </div>
-              <Users size={40} className="text-green-400 opacity-50" />
+              <Users size={40} className="text-[#e9c981]" />
             </div>
           </div>
 
           {/* Active Users Card */}
-          <div className="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-200 rounded-lg p-6">
+          <div className="bg-white border-2 border-[#ece4d0] rounded-lg p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-600 text-sm font-medium">Active Users</p>
-                <p className="text-3xl font-bold text-purple-600 mt-2">{stats?.activeUsers || 0}</p>
-                <p className="text-xs text-gray-500 mt-2">last 24 hours</p>
+                <p className="text-[#5a6a61] text-sm font-medium">Active Users</p>
+                <p className="text-3xl font-bold text-[#1d4035] mt-2">{stats?.activeUsers || 0}</p>
+                <p className="text-xs text-[#5a6a61] mt-2">last 24 hours</p>
               </div>
-              <Globe size={40} className="text-purple-400 opacity-50" />
+              <Globe size={40} className="text-[#e9c981]" />
             </div>
           </div>
 
           {/* Weekly Signups Card */}
-          <div className="bg-gradient-to-br from-orange-50 to-orange-100 border-2 border-orange-200 rounded-lg p-6">
+          <div className="bg-white border-2 border-[#ece4d0] rounded-lg p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-gray-600 text-sm font-medium">Weekly Signups</p>
-                <p className="text-3xl font-bold text-orange-600 mt-2">{stats?.weekSignups || 0}</p>
-                <p className="text-xs text-gray-500 mt-2">last 7 days</p>
+                <p className="text-[#5a6a61] text-sm font-medium">Weekly Signups</p>
+                <p className="text-3xl font-bold text-[#1d4035] mt-2">{stats?.weekSignups || 0}</p>
+                <p className="text-xs text-[#5a6a61] mt-2">last 7 days</p>
               </div>
-              <Users size={40} className="text-orange-400 opacity-50" />
+              <Users size={40} className="text-[#e9c981]" />
             </div>
           </div>
         </div>
 
         {/* Registered Users Table */}
-        <div className="bg-white rounded-lg shadow p-6 mb-8">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+        <div className="bg-white rounded-lg shadow border border-[#ece4d0] p-6 mb-8">
+          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2 text-[#1d4035]">
             <Users className="w-5 h-5" />
             Registered Users ({stats?.totalUsers || 0})
           </h3>
           <div className="bg-white rounded-lg shadow overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-gray-100">
+              <thead className="bg-[#faf8f2]">
                 <tr>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Name</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Email</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Country</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Registered</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Status</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-[#1d4035]">Name</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-[#1d4035]">Email</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-[#1d4035]">Country</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-[#1d4035]">Registered</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-[#1d4035]">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {messages && messages.length > 0 ? (
                   messages.slice(0, 10).map((msg: any) => (
-                    <tr key={msg.id} className="border-t hover:bg-gray-50">
-                      <td className="px-6 py-3 text-sm text-gray-600">{msg.name}</td>
-                      <td className="px-6 py-3 text-sm text-gray-600">{msg.email}</td>
-                      <td className="px-6 py-3 text-sm text-gray-600">N/A</td>
-                      <td className="px-6 py-3 text-sm text-gray-500">
+                    <tr key={msg.id} className="border-t border-[#f3eedd] hover:bg-[#faf8f2]">
+                      <td className="px-6 py-3 text-sm text-[#5a6a61]">{msg.name}</td>
+                      <td className="px-6 py-3 text-sm text-[#5a6a61]">{msg.email}</td>
+                      <td className="px-6 py-3 text-sm text-[#5a6a61]">N/A</td>
+                      <td className="px-6 py-3 text-sm text-[#5a6a61]">
                         {msg.created_at ? new Date(msg.created_at).toLocaleDateString() : 'N/A'}
                       </td>
                       <td className="px-6 py-3 text-sm">
-                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                        <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#e7f4ec] text-[#1d4035]">
                           Active
                         </span>
                       </td>
@@ -392,7 +404,7 @@ export default function AdminSettings() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="px-6 py-3 text-center text-gray-500">
+                    <td colSpan={5} className="px-6 py-3 text-center text-[#5a6a61]">
                       No registered users found
                     </td>
                   </tr>
@@ -403,28 +415,28 @@ export default function AdminSettings() {
         </div>
 
         {/* User Locations Section */}
-        <div className="bg-white rounded-lg shadow p-6 mb-8">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-            <Globe className="w-6 h-6 text-orange-500" />
-            User Locations (Live & Historical)
+        <div className="bg-white rounded-lg shadow border border-[#ece4d0] p-6 mb-8">
+          <h2 className="text-2xl font-bold text-[#1d4035] mb-6 flex items-center gap-2">
+            <Globe className="w-6 h-6 text-[#a9852e]" />
+            User Locations (Live &amp; Historical)
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b">
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Country</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">City</th>
-                  <th className="text-right py-3 px-4 text-gray-600 font-semibold">Users</th>
+                <tr className="border-b border-[#ece4d0]">
+                  <th className="text-left py-3 px-4 text-[#5a6a61] font-semibold">Country</th>
+                  <th className="text-left py-3 px-4 text-[#5a6a61] font-semibold">City</th>
+                  <th className="text-right py-3 px-4 text-[#5a6a61] font-semibold">Users</th>
                 </tr>
               </thead>
               <tbody>
                 {stats?.locationStats && stats.locationStats.length > 0 ? (
                   stats.locationStats.map((loc, index) => (
-                    <tr key={index} className="border-b hover:bg-gray-50 transition">
-                      <td className="py-4 px-4 font-medium text-gray-900">{loc.country || 'Unknown'}</td>
-                      <td className="py-4 px-4 text-gray-600">{loc.city || 'Unknown'}</td>
+                    <tr key={index} className="border-b border-[#f3eedd] hover:bg-[#faf8f2] transition">
+                      <td className="py-4 px-4 font-medium text-[#22382f]">{loc.country || 'Unknown'}</td>
+                      <td className="py-4 px-4 text-[#5a6a61]">{loc.city || 'Unknown'}</td>
                       <td className="py-4 px-4 text-right">
-                        <span className="inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-sm font-semibold">
+                        <span className="inline-block bg-[#faf8f2] text-[#a9852e] border border-[#e9c981] px-3 py-1 rounded-full text-sm font-semibold">
                           {loc.count}
                         </span>
                       </td>
@@ -432,7 +444,7 @@ export default function AdminSettings() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={3} className="py-8 text-center text-gray-500">
+                    <td colSpan={3} className="py-8 text-center text-[#5a6a61]">
                       No location data available yet
                     </td>
                   </tr>
@@ -443,10 +455,10 @@ export default function AdminSettings() {
         </div>
 
         {/* Support Messages Section */}
-        <div className="bg-white rounded-lg shadow p-6">
+        <div className="bg-white rounded-lg shadow border border-[#ece4d0] p-6">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <MessageSquare className="w-6 h-6 text-blue-500" />
+            <h2 className="text-2xl font-bold text-[#1d4035] flex items-center gap-2">
+              <MessageSquare className="w-6 h-6 text-[#a9852e]" />
               Support Messages
             </h2>
             <div className="flex gap-2">
@@ -456,8 +468,8 @@ export default function AdminSettings() {
                   onClick={() => setMessageFilter(filter)}
                   className={`px-3 py-1 rounded-full text-sm font-medium transition ${
                     messageFilter === filter
-                      ? 'bg-blue-500 text-white'
-                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      ? 'bg-[#1d4035] text-white'
+                      : 'bg-[#faf8f2] text-[#5a6a61] hover:bg-[#f3eedd]'
                   }`}
                 >
                   {filter.charAt(0).toUpperCase() + filter.slice(1)}
@@ -469,32 +481,32 @@ export default function AdminSettings() {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b">
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">From</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Subject</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Message</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Date</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-semibold">Status</th>
-                  <th className="text-center py-3 px-4 text-gray-600 font-semibold">Action</th>
+                <tr className="border-b border-[#ece4d0]">
+                  <th className="text-left py-3 px-4 text-[#5a6a61] font-semibold">From</th>
+                  <th className="text-left py-3 px-4 text-[#5a6a61] font-semibold">Subject</th>
+                  <th className="text-left py-3 px-4 text-[#5a6a61] font-semibold">Message</th>
+                  <th className="text-left py-3 px-4 text-[#5a6a61] font-semibold">Date</th>
+                  <th className="text-left py-3 px-4 text-[#5a6a61] font-semibold">Status</th>
+                  <th className="text-center py-3 px-4 text-[#5a6a61] font-semibold">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredMessages.length > 0 ? (
                   filteredMessages.map((msg) => (
-                    <tr key={msg.id} className="border-b hover:bg-gray-50 transition">
+                    <tr key={msg.id} className="border-b border-[#f3eedd] hover:bg-[#faf8f2] transition">
                       <td className="py-4 px-4">
                         <div>
-                          <p className="font-medium text-gray-900">{msg.name}</p>
-                          <p className="text-xs text-gray-500">{msg.email}</p>
+                          <p className="font-medium text-[#22382f]">{msg.name}</p>
+                          <p className="text-xs text-[#5a6a61]">{msg.email}</p>
                         </div>
                       </td>
-                      <td className="py-4 px-4 font-medium text-gray-900 max-w-xs truncate">
+                      <td className="py-4 px-4 font-medium text-[#22382f] max-w-xs truncate">
                         {msg.subject}
                       </td>
-                      <td className="py-4 px-4 text-gray-600 max-w-xs truncate">
+                      <td className="py-4 px-4 text-[#5a6a61] max-w-xs truncate">
                         {msg.message}
                       </td>
-                      <td className="py-4 px-4 text-sm text-gray-500">
+                      <td className="py-4 px-4 text-sm text-[#5a6a61]">
                         {formatDate(msg.created_at)}
                       </td>
                       <td className="py-4 px-4">
@@ -507,7 +519,7 @@ export default function AdminSettings() {
                           value={msg.status}
                           onChange={(e) => updateMessageStatus(msg.id, e.target.value)}
                           disabled={updatingStatus === msg.id}
-                          className="text-sm border rounded px-2 py-1 cursor-pointer hover:bg-gray-50 disabled:opacity-50"
+                          className="text-sm border border-[#e5dcc3] rounded px-2 py-1 cursor-pointer hover:bg-[#faf8f2] disabled:opacity-50 bg-white"
                         >
                           <option value="unread">Unread</option>
                           <option value="read">Read</option>
@@ -518,7 +530,7 @@ export default function AdminSettings() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={6} className="py-8 text-center text-gray-500">
+                    <td colSpan={6} className="py-8 text-center text-[#5a6a61]">
                       No messages found
                     </td>
                   </tr>
