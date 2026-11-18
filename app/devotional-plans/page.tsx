@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppFooter from '@/app/components/AppFooter';
-// app/devotional-plans/page.tsx — V14 (V13 + ALWAYS-VISIBLE HIGHLIGHT BAR + selectionchange + execCommand fallback): V11 + PER-USER HIGHLIGHT/UNDERLINE + BOOKMARK TO DASHBOARD
+// app/devotional-plans/page.tsx — V15 (V14 + SELECTION BLOCKER FIX + TAP-TO-MARK — no other sections changed) + selectionchange + execCommand fallback): V11 + PER-USER HIGHLIGHT/UNDERLINE + BOOKMARK TO DASHBOARD
 // WHAT'S NEW IN V12 (everything from V11 is unchanged):
 //  1) HIGHLIGHT / UNDERLINE in the reader popup:
 //     - Select any words in the devotional text -> a small toolbar appears:
@@ -205,6 +205,8 @@ export default function DevotionalPlansPage() {
   const [selText, setSelText] = useState('');
   const [selPos, setSelPos] = useState<{ x: number; y: number } | null>(null);
   const [markSaved, setMarkSaved] = useState('');
+  const [tapMode, setTapMode] = useState(false);
+  const [tapped, setTapped] = useState<string[]>([]);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -244,8 +246,40 @@ export default function DevotionalPlansPage() {
     });
   }
   // ── MARKS ──
+  // TAP-TO-MARK (V15): if drag-selection is blocked on this device/browser,
+  // tap a paragraph to select it instead — no dragging needed at all.
+  function onBodyClick(e: React.MouseEvent) {
+    if (!tapMode) return;
+    const target = e.target as HTMLElement;
+    // Don't treat taps on the action bar / buttons as paragraph taps
+    if (target.closest('button')) return;
+    const para = target.closest('p, blockquote, h3, li');
+    if (!para || !bodyRef.current?.contains(para)) return;
+    const text = (para.textContent || '').trim().replace(/\s+/g, ' ');
+    if (!text || text.length < 2) return;
+    para.classList.toggle('pr-tap-selected');
+    setTapped(prev => prev.includes(text) ? prev.filter(t => t !== text) : [...prev, text]);
+  }
+  function saveTapped(kind: 'highlight' | 'underline') {
+    if (!open || !tapped.length) return;
+    const num = numOf(open);
+    setMarks(prev => {
+      const fresh = tapped.filter(t => !prev.some(m => m.num === num && m.lang === lang && m.text === t && m.kind === kind));
+      if (!fresh.length) return prev;
+      const next = [...prev, ...fresh.map(t => ({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, num, lang, text: t, kind, at: new Date().toISOString() }))];
+      writeJSON(`pr_highlights_${userKey()}`, next);
+      return next;
+    });
+    // Paint tapped paragraphs now: remove the temporary tap style, then let
+    // applyMarksDOM repaint them as real marks on the next render.
+    try { bodyRef.current?.querySelectorAll('.pr-tap-selected').forEach((el: any) => el.classList.remove('pr-tap-selected')); } catch {}
+    setTapped([]);
+    setMarkSaved(kind === 'highlight' ? '✅ Highlight saved — just for you' : '✅ Underline saved — just for you');
+    setTimeout(() => setMarkSaved(''), 3000);
+  }
   function saveMark(kind: 'highlight' | 'underline') {
     if (!open) return;
+    if (tapMode && tapped.length) { saveTapped(kind); return; }
     let text = '';
     try { text = (window.getSelection()?.toString() || '').trim(); } catch {}
     if (!text) text = selText.trim();
@@ -341,6 +375,9 @@ export default function DevotionalPlansPage() {
         @media (max-width: 640px) { .dev-list-card { flex-direction: column !important; } .dev-list-img { width: 100% !important; } .dev-list-img > div { height: 170px !important; } .dev-list-body { padding: 14px 16px 18px !important; } .dev-list-body h3 { font-size: 20px !important; line-height: 1.3 !important; } .dev-grid { grid-template-columns: 1fr 1fr !important; gap: 10px !important; } }
         .dev-tab-row { scrollbar-width: none; -ms-overflow-style: none; } .dev-tab-row::-webkit-scrollbar { display: none; } .dev-tab { white-space: nowrap; text-decoration: none; }
         .dev-body h3, .dev-body .dev-h3 { font-size: 17px; font-weight: 800; color: #1d4035; margin: 22px 0 8px; line-height: 1.4; } .dev-body h3:first-child, .dev-body .dev-h3:first-child { margin-top: 4px; } .dev-body p { margin: 0 0 12px; } .dev-body .dev-quote { margin: 10px 0 14px; padding: 12px 16px; background: #fff; border-left: 5px solid #a9852e; border-radius: 0 10px 10px 0; font-style: italic; color: #1c352d; line-height: 1.7; }
+        .dev-popup, .dev-popup .dev-body, .dev-popup .dev-body p, .dev-popup .dev-body h3, .dev-popup .dev-body blockquote, .dev-popup .dev-body span { user-select: text !important; -webkit-user-select: text !important; -webkit-touch-callout: default !important; touch-action: manipulation; }
+        .dev-popup button { user-select: none !important; -webkit-user-select: none !important; }
+        .pr-tap-selected { background: #fef3c7 !important; outline: 2px dashed #a9852e; border-radius: 4px; }
         .pr-mark-hl { background: #fde68a; color: #1c352d; padding: 0 2px; border-radius: 3px; }
         .pr-mark-u { text-decoration: underline; text-decoration-color: #a9852e; text-decoration-thickness: 2px; text-underline-offset: 3px; }
       `}</style>
@@ -416,7 +453,7 @@ export default function DevotionalPlansPage() {
       </div>
       <AppFooter />
       {open && (() => { const [c1, c2, c3] = paletteFor(open); return (
-        <div onClick={() => { setOpen(null); setSelText(''); setSelPos(null); }} style={{ position: 'fixed', inset: 0, background: 'rgba(16,37,31,0.65)', backdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 14 }}>
+        <div className="dev-popup" onClick={(e) => { if (e.target === e.currentTarget) { setOpen(null); setSelText(''); setSelPos(null); } }} style={{ position: 'fixed', inset: 0, background: 'rgba(16,37,31,0.65)', backdropFilter: 'blur(3px)', zIndex: 50, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', overflowY: 'auto', padding: 14 }}>
           <div onClick={e => e.stopPropagation()} style={{ background: '#f8f6ef', backdropFilter: 'blur(6px)', border: '1px solid #e8e7de', borderRadius: 22, maxWidth: 780, width: '100%', margin: '22px 0', overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,0.35)' }}>
             <div style={{ position: 'relative' }}>
               {(open.cover_photo_url || open.default_image_url) ? <div style={{ position: 'relative', height: 210, overflow: 'hidden' }}><img src={String(open.cover_photo_url || open.default_image_url)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /><div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(0,0,0,0.05), rgba(23,55,47,0.72))' }} /></div> : <div style={{ height: 210, background: `linear-gradient(120deg, ${c1}, ${c2} 55%, ${c3})`, position: 'relative', overflow: 'hidden' }}><div style={{ position: 'absolute', right: -30, top: -30, width: 180, height: 180, borderRadius: '50%', background: 'rgba(255,255,255,0.18)' }} /><div style={{ position: 'absolute', right: 40, bottom: -50, width: 130, height: 130, borderRadius: '50%', background: 'rgba(0,0,0,0.16)' }} /><div style={{ position: 'absolute', right: 20, top: 14, fontSize: 56, opacity: 0.35, color: '#fff' }}>✝</div></div>}
@@ -454,12 +491,13 @@ export default function DevotionalPlansPage() {
                   2) tap Highlight or Underline here — it saves instantly. */}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', background: '#fff', border: '1px solid #e9c981', borderRadius: 12, padding: '10px 12px', marginBottom: 12 }}>
                 <span style={{ fontSize: 13, fontWeight: 800, color: '#1d4035' }}>🖍 Mark selected words:</span>
+                <button onClick={() => { setTapMode(!tapMode); setTapped([]); try { bodyRef.current?.querySelectorAll('.pr-tap-selected').forEach((el: any) => el.classList.remove('pr-tap-selected')); } catch {} }} style={{ cursor: 'pointer', border: '1px solid #1d4035', background: tapMode ? '#17372f' : '#fff', color: tapMode ? '#e9c981' : '#1d4035', borderRadius: 999, padding: '9px 14px', fontWeight: 800, fontSize: 13 }}>{tapMode ? '👆 Tap mode: ON — tap a paragraph' : '👆 Tap to mark (if drag won\'t select)'}</button>
                 <button onMouseDown={e => e.preventDefault()} onClick={() => saveMark('highlight')} style={{ cursor: 'pointer', border: 'none', background: '#e9c981', color: '#1c352d', borderRadius: 999, padding: '9px 16px', fontWeight: 800, fontSize: 13 }}>🖍 Highlight</button>
                 <button onMouseDown={e => e.preventDefault()} onClick={() => saveMark('underline')} style={{ cursor: 'pointer', border: '1px solid #1d4035', background: '#fff', color: '#1d4035', borderRadius: 999, padding: '9px 16px', fontWeight: 700, fontSize: 13 }}><u>Underline</u></button>
-                <span style={{ fontSize: 12, color: selText ? '#166534' : '#6b7280' }}>{selText ? `Selected: “${selText.slice(0, 50)}${selText.length > 50 ? '…' : ''}” — now tap a button` : 'No words selected yet — drag over words below first'}</span>
+                <span style={{ fontSize: 12, color: selText ? '#166534' : '#6b7280' }}>{tapMode ? (tapped.length ? `${tapped.length} paragraph${tapped.length === 1 ? '' : 's'} tapped — now tap Highlight / Underline` : 'Tap any paragraph below — it turns yellow, then tap Highlight / Underline') : (selText ? `Selected: “${selText.slice(0, 50)}${selText.length > 50 ? '…' : ''}” — now tap a button` : 'No words selected yet — drag over words below, or use 👆 Tap to mark')}</span>
               </div>
               {/* READER BODY — selection here triggers the Highlight/Underline toolbar */}
-              <div ref={bodyRef} onMouseUp={onSelectText} onTouchEnd={onSelectText} className="dev-body" style={{ userSelect: "text", WebkitUserSelect: "text", fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: openBodyHtml }} />
+              <div ref={bodyRef} onClick={onBodyClick} onMouseUp={onSelectText} onTouchEnd={onSelectText} className="dev-body" style={{ userSelect: "text", WebkitUserSelect: "text", fontSize: 16, lineHeight: 1.75, color: '#1f2937' }} dangerouslySetInnerHTML={{ __html: openBodyHtml }} />
               {/* MY MARKS ON THIS DEVOTIONAL */}
               {openMarks.length > 0 && (
                 <div style={{ marginTop: 20, background: '#fff', border: '1px solid #e9c981', borderRadius: 12, padding: '14px 16px' }}>
