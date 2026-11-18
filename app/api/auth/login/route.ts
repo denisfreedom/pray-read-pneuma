@@ -1,76 +1,77 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { neon } from '@neondatabase/serverless';
+import { NextResponse } from 'next/server';
+import sql from '@/app/api/utils/sql';
 
-// POST /api/auth/user-login — FIXED to match the FIXED signup route
-// Signup now stores the password in BOTH `password` and `password_hash`,
-// and sets cookies `user_session` + `session` + `auth-token`.
-// This login checks BOTH columns, plus bcrypt if the hash is a bcrypt hash,
-// so a correct password never fails because it looked in the wrong column.
-export async function POST(request: NextRequest) {
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+// POST /api/auth/login — THE route app/login/page.tsx calls.
+// Your page expects: { success, admin } + setAdmin(data.admin) + redirect.
+// This route MUST agree with /api/auth/update-password (same DB helper,
+// same password check), otherwise a password saved in Settings can never log in.
+//
+// Rules:
+//  1) Same DB helper as update-password: @/app/api/utils/sql (DATABASE_URL).
+//  2) Password check: plain-text match FIRST (update-password saves plain text),
+//     then bcrypt match if the stored value is a $2a$/$2b$ hash (old rows).
+//  3) admin123 fallback ONLY if there is NO admins row at all. If a row exists,
+//     admin123 must NOT bypass it — otherwise you can never tell which password
+//     is actually working, and admin123 stays live forever after you change it.
+//  4) Sets the SAME admin_session cookie that update-password + session read.
+//  5) Always returns JSON with a real message (page no longer crashes on HTML).
+
+async function bcryptMatches(plain: string, hash: string): Promise<boolean> {
   try {
-    if (!process.env.DATABASE_URL) {
-      return NextResponse.json({ success: false, message: 'Database is not configured (DATABASE_URL missing in Vercel).' }, { status: 500 });
-    }
-    const sql = neon(process.env.DATABASE_URL);
+    if (!hash.startsWith('$2')) return false;
+    const mod: any = await import('bcryptjs').catch(() => null);
+    if (!mod) return false;
+    const compare = mod.compare || mod.default?.compare;
+    if (!compare) return false;
+    return await compare(plain, hash);
+  } catch { return false; }
+}
+
+export async function POST(request: Request) {
+  try {
     let body: any = {};
-    try { body = await request.json(); } catch { return NextResponse.json({ success: false, message: 'Invalid JSON body.' }, { status: 400 }); }
-
-    const email = String(body.email || '').trim().toLowerCase();
-    const password = String(body.password || '');
-    if (!email || !password) return NextResponse.json({ success: false, message: 'Email and password are required.' }, { status: 400 });
-
-    // Make sure columns exist (safe if they already do) — so SELECT never 500s on an old table
-    try {
-      await sql`CREATE TABLE IF NOT EXISTS users (id SERIAL PRIMARY KEY, name TEXT, email TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, role TEXT DEFAULT 'user', created_at TIMESTAMPTZ DEFAULT NOW())`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS name TEXT`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password TEXT`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`;
-      await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'`;
-    } catch (e: any) {
-      return NextResponse.json({ success: false, message: 'Could not read users table: ' + (e.message || '') }, { status: 500 });
+    try { body = await request.json(); } catch { body = {}; }
+    const cleanEmail = String(body.email || '').trim().toLowerCase();
+    const cleanPassword = String(body.password || '');
+    if (!cleanEmail || !cleanPassword) {
+      return NextResponse.json({ success: false, message: 'Email and password are required.' }, { status: 400 });
     }
-
-    let rows: any[] = [];
-    try {
-      rows = await sql`SELECT id, name, email, password, password_hash, role, created_at FROM users WHERE LOWER(TRIM(email)) = ${email} LIMIT 1`;
-    } catch (e: any) {
-      return NextResponse.json({ success: false, message: 'Database lookup failed: ' + (e.message || '') }, { status: 500 });
+    await sql`CREATE TABLE IF NOT EXISTS admins (id SERIAL PRIMARY KEY, email TEXT UNIQUE NOT NULL, password TEXT, name TEXT, created_at TIMESTAMPTZ DEFAULT NOW())`;
+    const rows: any[] = await sql`SELECT id, email, password, name FROM admins WHERE LOWER(TRIM(email)) = ${cleanEmail} LIMIT 1`;
+    let admin: any = null;
+    if (rows.length) {
+      const stored = String(rows[0].password || '');
+      const plainOk = stored.length > 0 && stored === cleanPassword.trim();
+      const hashOk = !plainOk && (await bcryptMatches(cleanPassword.trim(), stored));
+      if (plainOk || hashOk) admin = rows[0];
+      if (!admin) {
+        return NextResponse.json({ success: false, message: 'Invalid email or password. If you changed your password in Settings, use the NEW password — the old one no longer works.' }, { status: 401 });
+      }
+    } else {
+      // No row at all: first-time setup only. Create the row with admin123 so the
+      // next login uses the DB, not the fallback — then change it in Settings.
+      if (cleanEmail === 'admin@prayread.com' && cleanPassword.trim() === 'admin123') {
+        const created: any[] = await sql`INSERT INTO admins (email, password, name) VALUES (${cleanEmail}, 'admin123', 'Admin') ON CONFLICT (email) DO UPDATE SET password = EXCLUDED.password RETURNING id, email, name`;
+        admin = created[0];
+      } else {
+        return NextResponse.json({ success: false, message: 'Invalid email or password.' }, { status: 401 });
+      }
     }
-    if (!rows.length) {
-      // Same message for "no such email" and "wrong password" — don't leak which one exists
-      return NextResponse.json({ success: false, message: 'Invalid email or password.' }, { status: 401 });
-    }
-    const user = rows[0];
-
-    // 1) Plain-text match (your admin + signup style: TRIM(password))
-    const plain = String(user.password || '').trim();
-    const hashCol = String(user.password_hash || '').trim();
-    let ok = false;
-    if (plain && password === plain) ok = true;
-    if (!ok && hashCol && password === hashCol) ok = true; // signup stored plain in password_hash too
-    // 2) Bcrypt match — only if password_hash looks like a bcrypt hash ($2a$ / $2b$)
-    if (!ok && hashCol && (hashCol.startsWith('$2a$') || hashCol.startsWith('$2b$') || hashCol.startsWith('$2y$'))) {
-      try {
-        // bcryptjs is optional — if it is not installed, this just falls through
-        const bcrypt: any = await import('bcryptjs').then((m: any) => m.default || m).catch(() => null);
-        if (bcrypt && typeof bcrypt.compare === 'function') ok = await bcrypt.compare(password, hashCol);
-      } catch { /* ignore — plain match above already tried */ }
-    }
-    // 3) Legacy: some old rows stored password with surrounding spaces
-    if (!ok && plain && password.trim() === plain) ok = true;
-
-    if (!ok) return NextResponse.json({ success: false, message: 'Invalid email or password.' }, { status: 401 });
-
-    const sessionData = { id: user.id, email: user.email, name: user.name, role: user.role || 'user', timestamp: Date.now() };
-    const res = NextResponse.json({ success: true, message: 'Signed in.', user: { id: user.id, name: user.name, email: user.email, role: user.role || 'user' } });
-    const cookieOpts: any = { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', maxAge: 60 * 60 * 24 * 7, path: '/' };
-    // Same 3 cookies signup sets — whichever your middleware checks will be there
-    res.cookies.set('user_session', JSON.stringify(sessionData), cookieOpts);
-    res.cookies.set('session', JSON.stringify(sessionData), cookieOpts);
-    res.cookies.set('auth-token', JSON.stringify(sessionData), cookieOpts);
-    return res;
+    const sessionData = { id: admin.id, email: admin.email, name: admin.name || 'Admin', timestamp: Date.now() };
+    const response = NextResponse.json({ success: true, admin: { id: admin.id, email: admin.email, name: admin.name || 'Admin' } });
+    response.cookies.set('admin_session', JSON.stringify(sessionData), {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60 * 24 * 7,
+      path: '/',
+    });
+    return response;
   } catch (error: any) {
-    console.error('User login error:', error);
-    return NextResponse.json({ success: false, message: 'Login failed: ' + (error.message || 'server error') }, { status: 500 });
+    console.error('Admin login error:', error);
+    return NextResponse.json({ success: false, message: 'Login failed: ' + (error?.message || 'server error') }, { status: 500 });
   }
 }
