@@ -1,206 +1,275 @@
 "use client";
 
-import { motion } from 'framer-motion';
-import { BookOpen, Users, Heart, Sparkles, ArrowRight, Calendar, FileText, Clock, Lightbulb, MessageCircle as MessageCircleIcon, Music, Download, Smartphone, Mic, Link2 } from 'lucide-react';
-import Link from 'next/link';
-import Image from 'next/image';
-import { useState, useEffect, useRef, type ReactNode, type MouseEvent as ReactMouseEvent } from 'react';
-import dynamic from 'next/dynamic';
-const VerseOfTheDayModal = dynamic(() => import('@/components/VerseOfTheDayModal'), { ssr: false, loading: () => null });
-const AuthProtectedLink = dynamic(() => import('@/components/AuthProtectedLink'), { ssr: false, loading: (props: any) => <Link href={props?.href || '/bible-reader'}>{props?.children}</Link> }) as any;
-const OfflineManager = dynamic(() => import('@/components/OfflineManager'), { ssr: false, loading: () => null });
-const RecommendedForYou = dynamic(() => import('@/app/components/RecommendedForYou'), { ssr: false, loading: () => null });
-const SessionTracker = dynamic(() => import('@/app/components/SessionTracker'), { ssr: false, loading: () => null });
-const ContentNotificationBell = dynamic(() => import('@/app/components/ContentNotificationBell'), { ssr: false, loading: () => <span className="w-9 h-9 rounded-full bg-[#efe9d8]" /> });
-import AppFooter from '@/app/components/AppFooter';
+import { motion } from "framer-motion";
+import {
+  ArrowRight,
+  BookOpen,
+  CalendarDays,
+  Clock3,
+  Download,
+  FileText,
+  Heart,
+  Lightbulb,
+  Link2,
+  MessageCircle,
+  Mic2,
+  Music2,
+  Smartphone,
+  Sparkles,
+  Users,
+} from "lucide-react";
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
+import dynamic from "next/dynamic";
+import React from "react";
 
-// app/page.tsx — REDESIGNED ELEGANT THEME
-// New look: ivory / warm paper + deep emerald + soft gold, serif headings, calm editorial layout.
-// Kept from before: Prayer Library in header + Prayer Library card, Theological & Historical merged,
-// Verse of the Day on the page, real PWA install (no forced redirect), Dashboard for signed-in users,
-// all 12 feature cards and all routes unchanged.
+// ── CRASH GUARD: React error #3 in your console was:
+// "Objects are not valid as a React child (found: object with keys
+// {id, book_id, book_number, chapter, verse, text_english, text_luganda,
+//  name_english, name_luganda})"
+// That is a VERSE object being rendered as {verse} somewhere. One such
+// render crashes the WHOLE page ("Application error..."). This boundary
+// catches it and shows the rest of the page instead of a white screen.
+class SafeBoundary extends React.Component<{ children: React.ReactNode; fallback?: React.ReactNode }, { crashed: boolean }> {
+  constructor(props: any) { super(props); this.state = { crashed: false }; }
+  static getDerivedStateFromError() { return { crashed: true }; }
+  componentDidCatch(err: any) { try { console.error("[SafeBoundary]", err); } catch {} }
+  render() { return this.state.crashed ? (this.props.fallback ?? null) : this.props.children; }
+}
+function safeText(v: unknown): string {
+  if (v == null) return "";
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.map(safeText).join(" ");
+  if (typeof v === "object") {
+    const o: any = v;
+    // A verse/book object — pick its readable text, NEVER render the object itself.
+    return safeText(o.text_english ?? o.text ?? o.name_english ?? o.title ?? o.label ?? "");
+  }
+  return "";
+}
+function safeNum(v: unknown, fallback: number): number {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
 
-const LOGO = '/assets/PrayRead-logo.png';
-const LOGO_FALLBACK = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
-const LANDSCAPE = 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=85&w=2200&auto=format&fit=crop';
+import AppFooter from "@/app/components/AppFooter";
 
-const getFeatureIcon = (iconName: string) => {
-  const icons: Record<string, ReactNode> = {
-    messageCircle: <MessageCircleIcon className="w-6 h-6 text-[#1d4035]" />,
-    bookOpen: <BookOpen className="w-6 h-6 text-[#1d4035]" />,
-    music: <Music className="w-6 h-6 text-[#1d4035]" />,
-    heart: <Heart className="w-6 h-6 text-[#1d4035]" />,
-    sparkles: <Sparkles className="w-6 h-6 text-[#1d4035]" />,
-    clock: <Clock className="w-6 h-6 text-[#1d4035]" />,
-    users: <Users className="w-6 h-6 text-[#1d4035]" />,
-    lightbulb: <Lightbulb className="w-6 h-6 text-[#1d4035]" />,
-    mic: <Mic className="w-6 h-6 text-[#1d4035]" />,
-    fileText: <FileText className="w-6 h-6 text-[#1d4035]" />,
-    link2: <Link2 className="w-6 h-6 text-[#1d4035]" />,
-  };
-  return icons[iconName] || <BookOpen className="w-6 h-6 text-[#1d4035]" />;
+// ── Client-only components — loaded with ssr:false so they NEVER run
+// during the server render or first hydration. If any of them throws,
+// the dynamic import shows nothing instead of crashing the whole site.
+// This is the fix for "Application error: a client-side exception has
+// occurred while loading" on first visit, then works after refresh
+// (stale service-worker / window-only code).
+const SessionTracker = dynamic(() => import("@/app/components/SessionTracker"), { ssr: false, loading: () => null });
+const OfflineManager = dynamic(() => import("@/components/OfflineManager"), { ssr: false, loading: () => null });
+const VerseOfTheDayModal = dynamic(() => import("@/components/VerseOfTheDayModal"), { ssr: false, loading: () => null });
+const ContentNotificationBell = dynamic(() => import("@/app/components/ContentNotificationBell"), { ssr: false, loading: () => <span className="w-9 h-9 rounded-full bg-white/10" /> });
+const RecommendedForYou = dynamic(() => import("@/app/components/RecommendedForYou"), { ssr: false, loading: () => null });
+const AuthProtectedLink = dynamic(() => import("@/components/AuthProtectedLink"), { ssr: false, loading: (props: any) => <Link href={props?.href || "/bible-reader"}>{props?.children}</Link> }) as any;
+
+const LOGO = "/assets/PrayRead-logo.png";
+const LOGO_FALLBACK =
+  "https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png";
+const LANDSCAPE =
+  "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?q=85&w=2200&auto=format&fit=crop";
+
+type Verse = {
+  book_number?: number;
+  book_id?: number;
+  chapter: number;
+  verse: number;
+  text_english: string;
+  name_english: string;
 };
 
-const FEATURES = [
-  { icon: 'messageCircle', title: 'Study Questions', desc: 'Dive deeper with contextual Q&A', route: '/qa' },
-  { icon: 'bookOpen', title: 'Devotional Plans', desc: 'Daily spiritual journeys', route: '/devotional-plans' },
-  { icon: 'bookOpen', title: 'Commentary', desc: 'Scholarly insights — read with commentary in the Bible Reader', route: '/bible-reader' },
-  { icon: 'music', title: 'Verse-Songs', desc: 'Worship through scripture music', route: '/verse-songs' },
-  { icon: 'heart', title: 'Prayer Passages', desc: 'Daily devotion — start a devotional plan', route: '/devotional-plans' },
-  { icon: 'heart', title: 'Prayer Library', desc: 'Prayers for every season — morning, healing, gratitude, family and more', route: '/prayer-library' },
-  { icon: 'clock', title: 'Theological & Historical Insights', desc: 'Doctrinal analysis + cultural background — the meaning and the world behind the text', route: '/theological-insights' },
-  { icon: 'users', title: 'Open Discussion', desc: 'Join community conversations', route: '/discussion-groups' },
-  { icon: 'lightbulb', title: 'Share Revelations', desc: 'Post spiritual insights', route: '/community/revelations' },
-  { icon: 'mic', title: 'Live Schedule', desc: 'Weekly teaching sessions', route: '/community/live-teaching' },
-  { icon: 'fileText', title: 'Verse Notes', desc: 'Personal annotations — track them on your Dashboard', route: '/dashboard' },
-  { icon: 'link2', title: 'Cross References', desc: 'Related verses — explore them in the Bible Reader', route: '/bible-reader' },
+type DeferredInstallPrompt = {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+type InstallWindow = Window & {
+  __pwaDeferredPrompt?: DeferredInstallPrompt;
+  __prbInstallPromptOpen?: boolean;
+};
+
+const features = [
+  { icon: MessageCircle, title: "Study questions", description: "Explore scripture with thoughtful, contextual Q&A.", href: "/qa" },
+  { icon: BookOpen, title: "Devotional plans", description: "Build a steady rhythm with guided reading journeys.", href: "/devotional-plans" },
+  { icon: BookOpen, title: "Bible commentary", description: "Discover historical and scholarly context as you read.", href: "/bible-reader" },
+  { icon: Music2, title: "Verse-songs", description: "Carry scripture with you through music and worship.", href: "/verse-songs" },
+  { icon: Heart, title: "Prayer passages", description: "Turn the words you read into a personal prayer practice.", href: "/devotional-plans" },
+  { icon: Heart, title: "Prayer Library", description: "Prayers for every season — morning, healing, gratitude, family and more.", href: "/prayer-library" },
+  { icon: Clock3, title: "Theological & Historical Insights", description: "Go deeper into the meaning and connections of scripture — plus the people, places, and world behind the text.", href: "/theological-insights" },
+  { icon: Users, title: "Community discussion", description: "Learn alongside others through open conversations.", href: "/discussion-groups" },
+  { icon: Lightbulb, title: "Share revelations", description: "Capture and share insights from your time in the Word.", href: "/community/revelations" },
+  { icon: Mic2, title: "Live teaching", description: "Find upcoming teaching sessions and community events.", href: "/community/live-teaching" },
+  { icon: FileText, title: "Verse notes", description: "Keep your personal reflections together on your dashboard.", href: "/dashboard" },
+  { icon: Link2, title: "Cross references", description: "Follow the themes and passages connected across the Bible.", href: "/bible-reader" },
 ];
 
-function VerseOfDayStrip() {
-  const [verse, setVerse] = useState<{ book_number?: number; book_id?: number; chapter: number; verse: number; text_english: string; name_english: string } | null>(null);
-  const [failed, setFailed] = useState(false);
+function VerseOfDay() {
+  const [verse, setVerse] = useState<Verse | null>(null);
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    async function loadVerse() {
       try {
-        const res = await fetch('/api/verse-of-the-day', { cache: 'no-store' });
-        const data = await res.json();
-        const v = data?.verse || data || null;
-        if (!cancelled && v?.text_english) setVerse(v);
-        else if (!cancelled) setFailed(true);
-      } catch { if (!cancelled) setFailed(true); }
-    })();
+        const response = await fetch("/api/verse-of-the-day", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+        // API may return { verse: {...} } | {...} | [{...}] | { data: {...} }
+        const raw: any = Array.isArray(data) ? data[0] : (data?.verse ?? data?.data ?? data);
+        if (!raw || typeof raw !== "object") return;
+        // NEVER keep an object in a field we will render — coerce everything now.
+        const clean: Verse = {
+          book_number: safeNum(raw.book_number ?? raw.book_id, 1),
+          book_id: safeNum(raw.book_id ?? raw.book_number, 1),
+          chapter: safeNum(raw.chapter, 1),
+          verse: safeNum(raw.verse, 1),
+          text_english: safeText(raw.text_english ?? raw.text ?? ""),
+          name_english: safeText(raw.name_english ?? raw.book_name ?? raw.book ?? "John"),
+        };
+        if (!cancelled && clean.text_english) setVerse(clean);
+      } catch {}
+    }
+    void loadVerse();
     return () => { cancelled = true; };
   }, []);
-  if (failed || !verse) return null;
-  const bookNum = verse.book_number ?? verse.book_id ?? 1;
-  const ref = `${verse.name_english} ${verse.chapter}:${verse.verse}`;
+  if (!verse) return null;
+  const bookNumber = safeNum((verse as any).book_number ?? (verse as any).book_id, 1);
+  const reference = `${safeText((verse as any).name_english)} ${safeNum((verse as any).chapter, 1)}:${safeNum((verse as any).verse, 1)}`;
   return (
-    <section className="bg-[#faf8f2] px-5 pb-4 pt-2 sm:px-8">
-      <motion.div initial={{ opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.55 }} className="mx-auto max-w-5xl overflow-hidden rounded-[2rem] border border-[#e8dfc8] bg-white px-6 py-10 text-center shadow-[0_24px_60px_-30px_rgba(29,64,53,0.25)] sm:px-14">
-        <p className="text-[11px] font-bold uppercase tracking-[0.28em] text-[#a9852e]">✦ &nbsp;Verse of the Day&nbsp; ✦</p>
-        <p className="mx-auto mt-5 max-w-3xl font-serif text-2xl leading-relaxed text-[#1d4035] sm:text-[2rem]">“{verse.text_english}”</p>
-        <p className="mt-4 text-sm font-semibold text-[#a9852e]">— {ref}</p>
-        <Link href={`/bible-reader/${bookNum}/${verse.chapter}#verse-${verse.verse}`} className="mt-7 inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[#1d4035] px-7 text-sm font-semibold text-white transition hover:bg-[#285445]">Pray-Read this verse <ArrowRight className="h-4 w-4" /></Link>
+    <SafeBoundary>
+    <section className="bg-[#f8f6ef] px-5 py-12 sm:px-8 sm:py-16">
+      <motion.div initial={{ opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.55 }} className="relative mx-auto max-w-5xl overflow-hidden rounded-[2rem] bg-[#17372f] px-6 py-10 text-center shadow-[0_24px_70px_-36px_rgba(20,45,37,0.55)] sm:px-14 sm:py-14">
+        <div aria-hidden="true" className="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full border border-white/10" />
+        <div aria-hidden="true" className="pointer-events-none absolute -right-8 -top-16 h-48 w-48 rounded-full border border-white/10" />
+        <p className="relative text-[11px] font-semibold uppercase tracking-[0.24em] text-[#e9c981]">A moment in the Word</p>
+        <p className="relative mx-auto mt-5 max-w-3xl font-serif text-2xl leading-relaxed text-white sm:text-3xl">“{safeText((verse as any).text_english)}”</p>
+        <p className="relative mt-4 text-sm font-medium text-[#e9c981]">{reference}</p>
+        <Link href={`/bible-reader/${bookNumber}/${safeNum((verse as any).chapter, 1)}#verse-${safeNum((verse as any).verse, 1)}`} className="relative mt-7 inline-flex min-h-12 items-center justify-center gap-2 rounded-full bg-[#e9c981] px-6 py-3 text-sm font-semibold text-[#19362e] transition hover:bg-[#f2d99d] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#e9c981]">Read and reflect <ArrowRight className="h-4 w-4" /></Link>
       </motion.div>
     </section>
+    </SafeBoundary>
   );
 }
 
 export default function Home() {
-  const [isMounted, setIsMounted] = useState(false);
-  const [userEmail, setUserEmail] = useState<string | undefined>(undefined);
+  const [userEmail, setUserEmail] = useState<string | undefined>();
   const [logoSrc, setLogoSrc] = useState(LOGO);
-  const [installState, setInstallState] = useState<'idle' | 'installing' | 'installed' | 'no-prompt'>('idle');
+  const [mounted, setMounted] = useState(false);
+  const [installState, setInstallState] = useState<"idle" | "installing" | "installed">("idle");
   const installStateRef = useRef(installState);
   const installTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const setInstall = (s: typeof installState) => { installStateRef.current = s; setInstallState(s); };
+  const updateInstallState = (nextState: typeof installState) => {
+    installStateRef.current = nextState;
+    setInstallState(nextState);
+  };
   useEffect(() => {
-    setIsMounted(true);
-    try { setUserEmail(localStorage.getItem('userEmail') || undefined); } catch {}
-    if (typeof window !== 'undefined' && window.matchMedia('(display-mode: standalone)').matches) setInstall('installed');
+    setMounted(true);
+    try {
+      if (typeof window !== "undefined") {
+        setUserEmail(localStorage.getItem("userEmail") || undefined);
+        if (window.matchMedia("(display-mode: standalone)").matches) {
+          updateInstallState("installed");
+        }
+      }
+    } catch {}
     return () => { if (installTimerRef.current) clearTimeout(installTimerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const handleInstallClick = async (e: ReactMouseEvent) => {
-    e.preventDefault();
-    const deferred: any = (window as any).__pwaDeferredPrompt;
-    if (deferred) {
-      setInstall('installing');
-      try { await deferred.prompt(); const { outcome } = await deferred.userChoice; setInstall(outcome === 'accepted' ? 'installed' : 'idle'); } catch { setInstall('no-prompt'); }
-      return;
-    }
-    window.dispatchEvent(new CustomEvent('prb-open-install'));
-    if (installTimerRef.current) clearTimeout(installTimerRef.current);
-    installTimerRef.current = setTimeout(() => {
-      if ((window as any).__prbInstallPromptOpen) return;
-      if (installStateRef.current === 'idle') window.location.href = '/install-prompt';
-    }, 1200);
+  const handleInstallClick = async (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    try {
+      const browserWindow = window as InstallWindow;
+      const deferredPrompt = browserWindow.__pwaDeferredPrompt;
+      if (deferredPrompt) {
+        updateInstallState("installing");
+        try {
+          await deferredPrompt.prompt();
+          const { outcome } = await deferredPrompt.userChoice;
+          updateInstallState(outcome === "accepted" ? "installed" : "idle");
+        } catch { updateInstallState("idle"); }
+        return;
+      }
+      window.dispatchEvent(new CustomEvent("prb-open-install"));
+      if (installTimerRef.current) clearTimeout(installTimerRef.current);
+      installTimerRef.current = setTimeout(() => {
+        if (browserWindow.__prbInstallPromptOpen) return;
+        if (installStateRef.current === "idle") window.location.href = "/install-prompt";
+      }, 1200);
+    } catch {}
   };
+
   return (
     <>
-      {isMounted && <SessionTracker />}
-      {isMounted && <VerseOfTheDayModal />}
-      {isMounted && <OfflineManager />}
-      <div className="min-h-screen bg-[#faf8f2] text-[#22382f] antialiased">
-        {/* Top hairline */}
-        <div className="bg-[#1d4035] text-center text-[11px] font-medium tracking-[0.18em] text-[#e9c981] uppercase py-2 px-4">Scripture &nbsp;·&nbsp; Prayer &nbsp;·&nbsp; Community</div>
-        {/* Header — sticky, light, elegant */}
-        <header className="sticky top-0 z-40 border-b border-[#ece4d0] bg-[#faf8f2]/90 backdrop-blur-md">
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-5 py-3.5 sm:px-8">
-            <Link href="/" className="flex items-center gap-3">
-              <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-[#e9c981] bg-white shadow-sm sm:h-12 sm:w-12">
-                <Image src={logoSrc} alt="Pray-Read Bible Logo" width={48} height={48} priority className="object-contain" onError={() => { if (logoSrc !== LOGO_FALLBACK) setLogoSrc(LOGO_FALLBACK); }} />
+      {mounted && (<SafeBoundary><SessionTracker /></SafeBoundary>)}
+      {mounted && (<SafeBoundary><VerseOfTheDayModal /></SafeBoundary>)}
+      {mounted && (<SafeBoundary><OfflineManager /></SafeBoundary>)}
+      <main className="min-h-screen overflow-hidden bg-[#f8f6ef] text-[#1d3029]">
+        <section className="relative isolate min-h-[760px] overflow-hidden bg-[#10251f] text-white sm:min-h-[820px]">
+          <div aria-hidden="true" className="absolute inset-0 -z-20 bg-cover bg-[center_44%]" style={{ backgroundImage: `url("${LANDSCAPE}")` }} />
+          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(12,31,25,0.91)_0%,rgba(12,31,25,0.78)_50%,rgba(12,31,25,0.54)_100%)]" />
+          <div aria-hidden="true" className="absolute inset-0 -z-10 bg-[linear-gradient(180deg,rgba(11,25,22,0.55)_0%,transparent_35%,rgba(11,25,22,0.27)_100%)]" />
+          <header className="relative z-20 mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-5 sm:px-8 sm:py-6 lg:px-12">
+            <Link href="/" className="flex shrink-0 items-center gap-3">
+              <span className="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl border border-[#e9c981]/70 bg-white shadow-lg sm:h-12 sm:w-12">
+                <Image src={logoSrc} alt="Pray-Read Bible" width={48} height={48} priority className="object-contain" onError={() => { if (logoSrc !== LOGO_FALLBACK) setLogoSrc(LOGO_FALLBACK); }} />
               </span>
-              <span className="leading-none"><span className="block font-serif text-lg font-bold text-[#1d4035] sm:text-xl">Pray-Read <span className="text-[#a9852e]">Bible</span></span><span className="mt-1 block text-[10px] font-semibold uppercase tracking-[0.22em] text-[#8a927f]">Meet the Word · Live it daily</span></span>
+              <span className="text-base font-semibold tracking-tight text-white sm:text-lg">Pray-Read <span className="text-[#e9c981]">Bible</span></span>
             </Link>
-            <nav aria-label="Main navigation" className="flex items-center gap-1 sm:gap-2">
-              {isMounted ? <ContentNotificationBell userEmail={userEmail} /> : <span className="w-9 h-9 rounded-full bg-[#efe9d8]" />}
-              <Link href="/about" className="hidden rounded-full px-3 py-2 text-sm font-medium text-[#3d5247] transition hover:bg-[#efe9d8] hover:text-[#1d4035] sm:inline-flex">About</Link>
-              <Link href="/community" className="hidden rounded-full px-3 py-2 text-sm font-medium text-[#3d5247] transition hover:bg-[#efe9d8] hover:text-[#1d4035] md:inline-flex">Community</Link>
-              <Link href="/prayer-library" className="hidden rounded-full border border-[#e9c981]/70 bg-[#fdf6e3] px-4 py-2 text-sm font-semibold text-[#1d4035] transition hover:bg-[#f5ead0] md:inline-flex">🙏 Prayer Library</Link>
-              <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="hidden items-center gap-1.5 rounded-full border border-[#1d4035]/20 px-4 py-2 text-sm font-medium text-[#1d4035] transition hover:bg-white sm:inline-flex"><Heart className="h-4 w-4 text-[#a9852e]" /> Donate</a>
-              {userEmail ? (<Link href="/dashboard" className="rounded-full bg-[#1d4035] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#285445] sm:px-5">Dashboard</Link>) : (<Link href="/signup" className="rounded-full bg-[#1d4035] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#285445] sm:px-5">Get started</Link>)}
+            <nav aria-label="Main navigation" className="flex items-center gap-1 sm:gap-3">
+              <Link href="/about" className="hidden rounded-full px-3 py-2 text-sm text-white/85 transition hover:bg-white/10 hover:text-white sm:inline-flex">About</Link>
+              <Link href="/community" className="hidden rounded-full px-3 py-2 text-sm text-white/85 transition hover:bg-white/10 hover:text-white md:inline-flex">Community</Link>
+              <Link href="/prayer-library" className="hidden rounded-full px-3 py-2 text-sm text-white/85 transition hover:bg-white/10 hover:text-white md:inline-flex">Prayer Library</Link>
+              {mounted ? <ContentNotificationBell userEmail={userEmail} /> : <span className="w-9 h-9 rounded-full bg-white/10" />}
+              <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="hidden items-center gap-2 rounded-full border border-white/25 px-4 py-2 text-sm font-medium text-white transition hover:border-[#e9c981]/70 hover:bg-white/10 sm:inline-flex"><Heart className="h-4 w-4 text-[#e9c981]" />Donate</a>
+              {userEmail ? <Link href="/dashboard" className="inline-flex min-h-10 items-center justify-center rounded-full bg-[#e9c981] px-4 text-sm font-semibold text-[#1c352d] transition hover:bg-[#f2d99d] sm:px-5">Dashboard</Link> : <Link href="/signup" className="inline-flex min-h-10 items-center justify-center rounded-full bg-[#e9c981] px-4 text-sm font-semibold text-[#1c352d] transition hover:bg-[#f2d99d] sm:px-5">Get started</Link>}
             </nav>
-          </div>
-        </header>
-
-        {/* Hero — editorial, light */}
-        <section className="relative overflow-hidden">
-          <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-96 w-96 rounded-full bg-[#f0e8d2] blur-3xl opacity-70" />
-          <div aria-hidden="true" className="pointer-events-none absolute -left-24 top-64 h-72 w-72 rounded-full bg-[#dce8dd] blur-3xl opacity-60" />
-          <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-5 pb-14 pt-10 sm:px-8 sm:pt-14 lg:grid-cols-[1.05fr_0.95fr] lg:gap-14 lg:pb-20">
-            <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-              <p className="inline-flex items-center gap-2 rounded-full border border-[#e8dfc8] bg-white px-4 py-2 text-[11px] font-bold uppercase tracking-[0.18em] text-[#a9852e]"><Sparkles className="h-3.5 w-3.5" /> Scripture for everyday life</p>
-              <h1 className="mt-6 font-serif text-[3.1rem] leading-[1.02] tracking-[-0.02em] text-[#1d4035] sm:text-6xl lg:text-[4.9rem]">Meet the Word.<br /><span className="italic font-normal text-[#a9852e]">Live it daily.</span></h1>
-              <p className="mt-6 max-w-xl text-base leading-8 text-[#5a6b5e] sm:text-lg">Make space for a more personal walk with God. Pray-Read brings scripture, reflection, and a faith-filled community into one thoughtful daily practice.</p>
-              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                <AuthProtectedLink href="/bible-reader"><span className="group inline-flex min-h-14 cursor-pointer items-center justify-center gap-2 rounded-full bg-[#1d4035] px-7 text-base font-semibold text-white shadow-[0_16px_35px_-18px_rgba(29,64,53,0.6)] transition hover:bg-[#285445]">Begin with scripture <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></span></AuthProtectedLink>
-                <Link href="/prayer-library" className="inline-flex min-h-14 items-center justify-center gap-2 rounded-full border border-[#1d4035]/25 bg-white px-7 text-base font-semibold text-[#1d4035] transition hover:border-[#a9852e] hover:bg-[#fdf6e3]">🙏 Open Prayer Library</Link>
+          </header>
+          <div className="mx-auto grid max-w-7xl items-center gap-12 px-5 pb-16 pt-12 sm:px-8 sm:pb-20 sm:pt-16 lg:grid-cols-[1.12fr_0.88fr] lg:gap-16 lg:px-12 lg:pb-24 lg:pt-20">
+            <motion.div initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, ease: "easeOut" }} className="max-w-2xl">
+              <span className="inline-flex items-center gap-2 rounded-full border border-[#e9c981]/35 bg-[#e9c981]/10 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.17em] text-[#f1d99f] backdrop-blur-sm sm:text-xs"><Sparkles className="h-3.5 w-3.5" />Scripture for everyday life</span>
+              <h1 className="mt-7 font-serif text-[3.25rem] leading-[1.03] tracking-[-0.04em] text-white sm:text-6xl lg:text-[5.25rem]">Meet the Word.<span className="mt-2 block italic text-[#e9c981]">Live it daily.</span></h1>
+              <p className="mt-6 max-w-xl text-base leading-7 text-white/80 sm:mt-7 sm:text-lg sm:leading-8">Make space for a more personal walk with God. Pray-Read brings scripture, reflection, and a faith-filled community into one thoughtful daily practice.</p>
+              <div className="mt-8 flex flex-col gap-3 sm:mt-10 sm:flex-row sm:items-center">
+                {mounted ? (
+                  <AuthProtectedLink href="/bible-reader"><span className="group inline-flex min-h-14 w-full cursor-pointer items-center justify-center gap-3 rounded-full bg-[#e9c981] px-7 text-base font-semibold text-[#1a352c] shadow-[0_12px_35px_-18px_rgba(233,201,129,0.8)] transition hover:-translate-y-0.5 hover:bg-[#f2d99d] sm:w-auto">Begin with scripture<ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></span></AuthProtectedLink>
+                ) : (
+                  <Link href="/bible-reader" className="group inline-flex min-h-14 w-full items-center justify-center gap-3 rounded-full bg-[#e9c981] px-7 text-base font-semibold text-[#1a352c] sm:w-auto">Begin with scripture<ArrowRight className="h-4 w-4" /></Link>
+                )}
+                <Link href="/community" className="inline-flex min-h-14 items-center justify-center gap-2 rounded-full border border-white/35 bg-white/[0.07] px-7 text-base font-medium text-white backdrop-blur-sm transition hover:border-white/60 hover:bg-white/[0.13]">Find your community<Users className="h-4 w-4 text-[#e9c981]" /></Link>
               </div>
-              <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-[#6b7a6e]"><span>✦ Read with intention</span><span>✦ Reflect at your pace</span><span>✦ Respond in prayer</span></div>
-              <div className="mt-8 flex flex-wrap gap-2">{[{ icon: BookOpen, label: 'Bible study', href: '/bible-reader' }, { icon: MessageCircleIcon, label: 'Questions', href: '/qa' }, { icon: Music, label: 'Verse-songs', href: '/verse-songs' }, { icon: Heart, label: 'Devotionals', href: '/devotional-plans' }].map(({ icon: Icon, label, href }) => (<Link key={label} href={href} className="inline-flex items-center gap-2 rounded-full border border-[#e8dfc8] bg-white px-4 py-2 text-xs font-medium text-[#3d5247] transition hover:border-[#a9852e]"><Icon className="h-4 w-4 text-[#a9852e]" />{label}</Link>))}</div>
+              <div className="mt-8 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-white/65 sm:mt-10 sm:text-sm"><span className="inline-flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#e9c981]" />Read with intention</span><span className="hidden h-1 w-1 rounded-full bg-white/40 sm:block" /><span className="inline-flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-[#e9c981]" />Reflect at your pace</span></div>
             </motion.div>
-            <motion.div initial={{ opacity: 0, y: 22 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.7, delay: 0.1 }} className="relative">
-              <div className="overflow-hidden rounded-[2rem] border border-[#e8dfc8] bg-white p-2 shadow-[0_30px_70px_-30px_rgba(29,64,53,0.35)]">
-                <div className="relative h-[320px] overflow-hidden rounded-[1.6rem] sm:h-[420px]"><Image src={LANDSCAPE} alt="Mountains at sunrise" width={1200} height={800} className="h-full w-full object-cover" priority /><div className="absolute inset-0 bg-gradient-to-t from-[#1d4035]/70 via-transparent to-transparent" /><div className="absolute bottom-5 left-5 right-5 text-white"><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#e9c981]">A simple rhythm</p><p className="mt-2 font-serif text-2xl leading-snug">Make room for meaning.</p></div></div>
-                <div className="grid grid-cols-3 gap-2 p-2 sm:gap-3 sm:p-3">{[{ n: '01', t: 'Read', d: 'Open a passage' }, { n: '02', t: 'Reflect', d: 'Explore meaning' }, { n: '03', t: 'Respond', d: 'Carry it today' }].map(s => (<div key={s.n} className="rounded-2xl bg-[#f6f2e6] px-3 py-3 text-center sm:py-4"><p className="text-[10px] font-bold tracking-widest text-[#a9852e]">{s.n}</p><p className="mt-1 text-sm font-bold text-[#1d4035]">{s.t}</p><p className="mt-0.5 text-[11px] leading-4 text-[#6b7a6e]">{s.d}</p></div>))}</div>
-                <Link href="/bible-reader" className="group m-2 flex items-center justify-between rounded-2xl bg-[#1d4035] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#285445] sm:m-3">Open the Bible reader <ArrowRight className="h-4 w-4 text-[#e9c981] transition-transform group-hover:translate-x-1" /></Link>
+            <motion.div initial={{ opacity: 0, y: 24, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.75, delay: 0.15, ease: "easeOut" }} className="relative mx-auto w-full max-w-md lg:ml-auto">
+              <div aria-hidden="true" className="absolute -inset-5 rounded-[2.5rem] border border-white/10" />
+              <div className="relative overflow-hidden rounded-[2rem] border border-white/20 bg-[#f8f6ef] p-6 text-[#1d3029] shadow-[0_35px_100px_-40px_rgba(0,0,0,0.8)] sm:p-8">
+                <div className="flex items-center justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#78877b]">A simple rhythm</p><h2 className="mt-2 font-serif text-2xl text-[#19372f] sm:text-3xl">Make room for meaning.</h2></div><span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#e9eddf] text-[#315d4b]"><BookOpen className="h-6 w-6" /></span></div>
+                <div className="relative mt-7 space-y-3"><div aria-hidden="true" className="absolute bottom-7 left-[1.08rem] top-7 w-px bg-[#d8ddcf]" />{[{ number: "01", title: "Read", text: "Open a passage and take it in." }, { number: "02", title: "Reflect", text: "Explore its meaning and context." }, { number: "03", title: "Respond", text: "Carry the Word into your day." }].map((step) => (<div key={step.number} className="relative flex items-center gap-4 rounded-2xl border border-[#e7e7df] bg-white/80 p-4"><span className="z-10 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[#dce4d8] bg-[#f2f4ec] text-[10px] font-bold tracking-wide text-[#53705e]">{step.number}</span><span><span className="block text-sm font-semibold text-[#213b31]">{step.title}</span><span className="mt-0.5 block text-xs leading-5 text-[#778176]">{step.text}</span></span></div>))}</div>
+                <Link href="/bible-reader" className="group mt-5 flex items-center justify-between rounded-2xl bg-[#1d4035] px-5 py-4 text-sm font-semibold text-white transition hover:bg-[#285445]">Open the Bible reader<ArrowRight className="h-4 w-4 text-[#e9c981] transition-transform group-hover:translate-x-1" /></Link>
               </div>
-              <div className="absolute -bottom-5 -left-3 hidden items-center gap-3 rounded-2xl border border-[#e8dfc8] bg-white px-4 py-3 shadow-lg sm:flex"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#fdf6e3] text-[#a9852e]"><Heart className="h-5 w-5" /></span><span><span className="block text-xs font-bold text-[#1d4035]">A daily practice</span><span className="block text-[11px] text-[#6b7a6e]">Rooted in the living Word</span></span></div>
+              <div className="absolute -bottom-5 -left-6 hidden items-center gap-3 rounded-2xl border border-white/15 bg-[#18372e]/95 px-4 py-3 text-white shadow-xl backdrop-blur-md sm:flex"><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#e9c981]/15 text-[#e9c981]"><Heart className="h-4 w-4" /></span><span><span className="block text-xs font-semibold">A daily practice</span><span className="mt-0.5 block text-[10px] text-white/60">Rooted in the living Word</span></span></div>
             </motion.div>
           </div>
+          <div className="relative z-10 mx-auto max-w-7xl px-5 pb-8 sm:px-8 lg:px-12"><div className="flex flex-wrap items-center justify-center gap-2 border-t border-white/15 pt-6 sm:justify-start sm:gap-3">{[{ icon: BookOpen, label: "Bible study", href: "/bible-reader" }, { icon: MessageCircle, label: "Questions", href: "/qa" }, { icon: Music2, label: "Verse-songs", href: "/verse-songs" }, { icon: Heart, label: "Devotionals", href: "/devotional-plans" }].map(({ icon: Icon, label, href }) => (<Link key={label} href={href} className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/[0.06] px-4 py-2.5 text-xs font-medium text-white/85 transition hover:border-[#e9c981]/60 hover:bg-white/10 hover:text-white sm:text-sm"><Icon className="h-4 w-4 text-[#e9c981]" />{label}</Link>))}</div></div>
         </section>
 
-        {/* Verse of the Day */}
-        <VerseOfDayStrip />
-
-        {/* Prayer Library spotlight — new, elegant */}
-        <section className="px-5 py-10 sm:px-8 sm:py-14">
-          <div className="mx-auto max-w-7xl overflow-hidden rounded-[2rem] bg-[#1d4035] text-white shadow-[0_30px_70px_-30px_rgba(29,64,53,0.6)]">
-            <div className="grid items-center gap-8 p-7 sm:p-10 lg:grid-cols-[1.2fr_auto] lg:p-14">
-              <div><p className="text-[11px] font-bold uppercase tracking-[0.24em] text-[#e9c981]">🙏 &nbsp;Prayer Library</p><h2 className="mt-4 font-serif text-3xl leading-tight sm:text-4xl lg:text-[2.9rem]">A prayer for every<br className="hidden sm:block" /> season of life.</h2><p className="mt-4 max-w-xl text-sm leading-7 text-white/75 sm:text-base">Morning, healing, gratitude, family, work, rest — find words when yours run out, and pray them in English or Luganda.</p><div className="mt-6 flex flex-wrap gap-2 text-xs font-medium"><span className="rounded-full bg-white/10 px-3 py-1.5">Morning</span><span className="rounded-full bg-white/10 px-3 py-1.5">Healing</span><span className="rounded-full bg-white/10 px-3 py-1.5">Gratitude</span><span className="rounded-full bg-white/10 px-3 py-1.5">Family</span><span className="rounded-full bg-white/10 px-3 py-1.5">Peace</span></div></div>
-              <Link href="/prayer-library" className="group inline-flex min-h-14 items-center justify-center gap-2 rounded-full bg-[#e9c981] px-8 text-sm font-bold text-[#1d4035] transition hover:bg-[#f2d99d] sm:text-base">Open Prayer Library <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></Link>
-            </div>
-          </div>
-        </section>
-
-        {/* Devotional */}
-        <section className="px-5 pb-6 sm:px-8"><div className="mx-auto max-w-7xl"><div className="grid items-center gap-8 rounded-[2rem] border border-[#e8dfc8] bg-[#efe9d8] p-7 sm:p-10 lg:grid-cols-[1fr_auto] lg:p-12"><div className="max-w-2xl"><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#a9852e]">Grow one day at a time</p><h2 className="mt-3 font-serif text-3xl leading-tight text-[#1d4035] sm:text-4xl">A little time in the Word can change the shape of your day.</h2><p className="mt-3 max-w-xl text-sm leading-7 text-[#5a6b5e] sm:text-base">Find a devotional journey for the season you are in, and return to scripture with fresh intention each day.</p></div><Link href="/devotional-plans" className="group inline-flex min-h-14 items-center justify-center gap-2 rounded-full bg-[#1d4035] px-7 text-sm font-semibold text-white transition hover:bg-[#285445]"><Calendar className="h-5 w-5 text-[#e9c981]" /> Explore devotional plans <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></Link></div></div></section>
-
-        {/* Install — light, calm */}
-        {isMounted && installState !== 'installed' && (
-          <section className="px-5 py-6 sm:px-8"><button type="button" onClick={handleInstallClick} className="group mx-auto flex w-full max-w-5xl items-center gap-4 rounded-[1.5rem] border border-[#e8dfc8] bg-white px-5 py-4 text-left shadow-sm transition hover:border-[#d8cdaa] sm:px-6 sm:py-5"><span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#efe9d8] text-[#1d4035]"><Smartphone className="h-6 w-6" /></span><span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2 text-sm font-bold text-[#1d4035] sm:text-base">{installState === 'installing' ? 'Opening install options…' : 'Take Pray-Read with you'} <span className="rounded-full bg-[#eef3ea] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#3f6b4a]">Free app</span></span><span className="mt-1 block text-xs leading-5 text-[#6b7a6e] sm:text-sm">Install for quick access and an easier reading experience.</span></span><Download className="h-5 w-5 shrink-0 text-[#a9852e] transition group-hover:translate-y-0.5" /></button></section>
+        {mounted && installState !== "installed" && (
+          <section className="bg-[#f8f6ef] px-5 pt-8 sm:px-8 sm:pt-10">
+            <motion.button type="button" onClick={handleInstallClick} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45, delay: 0.1 }} className="group mx-auto flex w-full max-w-5xl items-center gap-4 rounded-2xl border border-[#dfe3d8] bg-white px-5 py-4 text-left shadow-[0_12px_38px_-28px_rgba(31,57,46,0.4)] transition hover:border-[#c4cdbd] hover:shadow-[0_16px_45px_-28px_rgba(31,57,46,0.48)] sm:px-6 sm:py-5">
+              <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#eef1e7] text-[#315d4b] transition group-hover:scale-105"><Smartphone className="h-6 w-6" /></span>
+              <span className="min-w-0 flex-1"><span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[#243a30] sm:text-base">{installState === "installing" ? "Opening install options…" : "Take Pray-Read with you"}<span className="rounded-full bg-[#e9f1e7] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#47714f]">Free app</span></span><span className="mt-1 block text-xs leading-5 text-[#788176] sm:text-sm">Install for quick access and an easier reading experience.</span></span>
+              <Download className="h-5 w-5 shrink-0 text-[#52715d] transition group-hover:translate-y-0.5" />
+            </motion.button>
+          </section>
         )}
-
-        <div className="py-2">{isMounted && <RecommendedForYou />}</div>
-
-        {/* Features — light elegant cards */}
-        <section className="px-5 pb-20 pt-10 sm:px-8 sm:pb-24"><div className="mx-auto max-w-7xl"><div className="mx-auto mb-10 max-w-2xl text-center sm:mb-14"><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#a9852e]">Everything in one place</p><h2 className="mt-4 font-serif text-4xl leading-tight text-[#1d4035] sm:text-5xl">A deeper way to engage with scripture</h2><p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-[#6b7a6e] sm:text-base">Read, study, pray, and connect with tools designed to support your faith journey.</p></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5">{FEATURES.map(({ icon, title, desc, route }, index) => (<motion.div key={title} initial={{ opacity: 0, y: 14 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: '-60px' }} transition={{ duration: 0.4, delay: Math.min(index % 3, 2) * 0.06 }} whileHover={{ y: -4 }}><Link href={route} className="group flex h-full min-h-[190px] flex-col rounded-[1.5rem] border border-[#e8dfc8] bg-white p-6 shadow-[0_14px_35px_-28px_rgba(29,64,53,0.35)] transition hover:border-[#d8cdaa] hover:shadow-[0_22px_44px_-28px_rgba(29,64,53,0.3)] sm:p-7"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#f6f2e6] text-[#1d4035] transition group-hover:bg-[#efe9d8]">{getFeatureIcon(icon)}</span><span className="mt-5 flex items-center justify-between gap-3"><span className="text-base font-bold text-[#1d4035] sm:text-lg">{title}</span><ArrowRight className="h-4 w-4 shrink-0 text-[#a0a99c] transition group-hover:translate-x-1 group-hover:text-[#1d4035]" /></span><span className="mt-2 text-sm leading-6 text-[#6b7a6e]">{desc}</span><span className="mt-5 inline-flex w-fit items-center gap-2 rounded-full bg-[#f6f2e6] px-4 py-2 text-xs font-semibold text-[#1d4035] transition group-hover:bg-[#1d4035] group-hover:text-white">Open {title.includes('Prayer') ? 'Prayer Library' : title} <ArrowRight className="h-3.5 w-3.5" /></span></Link></motion.div>))}</div><div className="mt-10 text-center sm:mt-14"><AuthProtectedLink href="/bible-reader"><span className="group inline-flex min-h-14 cursor-pointer items-center justify-center gap-3 rounded-full bg-[#1d4035] px-8 text-sm font-semibold text-white transition hover:bg-[#285445] sm:text-base">Explore Pray-Read Bible <ArrowRight className="h-4 w-4 text-[#e9c981] transition-transform group-hover:translate-x-1" /></span></AuthProtectedLink></div></div></section>
-
-        {/* Community CTA */}
-        <section className="px-5 pb-16 sm:px-8 sm:pb-20"><div className="mx-auto flex max-w-7xl flex-col items-start justify-between gap-8 rounded-[2rem] border border-[#e8dfc8] bg-white p-7 shadow-sm sm:p-10 md:flex-row md:items-center"><div className="max-w-2xl"><p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#a9852e]">Keep growing</p><h2 className="mt-3 font-serif text-3xl leading-tight text-[#1d4035] sm:text-4xl">Let the Word meet you where you are.</h2><p className="mt-3 max-w-xl text-sm leading-7 text-[#6b7a6e] sm:text-base">Start with a passage, follow a question, or find a community conversation that helps you keep exploring.</p></div><Link href="/community" className="group inline-flex min-h-14 shrink-0 items-center justify-center gap-2 rounded-full bg-[#e9c981] px-7 text-sm font-bold text-[#1d4035] transition hover:bg-[#f2d99d] sm:text-base">Join the community <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></Link></div></section>
-      </div>
+        <VerseOfDay />
+        <section className="bg-[#f8f6ef] px-5 py-16 sm:px-8 sm:py-24"><div className="mx-auto max-w-7xl"><div className="grid items-center gap-10 rounded-[2rem] bg-[#e9eddf] p-7 sm:p-10 lg:grid-cols-[1fr_auto] lg:gap-14 lg:p-14"><div className="max-w-2xl"><p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#60745e]">Grow one day at a time</p><h2 className="mt-4 font-serif text-3xl leading-tight text-[#1c382e] sm:text-4xl lg:text-5xl">A little time in the Word can change the shape of your day.</h2><p className="mt-4 max-w-xl text-sm leading-7 text-[#5d6d5d] sm:text-base">Find a devotional journey for the season you are in, and return to scripture with fresh intention each day.</p></div><Link href="/devotional-plans" className="group inline-flex min-h-14 items-center justify-center gap-3 self-start rounded-full bg-[#1d4035] px-6 text-sm font-semibold text-white transition hover:bg-[#285445] sm:px-7 lg:self-center"><CalendarDays className="h-5 w-5 text-[#e9c981]" />Explore devotional plans<ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></Link></div></div></section>
+        <div className="bg-[#f8f6ef] py-2">{mounted && (<SafeBoundary><RecommendedForYou /></SafeBoundary>)}</div>
+        <section className="bg-[#f8f6ef] px-5 pb-20 pt-12 sm:px-8 sm:pb-28 sm:pt-16"><div className="mx-auto max-w-7xl"><div className="mx-auto mb-12 max-w-2xl text-center sm:mb-16"><p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#74826f]">Everything in one place</p><h2 className="mt-4 font-serif text-4xl leading-tight tracking-tight text-[#1c382e] sm:text-5xl">A deeper way to engage with scripture</h2><p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-[#687568] sm:text-base">Read, study, pray, and connect with tools designed to support your faith journey.</p></div><div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5">{features.map(({ icon: Icon, title, description, href }, index) => (<motion.div key={title} initial={{ opacity: 0, y: 14 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-60px" }} transition={{ duration: 0.4, delay: Math.min(index % 3, 2) * 0.06 }} whileHover={{ y: -4 }}><Link href={href} className="group flex h-full min-h-[190px] flex-col rounded-[1.5rem] border border-[#e8e7de] bg-white p-6 shadow-[0_12px_35px_-30px_rgba(31,57,46,0.5)] transition hover:border-[#cbd4c5] hover:shadow-[0_22px_44px_-30px_rgba(31,57,46,0.35)] sm:p-7"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#edf1e8] text-[#315d4b] transition group-hover:bg-[#e5eadc]"><Icon className="h-5 w-5" strokeWidth={1.8} /></span><span className="mt-5 flex items-center justify-between gap-3"><span className="text-base font-semibold text-[#213a30] sm:text-lg">{title}</span><ArrowRight className="h-4 w-4 shrink-0 text-[#9aa493] transition group-hover:translate-x-1 group-hover:text-[#315d4b]" /></span><span className="mt-2 text-sm leading-6 text-[#778176]">{description}</span></Link></motion.div>))}</div><div className="mt-10 text-center sm:mt-14"><AuthProtectedLink href="/bible-reader"><span className="group inline-flex min-h-14 cursor-pointer items-center justify-center gap-3 rounded-full bg-[#1d4035] px-7 text-sm font-semibold text-white transition hover:bg-[#285445] sm:text-base">Explore Pray-Read Bible<ArrowRight className="h-4 w-4 text-[#e9c981] transition-transform group-hover:translate-x-1" /></span></AuthProtectedLink></div></div></section>
+        <section className="relative overflow-hidden bg-[#17372f] px-5 py-16 text-white sm:px-8 sm:py-20"><div aria-hidden="true" className="absolute -right-24 -top-32 h-96 w-96 rounded-full border border-white/[0.08]" /><div aria-hidden="true" className="absolute -right-12 -top-20 h-72 w-72 rounded-full border border-white/[0.08]" /><div className="relative mx-auto flex max-w-7xl flex-col items-start justify-between gap-8 md:flex-row md:items-center"><div className="max-w-2xl"><p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#e9c981]">Keep growing</p><h2 className="mt-3 font-serif text-3xl leading-tight sm:text-4xl">Let the Word meet you where you are.</h2><p className="mt-3 max-w-xl text-sm leading-7 text-white/70 sm:text-base">Start with a passage, follow a question, or find a community conversation that helps you keep exploring.</p></div><Link href="/community" className="group inline-flex min-h-14 shrink-0 items-center justify-center gap-3 rounded-full bg-[#e9c981] px-7 text-sm font-semibold text-[#1a352c] transition hover:bg-[#f2d99d] sm:text-base">Join the community<ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" /></Link></div></section>
+      </main>
       <AppFooter />
     </>
   );
