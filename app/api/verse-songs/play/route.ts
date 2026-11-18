@@ -1,24 +1,18 @@
-import sql, { isDbConfigured } from "@/app/api/utils/sql";
+import sql from "@/app/api/utils/sql";
 import { NextResponse } from "next/server";
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 const headers = { 'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0', 'Pragma': 'no-cache', 'Expires': '0' };
 
-// app/api/verse-songs/play/route.ts — FIXED V2
-// V1 only COUNTED plays. It returned { message: 'Play recorded' } and no
-// song, no mp3_url — so if the front-end Play button waited on this
-// response to feed the floating player, the player got nothing to play.
-// That is what your screenshot shows: button clicks, nothing plays.
-// V2: POST still logs the play + increments play_count, but ALSO returns
-// the song row (id, title, mp3_url, thumbnail, duration, play_count)
-// so the floating player can do: const { song } = await res.json();
-// audio.src = song.mp3_url; audio.play().
-// Same tables, same columns. If mp3_url does not exist yet on your
-// verse_songs table, POST still logs the play and returns the song
-// without mp3_url (instead of 500ing) — then the fix is the column,
-// not this route. See the check list below.
-//
+// app/api/verse-songs/play/route.ts — FIXED V3 (DEPLOY-SAFE)
+// V2 refused to deploy: it imported { isDbConfigured } from "@/app/api/utils/sql",
+// but that file does NOT export isDbConfigured, so the TypeScript build failed
+// with "Module has no exported member 'isDbConfigured'".
+// V3: ONLY the default `sql` import, which does exist. DB check is done via
+// process.env directly, no named import. Same behaviour as V2 otherwise:
+// POST logs the play + increments play_count + returns the song with mp3_url
+// so the player has something to play. GET returns play history.
 // CORRECT PATH: app/api/verse-songs/play/route.ts — do NOT move it.
 
 function normEmail(v: any): string {
@@ -31,8 +25,6 @@ function normSongId(v: any): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
-// Duration: "1:30" / "1:02:30" -> seconds; numeric string -> number;
-// anything else -> null (never a negative, never garbage).
 function normDuration(v: any): number | null {
   if (v === undefined || v === null || v === '') return null;
   if (typeof v === 'number') return Number.isNaN(v) ? null : Math.max(0, Math.floor(v));
@@ -41,6 +33,10 @@ function normDuration(v: any): number | null {
   if (m) return (parseInt(m[1] || '0', 10) * 3600) + (parseInt(m[2], 10) * 60) + parseInt(m[3], 10);
   const n = Number(s);
   return Number.isNaN(n) ? null : Math.max(0, Math.floor(n));
+}
+
+function dbConfigured(): boolean {
+  return Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.POSTGRES_URL_NON_POOLING);
 }
 
 async function ensureTables() {
@@ -55,19 +51,17 @@ async function ensureTables() {
   await sql`CREATE INDEX IF NOT EXISTS user_verse_song_plays_user_song_idx ON user_verse_song_plays (user_email, verse_song_id)`;
 }
 
-// Fetch the song the player needs. mp3_url may not exist on older tables,
-// so fall back to a minimal row instead of 500ing.
 async function fetchSong(id: number) {
   try {
-    const [row] = await sql`
+    const rows: any = await sql`
       SELECT id, title, description, mp3_url, thumbnail, duration, play_count, series_id
       FROM verse_songs WHERE id = ${id}
     `;
-    return row ?? null;
+    return rows?.[0] ?? null;
   } catch {
     try {
-      const [row] = await sql`SELECT id, title, play_count FROM verse_songs WHERE id = ${id}`;
-      return row ?? null;
+      const rows: any = await sql`SELECT id, title, play_count FROM verse_songs WHERE id = ${id}`;
+      return rows?.[0] ?? null;
     } catch {
       return null;
     }
@@ -86,14 +80,12 @@ export async function POST(request: Request) {
     if (verseSongId === null) {
       return NextResponse.json({ error: 'Song ID is required' }, { status: 400, headers });
     }
-    if (!isDbConfigured()) {
+    if (!dbConfigured()) {
       return NextResponse.json({ error: 'DATABASE_URL is not set in Vercel.' }, { status: 503, headers });
     }
 
     await ensureTables();
 
-    // Record play event (only when we know who played it — anonymous plays
-    // still count toward the song's total below).
     if (userEmail) {
       await sql`
         INSERT INTO user_verse_song_plays (user_email, verse_song_id, play_duration_seconds)
@@ -101,15 +93,12 @@ export async function POST(request: Request) {
       `;
     }
 
-    // Increment play count. COALESCE handles songs whose play_count was
-    // never set (NULL + 1 = NULL used to freeze the count at NULL forever).
     await sql`
       UPDATE verse_songs
       SET play_count = COALESCE(play_count, 0) + 1
       WHERE id = ${verseSongId}
     `;
 
-    // NEW: return the song so the floating player has an mp3_url to play.
     const song = await fetchSong(verseSongId);
 
     return NextResponse.json(
@@ -134,17 +123,14 @@ export async function GET(request: Request) {
     if (!userEmail) {
       return NextResponse.json({ error: 'User email is required' }, { status: 400, headers });
     }
-    if (!isDbConfigured()) {
+    if (!dbConfigured()) {
       return NextResponse.json({ error: 'DATABASE_URL is not set in Vercel.' }, { status: 503, headers });
     }
 
     await ensureTables();
 
-    // NOTE: SELECT vs.* + GROUP BY vs.id relies on Postgres functional
-    // dependency (id is the PK). If your verse_songs table has no PK,
-    // this query 500s — the fallback below then returns a plain list.
     try {
-      const plays = await sql`
+      const plays: any = await sql`
         SELECT vs.*, COUNT(uvsp.id) as total_plays
         FROM verse_songs vs
         LEFT JOIN user_verse_song_plays uvsp ON vs.id = uvsp.verse_song_id AND uvsp.user_email = ${userEmail}
@@ -154,7 +140,7 @@ export async function GET(request: Request) {
       `;
       return NextResponse.json(plays, { headers });
     } catch {
-      const plays = await sql`
+      const plays: any = await sql`
         SELECT id, title, description, mp3_url, thumbnail, duration, play_count, series_id
         FROM verse_songs ORDER BY COALESCE(play_count, 0) DESC LIMIT ${limit}
       `;
