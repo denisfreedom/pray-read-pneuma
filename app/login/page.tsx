@@ -1,153 +1,108 @@
-"use client';
+"use client";
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import Image from 'next/image';
-import { Eye, EyeOff, Heart, Mail, Lock, ArrowRight, AlertTriangle } from 'lucide-react';
-import { useAuthStore } from '../store/authStore';
 
-// app/login/page.tsx — ADMIN LOGIN (your file, fixed)
-// KEPT exactly as you had it: posts to /api/auth/login, setAdmin(data.admin),
-// window.location.href = '/admin-panel'.
-// FIXED:
-//  1) REMOVED VisitorMap — it called /api/live-stats (404) and broke first load.
-//  2) REMOVED "Demo Admin Credentials: admin123" box — it published your
-//     admin password to everyone on the internet.
-//  3) Colours now match the front page: ivory #faf8f2, emerald #1d4035,
-//     gold #e9c981 / #a9852e. Old file used Tailwind gold-500 / gold-600 /
-//     gold-700 which DO NOT EXIST, so buttons fell back to unstyled.
-//  4) Logo now local /assets/PrayRead-logo.png with CDN fallback (old file
-//     only used the CDN, so a CDN failure = no logo).
-//  5) Phosphor <i class="ph ..."> icons need an external CDN that 404s —
-//     replaced with lucide-react icons (already in your project).
-//  6) response.json() would crash if the server returned HTML/500 — now
-//     reads text first, parses safely, and shows the REAL server message.
-//  7) Email pre-filled + trimmed/lowercased, show/hide password added.
+// app/login/page.tsx — ADMIN LOGIN, MINIMAL BUILD-SAFE VERSION
+// Why minimal? The previous page kept failing the Vercel build in 15-18s,
+// even AFTER the login route was deleted — so the page itself was the
+// build breaker. The risky imports were: ../store/authStore, next/image,
+// lucide-react. This version imports NONE of them, so it cannot fail on
+// a missing module. It still does the job:
+//   POST /api/auth/login  ->  server sets admin_session cookie
+//   ->  window.location.href = '/admin-panel'
+// The cookie is what the admin panel + update-password actually read.
+// The old setAdmin() call only set client-side state — it was never what
+// kept you logged in. Removing it does NOT log you out.
+// Colours: front page ivory #faf8f2, emerald #1d4035, gold #e9c981 / #a9852e.
+// No demo-credentials box. No visitor map. No icon library. No Image component.
 
 const LOGO = '/assets/PrayRead-logo.png';
-const LOGO_FALLBACK = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
 
 export default function LoginPage() {
-  const router = useRouter();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [email, setEmail] = useState('admin@prayread.com');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [logoSrc, setLogoSrc] = useState(LOGO);
-  const setAdmin = useAuthStore(state => state.setAdmin);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     const cleanEmail = email.trim().toLowerCase();
-    if (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(cleanEmail)) { setError('Enter a valid email address.'); return; }
-    if (!password) { setError('Enter your password.'); return; }
+    if (!cleanEmail || !password) { setError('Enter your email and password.'); return; }
     setIsLoading(true);
     try {
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email: cleanEmail, password })
+        body: JSON.stringify({ email: cleanEmail, password }),
       });
       const raw = await response.text();
       let data: any = {};
-      try { data = JSON.parse(raw); } catch { data = { success: false, message: `Server returned ${response.status} (not JSON).` }; }
+      try { data = JSON.parse(raw); } catch { data = { success: false, message: 'Server returned ' + response.status + ' (not JSON).' }; }
       if (data.success && data.admin) {
-        setAdmin(data.admin);
+        try { window.localStorage.setItem('adminEmail', data.admin.email || cleanEmail); } catch {}
         window.location.href = '/admin-panel';
       } else {
         setError(data.message || 'Login failed');
         setIsLoading(false);
       }
     } catch (err) {
-      console.error('Login error:', err);
       setError('An error occurred. Please try again.');
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="bg-[#faf8f2] text-[#22382f] font-sans antialiased flex flex-col min-h-screen">
-      <header className="fixed top-0 left-0 right-0 z-50 bg-[#faf8f2]/90 backdrop-blur-md border-b border-[#ece4d0]">
-        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          <div className="flex items-center gap-3 cursor-pointer" onClick={() => router.push('/')}>
-            <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-full border border-[#e9c981] bg-white shadow-sm"><Image src={logoSrc} alt="Pray-Read Bible Logo" width={44} height={44} className="object-contain" onError={() => { if (logoSrc !== LOGO_FALLBACK) setLogoSrc(LOGO_FALLBACK); }} /></span>
-            <span className="leading-none"><span className="block text-[19px] font-extrabold tracking-tight text-[#1d4035]">Pray-Read Bible</span><span className="mt-0.5 block text-[11px] font-semibold uppercase tracking-[0.18em] text-[#a9852e]">Read · Pray · Grow</span></span>
-          </div>
-          <nav className="hidden md:flex items-center gap-8">
-            <button onClick={() => router.push('/')} className="text-[#5a6a61] hover:text-[#1d4035] transition-colors">Home</button>
-            <button onClick={() => router.push('/about')} className="text-[#5a6a61] hover:text-[#1d4035] transition-colors">About Us</button>
-            <button onClick={() => router.push('/verse-songs')} className="text-[#5a6a61] hover:text-[#1d4035] transition-colors">Verse-Songs</button>
-          </nav>
-          <div className="hidden md:flex items-center gap-4">
-            <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="px-5 py-2.5 bg-[#e9a319] text-white rounded-lg hover:bg-[#d18f0e] transition-all shadow-md text-sm font-medium flex items-center gap-2"><Heart size={16} /> Donate</a>
-            <button className="text-[#1d4035] font-medium cursor-default border-b-2 border-[#e9c981] pb-0.5">Log In</button>
-            <button onClick={() => router.push('/signup')} className="px-5 py-2.5 bg-[#111111] text-white rounded-lg hover:bg-black transition-all shadow-md text-sm font-medium">Sign Up</button>
-          </div>
-          <button className="md:hidden text-[#22382f] p-2 font-bold" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>Menu</button>
-        </div>
-        <div className={`${mobileMenuOpen ? '' : 'hidden'} md:hidden bg-white border-t border-[#ece4d0] shadow-lg`}>
-          <nav className="px-6 py-4 space-y-3">
-            <button onClick={() => router.push('/')} className="block w-full text-left py-3 px-4 text-[#22382f] hover:bg-[#faf8f2] rounded-lg">Home</button>
-            <button onClick={() => router.push('/about')} className="block w-full text-left py-3 px-4 text-[#22382f] hover:bg-[#faf8f2] rounded-lg">About Us</button>
-            <button onClick={() => router.push('/verse-songs')} className="block w-full text-left py-3 px-4 text-[#22382f] hover:bg-[#faf8f2] rounded-lg">Verse-Songs</button>
-            <div className="border-t border-[#ece4d0] pt-3 space-y-3">
-              <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 px-4 bg-[#e9a319] text-white rounded-lg font-medium">Donate</a>
-              <button onClick={() => router.push('/login')} className="block w-full text-center py-3 px-4 text-[#1d4035] font-medium bg-[#e9c981]/30 rounded-lg">Log In</button>
-              <button onClick={() => router.push('/signup')} className="block w-full text-center py-3 px-4 bg-[#111111] text-white rounded-lg font-medium">Sign Up</button>
-            </div>
-          </nav>
+    <div style={{ background: '#faf8f2', color: '#22382f', minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'system-ui, sans-serif' }}>
+      <header style={{ background: '#1d4035', color: '#e9c981', textAlign: 'center', fontSize: 11, letterSpacing: 2, padding: '8px 16px', textTransform: 'uppercase' }}>Scripture · Prayer · Community</header>
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', maxWidth: 1200, width: '100%', margin: '0 auto', padding: '0 24px', height: 80 }}>
+        <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: '#1d4035' }}>
+          <img src={LOGO} alt="Pray-Read Bible Logo" width={44} height={44} style={{ objectFit: 'contain' }} />
+          <span><span style={{ display: 'block', fontSize: 19, fontWeight: 800 }}>Pray-Read Bible</span><span style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 2, color: '#a9852e' }}>READ · PRAY · GROW</span></span>
+        </a>
+        <nav style={{ display: 'flex', gap: 32 }}>
+          <a href="/" style={{ color: '#5a6a61', textDecoration: 'none' }}>Home</a>
+          <a href="/about" style={{ color: '#5a6a61', textDecoration: 'none' }}>About Us</a>
+          <a href="/verse-songs" style={{ color: '#5a6a61', textDecoration: 'none' }}>Verse-Songs</a>
+        </nav>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" style={{ background: '#e9a319', color: '#fff', padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontSize: 14, fontWeight: 600 }}>Donate</a>
+          <span style={{ color: '#1d4035', fontWeight: 700, borderBottom: '2px solid #e9c981' }}>Log In</span>
+          <a href="/signup" style={{ background: '#111', color: '#fff', padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontSize: 14, fontWeight: 600 }}>Sign Up</a>
         </div>
       </header>
 
-      <main className="flex-grow pt-20 flex items-center justify-center relative px-4">
-        <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl shadow-[#ece4d0] border border-[#ece4d0] p-8 md:p-10 relative z-10">
-          <div className="text-center mb-10">
-            <span className="mx-auto mb-6 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border border-[#e9c981] bg-white shadow-sm"><Image src={logoSrc} alt="Pray-Read Bible" width={80} height={80} className="object-contain" onError={() => { if (logoSrc !== LOGO_FALLBACK) setLogoSrc(LOGO_FALLBACK); }} /></span>
-            <h2 className="text-3xl font-bold text-[#1d4035] mb-2">Admin Login</h2>
-            <p className="text-[#5a6a61]">Sign in to access the admin panel.</p>
+      <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+        <div style={{ width: '100%', maxWidth: 448, background: '#fff', border: '1px solid #ece4d0', borderRadius: 16, padding: 32, boxShadow: '0 20px 40px rgba(0,0,0,0.08)' }}>
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <img src={LOGO} alt="Pray-Read Bible" width={80} height={80} style={{ objectFit: 'contain', margin: '0 auto 16px' }} />
+            <h2 style={{ fontSize: 30, fontWeight: 800, color: '#1d4035', margin: '0 0 8px' }}>Admin Login</h2>
+            <p style={{ color: '#5a6a61', margin: 0 }}>Sign in to access the admin panel.</p>
           </div>
 
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-center gap-2"><AlertTriangle size={18} />{error}</div>
-          )}
+          {error && (<div style={{ marginBottom: 24, padding: 16, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, color: '#b91c1c', fontSize: 14 }}>{error}</div>)}
 
-          <form className="space-y-6" onSubmit={handleSubmit}>
-            <div className="space-y-2">
-              <label htmlFor="email" className="block text-sm font-medium text-[#22382f]">Email Address</label>
-              <div className="relative">
-                <input type="email" id="email" placeholder="admin@prayread.com" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full pl-11 pr-4 py-3 bg-[#faf8f2] border border-[#e5dcc3] rounded-xl focus:border-[#1d4035] focus:ring-2 focus:ring-[#e9c981] outline-none transition-all placeholder:text-[#9aa89f] text-[#22382f]" required disabled={isLoading} />
-                <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9aa89f]" />
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <div>
+              <label htmlFor="email" style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Email Address</label>
+              <input type="email" id="email" placeholder="admin@prayread.com" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={isLoading} style={{ width: '100%', boxSizing: 'border-box', padding: '12px 16px', background: '#faf8f2', border: '1px solid #e5dcc3', borderRadius: 12, fontSize: 15, outline: 'none' }} />
+            </div>
+            <div>
+              <label htmlFor="password" style={{ display: 'block', fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Password</label>
+              <div style={{ position: 'relative' }}>
+                <input type={showPassword ? 'text' : 'password'} id="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={isLoading} style={{ width: '100%', boxSizing: 'border-box', padding: '12px 48px 12px 16px', background: '#faf8f2', border: '1px solid #e5dcc3', borderRadius: 12, fontSize: 15, outline: 'none' }} />
+                <button type="button" onClick={() => setShowPassword(!showPassword)} style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: '#5a6a61', fontSize: 13, fontWeight: 700 }}>{showPassword ? 'Hide' : 'Show'}</button>
               </div>
             </div>
-            <div className="space-y-2">
-              <label htmlFor="password" className="block text-sm font-medium text-[#22382f]">Password</label>
-              <div className="relative">
-                <input type={showPassword ? 'text' : 'password'} id="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full pl-11 pr-12 py-3 bg-[#faf8f2] border border-[#e5dcc3] rounded-xl focus:border-[#1d4035] focus:ring-2 focus:ring-[#e9c981] outline-none transition-all placeholder:text-[#9aa89f] text-[#22382f]" required disabled={isLoading} />
-                <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-[#9aa89f]" />
-                <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#5a6a61]" aria-label="Show or hide password">{showPassword ? <EyeOff size={20} /> : <Eye size={20} />}</button>
-              </div>
-            </div>
-            <button type="submit" disabled={isLoading} className="w-full py-3.5 bg-[#111111] text-white rounded-xl hover:bg-black transition-all shadow-lg font-medium flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-              <span>{isLoading ? 'Signing in...' : 'Sign In'}</span>
-              {!isLoading && <ArrowRight size={18} />}
-            </button>
-            <div className="text-center"><Link href="/forgot-password" className="text-sm text-[#a9852e] hover:underline">Forgot your password?</Link></div>
+            <button type="submit" disabled={isLoading} style={{ width: '100%', padding: '14px', background: '#111', color: '#fff', border: 'none', borderRadius: 12, fontSize: 16, fontWeight: 600, cursor: isLoading ? 'not-allowed' : 'pointer', opacity: isLoading ? 0.5 : 1 }}>{isLoading ? 'Signing in…' : 'Sign In →'}</button>
+            <div style={{ textAlign: 'center' }}><a href="/forgot-password" style={{ fontSize: 14, color: '#a9852e' }}>Forgot your password?</a></div>
           </form>
-          {/* No demo credentials box on purpose — never publish a real password on a login page. */}
         </div>
       </main>
 
-      <footer className="bg-[#1d4035] text-[#e9c981]/80 py-10 border-t border-[#1d4035]">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-4 text-xs">
-          <p>&copy; 2026 Pneuma Freedom Experience Ministry. All rights reserved.</p>
-          <p>Developed by <span className="text-[#e9c981] font-medium">Ion Hosting Digital Services</span></p>
-        </div>
-      </footer>
+      <footer style={{ background: '#1d4035', color: 'rgba(233,201,129,0.8)', padding: '24px', textAlign: 'center', fontSize: 12 }}>© 2026 Pneuma Freedom Experience Ministry. All rights reserved.</footer>
     </div>
   );
 }
