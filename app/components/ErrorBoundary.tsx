@@ -1,22 +1,26 @@
 "use client";
 import React from "react";
 
-// components/ErrorBoundary.tsx — stops ONE broken component from white-screening the whole site.
-// Wrap {children} in app/layout.tsx with <ErrorBoundary> … </ErrorBoundary>
-// If any child throws (e.g. rendering a verse object), users see a friendly fallback + Retry,
-// NOT "Application error: a client-side exception has occurred".
+// app/components/ErrorBoundary.tsx — THE ONLY ErrorBoundary file.
+// WHY THE ORIGINAL "Add ErrorBoundary" COMMIT FAILED:
+// 1) If this file is missing "use client" at the very top, Next.js treats it
+//    as a Server Component — but it uses state + lifecycle, so the build fails.
+// 2) If layout.tsx imported it from the WRONG path (e.g. "@/components/..."
+//    when the file is at "app/components/..."), the build fails with
+//    "Module not found".
+// This file fixes (1): "use client" is line 1. The layout file below fixes (2)
+// by importing from "./components/ErrorBoundary" — the exact path of this file.
 
 type Props = { children: React.ReactNode };
-type State = { hasError: boolean; message: string };
+type State = { hasError: boolean };
 
 export default class ErrorBoundary extends React.Component<Props, State> {
-  state: State = { hasError: false, message: "" };
-  static getDerivedStateFromError(err: unknown): State {
-    return { hasError: true, message: err instanceof Error ? err.message : "Something went wrong." };
+  state: State = { hasError: false };
+  static getDerivedStateFromError(): State {
+    return { hasError: true };
   }
   componentDidCatch(err: unknown) {
-    // Keep this log — it is what tells you WHICH component crashed, in Vercel / browser console.
-    try { console.error("[ErrorBoundary] caught:", err); } catch {}
+    try { console.error("[ErrorBoundary]", err); } catch {}
   }
   render() {
     if (!this.state.hasError) return this.props.children;
@@ -29,7 +33,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
             A section on this page hit a snag. Your Bible, prayers and plans are safe — try again.
           </p>
           <button
-            onClick={() => this.setState({ hasError: false, message: "" })}
+            onClick={() => this.setState({ hasError: false })}
             style={{ marginTop: 20, background: "#1d4035", color: "#fff", border: 0, borderRadius: 999, padding: "12px 28px", fontWeight: 700, cursor: "pointer" }}
           >
             Try again →
@@ -39,20 +43,4 @@ export default class ErrorBoundary extends React.Component<Props, State> {
       </div>
     );
   }
-}
-
-// THE RULE THAT PREVENTS React Error #3 FOREVER:
-// Never render a value that might be an object: {verse} {book} {selectedVerse}
-// Always render a STRING field: {verse.text_english} {verse.name_english}
-// If you are not sure what it is, use this helper:
-export function safeText(v: unknown): string {
-  if (v == null) return "";
-  if (typeof v === "string" || typeof v === "number") return String(v);
-  if (typeof v === "object") {
-    const o = v as Record<string, unknown>;
-    const first = o.text_english ?? o.text ?? o.name_english ?? o.title ?? o.message;
-    if (typeof first === "string") return first;
-    return "";
-  }
-  return "";
 }
