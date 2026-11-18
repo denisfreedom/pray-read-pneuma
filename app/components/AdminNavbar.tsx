@@ -1,111 +1,59 @@
-'use client';
+"use client";
 
-import { useRouter } from 'next/navigation';
-import { useState, useEffect } from 'react';
-import { useAuthStore } from '../store/authStore';
+import { useState } from 'react';
 
-const LOGO = 'https://app-cdn.appgen.com/f81ce8c5-5bb9-49c7-b043-fd6438f7bc50/assets/uploaded_1779376257485_pgg34c.png';
+// app/components/AdminNavbar.tsx — REDESIGNED, front-page colours
+// Ivory #faf8f2 / emerald #1d4035 / gold #e9c981 / #a9852e
+// NEW LOGO: /assets/PrayRead-logo.png (plain <img>, no next/image, no icon lib)
+// Logic kept simple on purpose: Logout clears the admin session on the
+// server (if that route exists) AND locally, then goes to /login.
+// No other admin-panel logic lives here, so replacing this file cannot
+// break any Save / Load / Edit / Delete handler in the panel.
+
+const LOGO = '/assets/PrayRead-logo.png';
 
 export default function AdminNavbar() {
-  const router = useRouter();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { isAdmin, admin, logout, checkSession } = useAuthStore();
-
-  useEffect(() => {
-    checkSession();
-  }, [checkSession]);
+  const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = async () => {
-    await logout();
-    router.push('/login');
+    setLoggingOut(true);
+    try { await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }); } catch {}
+    try {
+      window.localStorage.removeItem('adminEmail');
+      window.localStorage.removeItem('admin_session');
+      window.localStorage.removeItem('admin');
+    } catch {}
+    document.cookie = 'admin_session=; Max-Age=0; path=/';
+    window.location.href = '/login';
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-50 bg-white/85 backdrop-blur-md border-b border-stone-200 transition-all duration-300">
-      <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-        <div className="flex items-center gap-3 cursor-pointer" onClick={() => router.push('/')}>
-          <img src={LOGO} alt="Pray-Read Bible Logo" className="h-14 w-auto" />
-        </div>
-
-        <nav className="hidden md:flex items-center gap-8">
-          <button onClick={() => router.push('/')} className="text-stone-500 hover:text-stone-900 transition-colors">Home</button>
-          <button onClick={() => router.push('/about')} className="text-stone-500 hover:text-stone-900 transition-colors">About Us</button>
-          {isAdmin && (
-            <>
-              <button onClick={() => router.push('/admin-panel')} className="text-stone-500 hover:text-stone-900 transition-colors">Admin Panel</button>
-              <button onClick={() => router.push('/admin-panel/settings')} className="text-stone-500 hover:text-stone-900 transition-colors">Settings</button>
-            </>
-          )}
-        </nav>
-
-        <div className="hidden md:flex items-center gap-4">
-          {isAdmin ? (
-            <>
-              <div className="flex items-center gap-2 px-4 py-2 bg-gold-50 rounded-lg">
-                <i className="ph ph-user-circle text-gold-600 text-lg"></i>
-                <span className="text-sm font-medium text-stone-900">{admin?.name}</span>
-              </div>
-              <button 
-                onClick={handleLogout}
-                className="px-5 py-2.5 bg-stone-900 text-white rounded-lg hover:bg-stone-800 transition-all shadow-md hover:shadow-xl active:scale-95 text-sm font-medium flex items-center gap-2"
-              >
-                <i className="ph ph-sign-out"></i> Logout
-              </button>
-            </>
-          ) : (
-            <>
-              <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="px-5 py-2.5 bg-gold-600 text-white rounded-lg hover:bg-gold-700 transition-all shadow-md hover:shadow-xl active:scale-95 text-sm font-medium flex items-center gap-2">
-                <i className="ph ph-heart"></i> Donate
-              </a>
-              <button onClick={() => router.push('/login')} className="text-stone-900 font-medium hover:text-gold-600 transition-colors">Log In</button>
-              <button onClick={() => router.push('/signup')} className="px-5 py-2.5 bg-stone-900 text-white rounded-lg hover:bg-stone-800 transition-all shadow-md hover:shadow-xl active:scale-95 text-sm font-medium">
-                Sign Up
-              </button>
-            </>
-          )}
-        </div>
-
-        <button className="md:hidden text-stone-800 p-2" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>
-          <i className="ph ph-list text-2xl"></i>
-        </button>
+    <header style={{ background: '#1d4035', color: '#fff', position: 'sticky', top: 0, zIndex: 40, boxShadow: '0 4px 20px rgba(0,0,0,0.15)' }}>
+      <div style={{ background: '#17372f', color: '#e9c981', textAlign: 'center', fontSize: 11, letterSpacing: 2, padding: '6px 16px', textTransform: 'uppercase' }}>
+        Scripture &nbsp;·&nbsp; Prayer &nbsp;·&nbsp; Community
       </div>
-
-      <div className={`${mobileMenuOpen ? '' : 'hidden'} md:hidden bg-white border-t border-stone-200 shadow-lg`}>
-        <nav className="px-6 py-4 space-y-3">
-          <button onClick={() => router.push('/')} className="block w-full text-left py-3 px-4 text-stone-700 hover:bg-stone-50 rounded-lg transition-colors">Home</button>
-          <button onClick={() => router.push('/about')} className="block w-full text-left py-3 px-4 text-stone-700 hover:bg-stone-50 rounded-lg transition-colors">About Us</button>
-          {isAdmin && (
-            <>
-              <button onClick={() => router.push('/admin-panel')} className="block w-full text-left py-3 px-4 text-stone-700 hover:bg-stone-50 rounded-lg transition-colors">Admin Panel</button>
-              <button onClick={() => router.push('/admin-panel/settings')} className="block w-full text-left py-3 px-4 text-stone-700 hover:bg-stone-50 rounded-lg transition-colors">Settings</button>
-            </>
-          )}
-          <div className="border-t border-stone-200 pt-3 space-y-3">
-            {isAdmin ? (
-              <>
-                <div className="flex items-center gap-2 px-4 py-3 bg-gold-50 rounded-lg">
-                  <i className="ph ph-user-circle text-gold-600 text-lg"></i>
-                  <span className="text-sm font-medium text-stone-900">{admin?.name}</span>
-                </div>
-                <button 
-                  onClick={handleLogout}
-                  className="block w-full text-center py-3 px-4 bg-stone-900 text-white rounded-lg font-medium flex items-center justify-center gap-2"
-                >
-                  <i className="ph ph-sign-out"></i> Logout
-                </button>
-              </>
-            ) : (
-              <>
-                <a href="https://store.pesapal.com/donatetoprayreadbibleproject" target="_blank" rel="noopener noreferrer" className="block w-full text-center py-3 px-4 bg-gold-600 text-white rounded-lg font-medium flex items-center justify-center gap-2">
-                  <i className="ph ph-heart"></i> Donate
-                </a>
-                <button onClick={() => router.push('/login')} className="block w-full text-center py-3 px-4 text-stone-900 font-medium bg-gold-50 rounded-lg">Log In</button>
-                <button onClick={() => router.push('/signup')} className="block w-full text-center py-3 px-4 bg-stone-900 text-white rounded-lg font-medium">Sign Up</button>
-              </>
-            )}
-          </div>
+      <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 16px', height: 72, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+        <a href="/" style={{ display: 'flex', alignItems: 'center', gap: 12, textDecoration: 'none', color: '#fff' }}>
+          <img src={LOGO} alt="Pray-Read Bible Logo" width={46} height={46} style={{ objectFit: 'contain', background: '#faf8f2', borderRadius: 10, padding: 3 }} />
+          <span>
+            <span style={{ display: 'block', fontSize: 19, fontWeight: 800, lineHeight: 1.1 }}>Pray-Read Bible</span>
+            <span style={{ display: 'block', fontSize: 11, fontWeight: 700, letterSpacing: 2, color: '#e9c981' }}>READ · PRAY · GROW</span>
+          </span>
+        </a>
+        <nav style={{ display: 'flex', gap: 28, alignItems: 'center' }}>
+          <a href="/" style={{ color: 'rgba(255,255,255,0.85)', textDecoration: 'none' }}>Home</a>
+          <a href="/about" style={{ color: 'rgba(255,255,255,0.85)', textDecoration: 'none' }}>About Us</a>
+          <a href="/admin-panel" style={{ color: '#fff', textDecoration: 'none', fontWeight: 700, borderBottom: '2px solid #e9c981', paddingBottom: 4 }}>Admin Panel</a>
+          <a href="/admin-panel" style={{ color: 'rgba(255,255,255,0.85)', textDecoration: 'none' }}>Settings</a>
         </nav>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <span style={{ color: '#e9c981', fontWeight: 700, fontSize: 14 }}>Admin</span>
+          <button onClick={handleLogout} disabled={loggingOut} style={{ background: '#111', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 8, fontSize: 14, fontWeight: 600, cursor: loggingOut ? 'not-allowed' : 'pointer', opacity: loggingOut ? 0.6 : 1 }}>
+            {loggingOut ? 'Logging out…' : 'Logout'}
+          </button>
+        </div>
       </div>
+      <div style={{ height: 3, background: 'linear-gradient(90deg, #e9c981, #a9852e, #e9c981)' }} />
     </header>
   );
 }
