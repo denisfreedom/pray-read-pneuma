@@ -93,10 +93,19 @@ export default function VerseSongsLibraryPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [playerMsg, setPlayerMsg] = useState('');
 
-  // LOCAL PLAYER — lives in this page, does not depend on GlobalVerseSongPlayer
+  // LOCAL PLAYER — full-featured, DEPLOY-SAFE V2 (no TS null/cast errors), lives in this page, does not depend on GlobalVerseSongPlayer
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [queue, setQueue] = useState<Song[]>([]);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [totalDuration, setTotalDuration] = useState(0);
+  const [volume, setVolume] = useState(0.9);
+  const [isMuted, setIsMuted] = useState(false);
+  const [shuffleOn, setShuffleOn] = useState(false);
+  const [repeatMode, setRepeatMode] = useState<'off' | 'all' | 'one'>('off');
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [showFullPlayer, setShowFullPlayer] = useState(false);
+  const [showQueue, setShowQueue] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const loadAll = useCallback(async () => {
@@ -195,9 +204,14 @@ export default function VerseSongsLibraryPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ verseSongId: song.id, userEmail: userEmail || undefined }),
     }).catch(() => {});
+    setCurrentTime(0);
+    setTotalDuration(song.duration || 0);
     setTimeout(() => {
       const a = audioRef.current;
       if (!a) return;
+      a.volume = volume;
+      a.muted = isMuted;
+      a.playbackRate = playbackRate;
       if (a.src !== song.mp3_url) a.src = song.mp3_url;
       a.play().catch(() => {
         setPlayerMsg('Tap Play again — your browser blocked autoplay.');
@@ -214,9 +228,75 @@ export default function VerseSongsLibraryPage() {
 
   function playNext() {
     if (!currentSong || !queue.length) return;
+    if (shuffleOn) {
+      const others = queue.filter(s => s.id !== currentSong.id);
+      const pick = others.length ? others[Math.floor(Math.random() * others.length)] : currentSong;
+      playSong(pick, queue);
+      return;
+    }
     const idx = queue.findIndex(s => s.id === currentSong.id);
     const next = queue[(idx + 1) % queue.length];
     if (next) playSong(next, queue);
+  }
+
+  function playPrev() {
+    if (!currentSong || !queue.length) return;
+    const a = audioRef.current;
+    // If more than 3s in, restart the song first (like Spotify / Apple Music)
+    if (a && a.currentTime > 3) { a.currentTime = 0; setCurrentTime(0); return; }
+    const idx = queue.findIndex(s => s.id === currentSong.id);
+    const prev = queue[(idx - 1 + queue.length) % queue.length];
+    if (prev) playSong(prev, queue);
+  }
+
+  function seekTo(seconds: number) {
+    const a = audioRef.current;
+    if (!a) return;
+    const clamped = Math.max(0, Math.min(totalDuration || a.duration || 0, seconds));
+    a.currentTime = clamped;
+    setCurrentTime(clamped);
+  }
+
+  function skipBy(delta: number) { seekTo(currentTime + delta); }
+
+  function cycleRepeat() {
+    setRepeatMode(m => m === 'off' ? 'all' : m === 'all' ? 'one' : 'off');
+  }
+
+  function handleEnded() {
+    if (repeatMode === 'one') {
+      const a = audioRef.current;
+      if (a) { a.currentTime = 0; a.play().catch(() => {}); }
+      return;
+    }
+    if (repeatMode === 'off') {
+      const idx = queue.findIndex(s => s.id === currentSong?.id);
+      if (idx >= 0 && idx === queue.length - 1) { setIsPlaying(false); return; }
+    }
+    playNext();
+  }
+
+  function applyVolume(v: number, muted?: boolean) {
+    const a = audioRef.current;
+    setVolume(v);
+    if (muted !== undefined) setIsMuted(muted);
+    if (a) { a.volume = v; a.muted = muted ?? isMuted; }
+  }
+
+  function cycleSpeed() {
+    const speeds = [1, 1.25, 1.5, 2, 0.75];
+    const next = speeds[(speeds.indexOf(playbackRate) + 1) % speeds.length];
+    setPlaybackRate(next);
+    const a = audioRef.current;
+    if (a) a.playbackRate = next;
+  }
+
+  function closePlayer() {
+    audioRef.current?.pause();
+    setCurrentSong(null);
+    setIsPlaying(false);
+    setShowFullPlayer(false);
+    setCurrentTime(0);
   }
 
   const handleLike = (song: Song) => {
@@ -444,26 +524,124 @@ export default function VerseSongsLibraryPage() {
         {!loadError && filtered.length > 0 && renderPagination('bottom')}
       </div>
 
-      {/* Local floating player — bottom bar, this page only */}
-      {currentSong && (
+      {/* Mini player — tap anywhere to open the full player */}
+      {currentSong && !showFullPlayer && (
         <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#1d4035] text-white shadow-2xl">
+          <div className="h-1 bg-white/20 cursor-pointer" onClick={(e) => { const r = (e.target as HTMLElement).getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * (totalDuration || 0)); }}>
+            <div className="h-1 bg-[#e9c981]" style={{ width: `${totalDuration ? (currentTime / totalDuration) * 100 : 0}%` }} />
+          </div>
           <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
-            <img src={currentSong.thumbnail || '/assets/PrayRead-logo.png'} alt="" width={44} height={44} className="rounded object-cover shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="font-bold truncate">{currentSong.title}</p>
-              <p className="text-xs text-[#e9c981] truncate">{currentSong.series_title || 'Verse Songs'}</p>
-            </div>
+            <button onClick={() => setShowFullPlayer(true)} className="flex items-center gap-3 flex-1 min-w-0 text-left">
+              <img src={currentSong.thumbnail || '/assets/PrayRead-logo.png'} alt="" width={44} height={44} className="rounded object-cover shrink-0" />
+              <span className="flex-1 min-w-0">
+                <span className="font-bold truncate block">{currentSong.title}</span>
+                <span className="text-xs text-[#e9c981] truncate block">{currentSong.series_title || 'Verse Songs'} · {fmt(currentTime)} / {fmt(totalDuration || currentSong.duration)}</span>
+              </span>
+            </button>
+            <button onClick={() => setShowFullPlayer(true)} className="text-xs bg-white/10 px-3 py-2 rounded-full shrink-0">▲ Full player</button>
             <button onClick={togglePlayPause} className="w-11 h-11 rounded-full bg-[#e9c981] text-[#1d4035] font-bold text-lg shrink-0">{isPlaying ? '❚❚' : '▶'}</button>
             <button onClick={playNext} className="px-3 py-2 rounded-full bg-white/10 text-sm font-semibold shrink-0">Next →</button>
-            <button onClick={() => { audioRef.current?.pause(); setCurrentSong(null); setIsPlaying(false); }} className="text-sm text-white/70 shrink-0">✕</button>
+            <button onClick={closePlayer} className="text-sm text-white/70 shrink-0">✕</button>
           </div>
         </div>
       )}
+
+      {/* FULL PLAYER POPUP — progress, seek, volume, shuffle, repeat, speed, queue */}
+      {currentSong && showFullPlayer && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-6" onClick={() => setShowFullPlayer(false)}>
+          <div className="bg-[#faf8f2] text-[#22382f] w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-[#1d4035] text-white px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-3xl">
+              <div className="flex items-center gap-3 min-w-0">
+                <img src="/assets/PrayRead-logo.png" alt="" width={36} height={36} className="object-contain rounded shrink-0" />
+                <div className="min-w-0"><p className="font-bold truncate">Now Playing</p><p className="text-xs text-[#e9c981]">Verse Songs · Pray-Read Bible</p></div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => setShowFullPlayer(false)} className="px-3 py-1.5 rounded-full bg-white/10 text-sm">Minimise ↓</button>
+                <button onClick={closePlayer} className="px-3 py-1.5 rounded-full bg-white/10 text-sm">✕ Close</button>
+              </div>
+            </div>
+
+            <div className="p-5">
+              <div className="flex flex-col sm:flex-row gap-5">
+                <img src={currentSong.thumbnail || '/assets/PrayRead-logo.png'} alt={currentSong.title} className="w-full sm:w-56 h-56 object-cover rounded-2xl border border-[#ece4d0] shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-bold tracking-[2px] text-[#a9852e] uppercase">{currentSong.series_title || 'Verse Songs'}</p>
+                  <h2 className="text-2xl font-bold text-[#1d4035] leading-snug">{currentSong.title}</h2>
+                  {currentSong.description && <p className="text-sm text-[#5a6a61] mt-2 line-clamp-3">{currentSong.description}</p>}
+                  <div className="flex gap-2 mt-4">
+                    <button onClick={() => currentSong && handleLike(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_liked ? 'bg-red-500 text-white' : 'bg-white border border-[#ece4d0]'}`}>♥ {currentSong.user_liked ? 'Liked' : 'Like'} · {currentSong.likes_count}</button>
+                    <button onClick={() => currentSong && handleFavorite(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_favorited ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-white border border-[#ece4d0]'}`}>🔖 {currentSong.user_favorited ? 'Saved' : 'Save'}</button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress bar + times + seek */}
+              <div className="mt-6">
+                <input
+                  type="range" min={0} max={Math.max(1, Math.floor(totalDuration || currentSong.duration || 1))} value={Math.floor(currentTime)}
+                  onChange={(e) => seekTo(Number(e.target.value))}
+                  className="w-full accent-[#1d4035] cursor-pointer" aria-label="Seek"
+                />
+                <div className="flex justify-between text-xs text-[#5a6a61] font-medium tabular-nums"><span>{fmt(currentTime)}</span><span>{fmt(totalDuration || currentSong.duration)}</span></div>
+                <div className="flex justify-center gap-2 mt-1">
+                  <button onClick={() => skipBy(-10)} className="px-3 py-1.5 rounded-full bg-white border border-[#ece4d0] text-xs font-semibold">↩ −10s</button>
+                  <button onClick={() => skipBy(10)} className="px-3 py-1.5 rounded-full bg-white border border-[#ece4d0] text-xs font-semibold">+10s ↪</button>
+                </div>
+              </div>
+
+              {/* Main controls */}
+              <div className="flex items-center justify-center gap-3 mt-4">
+                <button onClick={() => setShuffleOn(s => !s)} title="Shuffle" className={`w-11 h-11 rounded-full text-lg font-bold ${shuffleOn ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-white border border-[#ece4d0]'}`}>⇄</button>
+                <button onClick={playPrev} title="Previous" className="w-12 h-12 rounded-full bg-white border border-[#ece4d0] text-xl font-bold">⏮</button>
+                <button onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Play'} className="w-16 h-16 rounded-full bg-[#1d4035] text-white text-2xl font-bold shadow">{isPlaying ? '❚❚' : '▶'}</button>
+                <button onClick={playNext} title="Next" className="w-12 h-12 rounded-full bg-white border border-[#ece4d0] text-xl font-bold">⏭</button>
+                <button onClick={cycleRepeat} title="Repeat" className={`w-11 h-11 rounded-full text-sm font-bold ${repeatMode !== 'off' ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-white border border-[#ece4d0]'}`}>{repeatMode === 'one' ? '↻1' : '↻'}</button>
+              </div>
+              <p className="text-center text-xs text-[#5a6a61] mt-2">{shuffleOn ? 'Shuffle on · ' : ''}{repeatMode === 'off' ? 'Repeat off' : repeatMode === 'all' ? 'Repeat all' : 'Repeat this song'}</p>
+
+              {/* Volume + speed */}
+              <div className="flex flex-wrap items-center justify-center gap-4 mt-4 bg-white border border-[#ece4d0] rounded-2xl px-4 py-3">
+                <button onClick={() => applyVolume(volume, !isMuted)} className="text-lg">{isMuted || volume === 0 ? '🔇' : volume < 0.5 ? '🔈' : '🔊'}</button>
+                <input type="range" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={(e) => applyVolume(Number(e.target.value), false)} className="w-36 accent-[#1d4035] cursor-pointer" aria-label="Volume" />
+                <span className="text-xs text-[#5a6a61] w-10 tabular-nums">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+                <button onClick={cycleSpeed} className="px-3 py-1.5 rounded-full bg-[#faf8f2] border border-[#ece4d0] text-xs font-bold">{playbackRate}× speed</button>
+                <button onClick={() => setShowQueue(q => !q)} className="px-3 py-1.5 rounded-full bg-[#1d4035] text-white text-xs font-bold">{showQueue ? 'Hide list ↑' : 'Show list ↓'} · {queue.length}</button>
+              </div>
+
+              {/* Popup music file list — tap any song to play it */}
+              {showQueue && (
+                <div className="mt-5">
+                  <h3 className="font-bold text-[#1d4035] mb-2">Up next — tap any song to play</h3>
+                  <div className="bg-white border border-[#ece4d0] rounded-2xl divide-y divide-[#f3eedd] max-h-72 overflow-y-auto">
+                    {queue.map((q, i) => {
+                      const active = q.id === currentSong.id;
+                      return (
+                        <button key={q.id} onClick={() => playSong(q, queue)} className={`w-full flex items-center gap-3 px-4 py-3 text-left ${active ? 'bg-[#fff7e0]' : 'hover:bg-[#faf8f2]'}`}>
+                          <span className="text-xs text-[#5a6a61] w-6 shrink-0">{active && isPlaying ? '♫' : `${i + 1}.`}</span>
+                          <img src={q.thumbnail || '/assets/PrayRead-logo.png'} alt="" width={40} height={40} className="rounded object-cover shrink-0" />
+                          <span className="flex-1 min-w-0"><span className={`block truncate font-semibold ${active ? 'text-[#1d4035]' : ''}`}>{q.title}</span><span className="block text-xs text-[#5a6a61] truncate">{q.series_title || 'Verse Songs'}</span></span>
+                          <span className="text-xs text-[#5a6a61] tabular-nums shrink-0">{fmt(q.duration)}</span>
+                          {active && <span className="text-xs font-bold text-[#a9852e] shrink-0">Playing</span>}
+                        </button>
+                      );
+                    })}
+                    {queue.length === 0 && <p className="px-4 py-4 text-sm text-[#5a6a61]">No songs in this queue yet.</p>}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <audio
         ref={audioRef}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
-        onEnded={() => playNext()}
+        onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+        onLoadedMetadata={() => { const d = audioRef.current?.duration || 0; setTotalDuration(d || currentSong?.duration || 0); }}
+        onDurationChange={() => { const d = audioRef.current?.duration || 0; if (d) setTotalDuration(d); }}
+        onEnded={() => handleEnded()}
         onError={() => { setPlayerMsg('This song file could not be played. The audio link may be broken.'); }}
         preload="metadata"
         className="hidden"
