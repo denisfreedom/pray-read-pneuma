@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
-import { Play, Pause, Heart, Bookmark, Lock, Music, ChevronRight, RefreshCw } from 'lucide-react';
 
 // app/verse-songs/page.tsx — V7 DATA LAYER (unchanged, proven) + FRONT-PAGE COLOURS + LOCAL PLAYER
 // KEPT from V7: series ONLY from /api/verse-songs/series, songs via per-series
@@ -93,7 +91,7 @@ export default function VerseSongsLibraryPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [playerMsg, setPlayerMsg] = useState('');
 
-  // LOCAL PLAYER — full-featured, DEPLOY-SAFE V2 (no TS null/cast errors), lives in this page, does not depend on GlobalVerseSongPlayer
+  // LOCAL PLAYER — full-featured, ULTRA-SAFE V3: no icon library, no next-image (plain img + text icons only) (no TS null/cast errors), lives in this page, does not depend on GlobalVerseSongPlayer
   const [currentSong, setCurrentSong] = useState<Song | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [queue, setQueue] = useState<Song[]>([]);
@@ -427,7 +425,7 @@ export default function VerseSongsLibraryPage() {
 
         {filtered.length > 0 && (
           <button onClick={() => playSong(filtered[0], filtered)} className="mb-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#1d4035] text-sm font-bold shadow transition hover:scale-105 active:scale-95">
-            <Play className="w-4 h-4" fill="currentColor" /> Play All · {filtered.length} songs
+            ▶ Play All · {filtered.length} songs
           </button>
         )}
 
@@ -437,7 +435,7 @@ export default function VerseSongsLibraryPage() {
             <span className="text-[#5a6a61]">Buy the album or the full book to download any song for offline listening.</span>
           </p>
           <Link href="/verse-songs/store" className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#1d4035] text-white text-sm font-bold transition hover:scale-105 active:scale-95">
-            <Lock className="w-4 h-4" /> Album Store
+            🔒 Album Store
           </Link>
         </div>
 
@@ -449,15 +447,15 @@ export default function VerseSongsLibraryPage() {
 
         {loadError ? (
           <div className="text-center py-16">
-            <Music className="w-12 h-12 mx-auto mb-3 opacity-50 text-[#1d4035]" />
+            <span className="text-5xl block text-center mb-3">♫</span>
             <p className="text-[#5a6a61] mb-4">Couldn&apos;t load the songs. Check your connection and try again.</p>
             <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#1d4035] text-sm font-bold shadow transition hover:scale-105">
-              <RefreshCw className="w-4 h-4" /> Retry
+              ↻ Retry
             </button>
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-16 text-[#5a6a61]">
-            <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <span className="text-5xl block text-center mb-3">♫</span>
             <p>No songs in this series yet.</p>
           </div>
         ) : (
@@ -469,10 +467,10 @@ export default function VerseSongsLibraryPage() {
                 <article key={song.id} className="group bg-white rounded-3xl overflow-hidden border border-[#ece4d0] shadow hover:shadow-xl hover:border-[#e9c981] transition-all">
                   <div className="relative w-full aspect-video bg-[#f3eedd] overflow-hidden">
                     {song.thumbnail ? (
-                      <Image src={song.thumbnail} alt={song.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw" />
+                      <img src={song.thumbnail} alt={song.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center bg-[#1d4035]">
-                        <Music size={64} strokeWidth={1.5} className="text-[#e9c981] opacity-60" />
+                        <span className="text-6xl text-[#e9c981] opacity-60">♫</span>
                       </div>
                     )}
                     {song.series_title && (
@@ -490,7 +488,7 @@ export default function VerseSongsLibraryPage() {
                         className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${playingThis ? 'bg-[#e9c981] text-[#1d4035] shadow' : 'bg-[#1d4035] text-white'}`}
                         aria-label={playingThis ? 'Pause' : 'Play'}
                       >
-                        {playingThis ? <Pause className="w-4 h-4" fill="currentColor" /> : <Play className="w-4 h-4 ml-0.5" fill="currentColor" />}
+                        {playingThis ? ❚❚ : ▶}
                       </button>
                       <span className="text-xs font-medium text-[#5a6a61]">{isCurrent ? (playingThis ? 'Now playing' : 'Paused — tap play to resume') : song.mp3_url ? 'Play' : 'No audio file yet'}</span>
                       <span className="ml-auto text-xs font-medium tabular-nums text-[#5a6a61]">{fmt(song.duration)}</span>
@@ -502,18 +500,18 @@ export default function VerseSongsLibraryPage() {
 
                     <div className="flex items-center gap-2">
                       <button onClick={() => handleLike(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-white' : 'bg-[#faf8f2] border border-[#ece4d0] hover:bg-[#f3eedd] text-[#1d4035]'}`}>
-                        <Heart size={13} fill={song.user_liked ? 'white' : 'none'} /> {song.user_liked ? 'Liked' : 'Like'}
+                        ♥ {song.user_liked ? 'Liked' : 'Like'}
                       </button>
                       <button onClick={() => handleFavorite(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_favorited ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-[#faf8f2] border border-[#ece4d0] hover:bg-[#f3eedd] text-[#1d4035]'}`}>
-                        <Bookmark size={13} fill={song.user_favorited ? 'currentColor' : 'none'} /> {song.user_favorited ? 'Saved' : 'Save'}
+                        🔖 {song.user_favorited ? 'Saved' : 'Save'}
                       </button>
                       <Link href={`/verse-songs/store?album=${song.series_id}`} className="flex-1 py-2 px-2 rounded-full text-xs font-bold flex items-center justify-center gap-1 bg-[#e9c981] text-[#1d4035] shadow transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
-                        <Lock size={13} /> Download
+                        🔒 Download
                       </Link>
                     </div>
 
                     <Link href={`/verse-songs/${song.series_id}`} className="mt-4 flex items-center justify-between text-sm text-[#a9852e] hover:text-[#1d4035] font-semibold">
-                      Open Series <ChevronRight size={16} />
+                      Open Series →
                     </Link>
                   </div>
                 </article>
