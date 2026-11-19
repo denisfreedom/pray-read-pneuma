@@ -1,4 +1,6 @@
-// app/verse-songs/[seriesId]/page.tsx — SERIES DETAIL V6
+// app/verse-songs/[seriesId]/page.tsx — SERIES DETAIL V7
+// 4 CARDS PER ROW (was 6) so Like + Save + Download all fit fully on one line.
+// 24 songs per page = 4 per row x 6 rows. Same colours/logo as main page (V8).
 // Same look as the main verse-songs page (V8): photo bg + emerald overlay,
 // black glass cards, gold #e9c981 buttons, cream #fdf6e3 text, logo /assets/PrayRead-logo.png.
 // GLOBAL PLAYER, NO LUCIDE, NO MISSING HOOK. Reads params.seriesId OR params.id.
@@ -213,8 +215,9 @@ export default function VerseSongsSeriesPage() {
     }
   };
 
-  // ── Pagination: 6 per row × 6 rows = 36 songs per page ───────────
-  const PAGE_SIZE = 36;
+  // ── Pagination: 4 per row × 6 rows = 24 songs per page ───────────
+  // 4 per row (was 6) so the Download button is fully visible.
+  const PAGE_SIZE = 24;
   const totalPages = Math.max(1, Math.ceil(songs.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
   const pageSongs = songs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
@@ -299,9 +302,14 @@ export default function VerseSongsSeriesPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-32">
-        <Link href="/verse-songs" className="inline-flex items-center gap-1 text-sm text-[#e9c981] hover:text-[#fdf6e3] font-semibold mb-5">
-          ← Back to Verse Songs
-        </Link>
+        <div className="flex items-center gap-4 mb-5">
+          <Link href="/verse-songs" className="inline-flex items-center gap-1 text-sm text-[#e9c981] hover:text-[#fdf6e3] font-semibold">
+            ← Back to Verse Songs
+          </Link>
+          <Link href="/verse-songs/series" className="inline-flex items-center gap-1 text-sm text-[#fdf6e3]/70 hover:text-[#e9c981] font-semibold">
+            All 66 Books →
+          </Link>
+        </div>
 
         {/* Series hero */}
         <div className="flex items-start gap-4 sm:gap-5 mb-8">
@@ -345,7 +353,7 @@ export default function VerseSongsSeriesPage() {
             <p>No songs in this series yet.</p>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {pageSongs.map(song => {
               const isPlaying = playingId === song.id;
               return (
@@ -353,7 +361,7 @@ export default function VerseSongsSeriesPage() {
                   {/* Cover — tap the play button to play */}
                   <div className="relative w-full aspect-square bg-[#1d4035] overflow-hidden">
                     {song.thumbnail ? (
-                      <Image src={song.thumbnail} alt={song.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw" />
+                      <Image src={song.thumbnail} alt={song.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw" />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center bg-[#1d4035]">
                         ♫
@@ -379,6 +387,7 @@ export default function VerseSongsSeriesPage() {
                       <span className="text-xs font-medium text-[#fdf6e3]/70">{isPlaying ? 'Now playing' : (playingId === song.id ? 'Paused' : 'Play')}</span>
                       <span className="ml-auto text-xs font-medium tabular-nums text-[#fdf6e3]/70 shrink-0">{fmt(song.duration)}</span>
                     </div>
+                      
 
                     <p className="flex items-center justify-between text-xs text-[#fdf6e3]/70 mb-3"><span>Duration {fmt(song.duration)} · ❤ {song.likes_count}</span>{song.user_favorited && <span className="text-[#a9852e] font-semibold">★ Saved</span>}</p>
 
