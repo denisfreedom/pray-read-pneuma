@@ -1,8 +1,11 @@
-// app/verse-songs/series/page.tsx — SERIES INDEX V2 (ADMIN NAMES, VERBATIM)
+// app/verse-songs/series/page.tsx — SERIES INDEX V3 (ADMIN NAMES, VERBATIM — NO EPISODES)
 // The series are EXACTLY as named + saved in Admin Panel — title, description,
 // thumbnail, featured flag. NO built-in book list, NO renaming, NO appending
 // "music", NO 66-book assumption. If you rename a series in admin, this page
 // shows the new name. If you add a 4th series, this page shows 4.
+// This page shows NO episodes. Tapping a series goes to the Verse Songs
+// page with ?series=<id>, which already shows that series' episodes.
+// That is the ONE place episodes live — this page is series only.
 // Song counts are counted from each series' detail endpoint, because the
 // series-list endpoint reports 0 songs even when a series has songs
 // (Philemon shows "0 songs" in admin but 18 on its detail page).
@@ -140,7 +143,7 @@ export default function VerseSongsSeriesIndex() {
 
           <p className="text-[11px] font-bold tracking-[2px] text-[#a9852e] uppercase">Scripture · Prayer · Community</p>
           <h1 className="text-3xl font-bold text-[#fdf6e3] mt-1">All Series</h1>
-          <p className="text-[#e9c981] mt-1 font-medium">As saved in the Admin Panel. Tap a series to open its songs.</p>
+          <p className="text-[#e9c981] mt-1 font-medium">As saved in the Admin Panel. Tap a series to open its episodes on the Verse Songs page.</p>
 
           <div className="mt-5">
             <input
@@ -176,7 +179,7 @@ export default function VerseSongsSeriesIndex() {
               {filtered.map(s => {
                 const count = counts[s.id] ?? s.song_count ?? 0;
                 return (
-                  <Link key={s.id} href={`/verse-songs/${s.id}`} className="group bg-black/70 backdrop-blur-xl rounded-3xl overflow-hidden border border-[#ece4d0] shadow hover:shadow-xl hover:border-[#e9c981] transition-all">
+                  <Link key={s.id} href={`/verse-songs?series=${s.id}`} className="group bg-black/70 backdrop-blur-xl rounded-3xl overflow-hidden border border-[#ece4d0] shadow hover:shadow-xl hover:border-[#e9c981] transition-all">
                     <div className="relative w-full aspect-square bg-[#1d4035] overflow-hidden">
                       {s.thumbnail ? (
                         <Image src={s.thumbnail} alt={s.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw" />
@@ -193,7 +196,7 @@ export default function VerseSongsSeriesIndex() {
                       {s.description && <p className="text-[#fdf6e3]/70 text-sm line-clamp-2 mb-3">{s.description}</p>}
                       <p className="text-xs text-[#fdf6e3]/70 mb-3">🎵 {count} song{count === 1 ? '' : 's'}</p>
                       <span className="w-full py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center whitespace-nowrap bg-[#e9c981] text-[#1a1a1a] shadow transition group-hover:scale-105">
-                        Open Series →
+                        View Episodes →
                       </span>
                     </div>
                   </Link>
