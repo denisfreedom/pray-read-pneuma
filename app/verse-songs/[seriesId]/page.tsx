@@ -1,10 +1,7 @@
-// app/verse-songs/[seriesId]/page.tsx — SERIES DETAIL V5 (All Episodes: 6x6 pagination)
-// GLOBAL PLAYER, NO LUCIDE, NO MISSING HOOK.
-// Play dispatches to the global player in layout — same as the main list page.
-// No per-card <audio>, no lucide-react, no useVerseSongPlayer import.
-// Reads params.seriesId OR params.id. Keep ONE folder only ([seriesId] OR [id]).
-// Layout: 6 per row x 6 rows = 36 songs per page, pagination ABOVE and BELOW grid.
-// Header menu: Home, About Us, Verse Songs, Album Store, Dashboard.
+// app/verse-songs/[seriesId]/page.tsx — SERIES DETAIL V6
+// Same look as the main verse-songs page (V8): photo bg + emerald overlay,
+// black glass cards, gold #e9c981 buttons, cream #fdf6e3 text, logo /assets/PrayRead-logo.png.
+// GLOBAL PLAYER, NO LUCIDE, NO MISSING HOOK. Reads params.seriesId OR params.id.
 'use client';
 // SERIES DETAIL V5 — GLOBAL PLAYER, NO LUCIDE, NO MISSING HOOK
 // Reads params.seriesId OR params.id (works in [seriesId] OR [id] folder).
@@ -243,89 +240,93 @@ export default function VerseSongsSeriesPage() {
   // One pagination bar, rendered twice: once ABOVE the grid, once BELOW it.
   const renderPagination = (position: 'top' | 'bottom') => (
     <div key={position} className="flex flex-col sm:flex-row items-center justify-between gap-3 my-4">
-      <p className="text-xs text-white/60">Showing {startIdx}–{endIdx} of {songs.length} songs · Page {safePage} of {totalPages}</p>
+      <p className="text-xs text-[#fdf6e3]/70">Showing {startIdx}–{endIdx} of {songs.length} songs · Page {safePage} of {totalPages}</p>
       <div className="flex items-center gap-1.5 flex-wrap justify-center">
-        <button onClick={() => goToPage(safePage - 1)} disabled={safePage <= 1} className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+        <button onClick={() => goToPage(safePage - 1)} disabled={safePage <= 1} className="px-3 py-2 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
         {pageNumbers.map((p, i) => p === '…' ? (
-          <span key={`e-${i}`} className="px-1 text-white/50">…</span>
+          <span key={`e-${i}`} className="px-1 text-[#fdf6e3]/70">…</span>
         ) : (
-          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30' : 'bg-white/10 hover:bg-white/20'}`}>{p}</button>
+          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-[#e9c981] text-[#1a1a1a] shadow' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>{p}</button>
         ))}
-        <button onClick={() => goToPage(safePage + 1)} disabled={safePage >= totalPages} className="px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+        <button onClick={() => goToPage(safePage + 1)} disabled={safePage >= totalPages} className="px-3 py-2 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
       </div>
     </div>
   );
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#120e2b] flex items-center justify-center">
-        <p className="text-white/60">Loading series…</p>
+      <div className="min-h-screen bg-black/85 backdrop-blur-2xl flex items-center justify-center">
+        <p className="text-[#fdf6e3] font-semibold">Loading series…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#120e2b] text-white">
-      {/* ── Header menu (same menu as the library page) ── */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#120e2b]/95 backdrop-blur">
+    <div className="min-h-screen relative text-[#fdf6e3]" style={{ backgroundImage: "url(/assets/verse-songs-bg.jpg)", backgroundSize: "cover", backgroundPosition: "center", backgroundAttachment: "fixed" }}>
+      <div className="absolute inset-0 bg-[#022c22]/75 pointer-events-none" />
+      <div className="relative z-10">
+      {/* Header — same as main verse-songs page: logo + front-page colours */}
+      <header className="sticky top-0 z-40 bg-black/80 backdrop-blur-xl text-[#fdf6e3] border-b border-white/25 shadow-[0_8px_30px_rgba(0,0,0,0.25)]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
-          <Link href="/" className="flex items-center gap-2.5 font-bold text-lg">
-            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 flex items-center justify-center font-black text-sm shadow-lg shadow-amber-500/30">PRB</span>
+          <Link href="/" className="flex items-center gap-3 font-bold text-lg">
+            <img src="/assets/PrayRead-logo.png" alt="Pray-Read Bible" width={42} height={42} className="object-contain rounded" />
             Pray-Read Bible
           </Link>
           <nav className="hidden md:flex items-center gap-1 text-sm font-semibold">
-            <Link href="/" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Home</Link>
-            <Link href="/about" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">About Us</Link>
-            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/30">Verse Songs</Link>
-            <Link href="/verse-songs/store" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Album Store</Link>
-            <Link href="/dashboard" className="px-3 py-2 rounded-full text-white/70 hover:text-white hover:bg-white/10 transition">Dashboard</Link>
+            <Link href="/" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Home</Link>
+            <Link href="/about" className="px-3 py-2 rounded-full hover:text-[#e9c981]">About Us</Link>
+            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-[#e9c981] text-[#1a1a1a]">Verse Songs</Link>
+            <Link href="/verse-songs/store" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Album Store</Link>
+            <Link href="/prayer-library" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Prayer Library</Link>
+            <Link href="/dashboard" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Dashboard</Link>
           </nav>
-          <button onClick={() => setMenuOpen(o => !o)} className="md:hidden p-2 rounded-lg bg-white/10 hover:bg-white/20" aria-label="Toggle menu">
-            <span className="block w-5 h-0.5 bg-white mb-1" />
-            <span className="block w-5 h-0.5 bg-white mb-1" />
-            <span className="block w-5 h-0.5 bg-white" />
+          <button onClick={() => setMenuOpen(o => !o)} className="md:hidden p-2 rounded-lg bg-white/10 backdrop-blur-xl hover:bg-black/70" aria-label="Toggle menu">
+            <span className="block w-5 h-0.5 bg-[#fdf6e3] mb-1" />
+            <span className="block w-5 h-0.5 bg-[#fdf6e3] mb-1" />
+            <span className="block w-5 h-0.5 bg-[#fdf6e3]" />
           </button>
         </div>
         {menuOpen && (
           <nav className="md:hidden border-t border-white/10 px-4 py-3 flex flex-col gap-1 text-sm font-semibold">
-            <Link href="/" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Home</Link>
-            <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">About Us</Link>
-            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-amber-400 text-slate-950">Verse Songs</Link>
-            <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Album Store</Link>
-            <Link href="/dashboard" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg text-white/80 hover:bg-white/10">Dashboard</Link>
+            <Link href="/" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Home</Link>
+            <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">About Us</Link>
+            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-[#e9c981] text-[#1a1a1a]">Verse Songs</Link>
+            <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Album Store</Link>
+            <Link href="/prayer-library" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Prayer Library</Link>
+            <Link href="/dashboard" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Dashboard</Link>
           </nav>
         )}
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        <Link href="/verse-songs" className="inline-flex items-center gap-1 text-sm text-purple-300 hover:text-purple-200 font-semibold mb-5">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-32">
+        <Link href="/verse-songs" className="inline-flex items-center gap-1 text-sm text-[#e9c981] hover:text-[#fdf6e3] font-semibold mb-5">
           ← Back to Verse Songs
         </Link>
 
         {/* Series hero */}
         <div className="flex items-start gap-4 sm:gap-5 mb-8">
-          <div className="relative w-24 h-24 sm:w-32 sm:h-32 shrink-0 rounded-xl overflow-hidden border-4 border-white shadow-xl bg-slate-800">
+          <div className="relative w-24 h-24 sm:w-32 sm:h-32 shrink-0 rounded-xl overflow-hidden border-4 border-[#e9c981] shadow-xl bg-[#1d4035]">
             {series?.thumbnail ? (
               <Image src={series.thumbnail} alt={series.title} fill className="object-cover" sizes="128px" />
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700">
+              <div className="absolute inset-0 flex items-center justify-center bg-[#1d4035]">
                 ♫
               </div>
             )}
           </div>
           <div className="min-w-0">
-            <h1 className="text-2xl sm:text-4xl font-bold leading-tight">{series?.title || 'Series'}</h1>
-            {series?.description && <p className="text-white/60 mt-1.5 text-sm sm:text-base">{series.description}</p>}
-            <span className="inline-block mt-3 px-3 py-1 rounded-full bg-purple-600 text-white text-xs font-bold shadow">🎵 {songs.length} Songs</span>
+            <h1 className="text-2xl sm:text-4xl font-bold leading-tight text-[#fdf6e3]">{series?.title || 'Series'}</h1>
+            {series?.description && <p className="text-[#fdf6e3]/70 mt-1.5 text-sm sm:text-base">{series.description}</p>}
+            <span className="inline-block mt-3 px-3 py-1 rounded-full bg-[#e9c981] text-[#1a1a1a] text-xs font-bold shadow">🎵 {songs.length} Songs</span>
             {songs.length > 0 && (
-              <button onClick={() => togglePlay(songs[0])} className="ml-2 mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-amber-400 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95">
+              <button onClick={() => togglePlay(songs[0])} className="ml-2 mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-[#e9c981] text-[#1a1a1a] text-xs font-bold shadow transition hover:scale-105 active:scale-95">
                 ▶ Play All
               </button>
             )}
           </div>
         </div>
 
-        <h2 className="text-xl sm:text-2xl font-bold mb-2">All Episodes</h2>
+        <h2 className="text-xl sm:text-2xl font-bold mb-2 text-[#fdf6e3]">All Episodes</h2>
 
         {/* Pagination ABOVE the grid */}
         {!loadError && songs.length > 0 && renderPagination('top')}
@@ -333,13 +334,13 @@ export default function VerseSongsSeriesPage() {
         {loadError ? (
           <div className="text-center py-16">
             ♫
-            <p className="text-white/70 mb-4">Couldn&apos;t load this series. Check your connection and try again.</p>
-            <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-400 text-slate-950 text-sm font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105">
+            <p className="text-[#fdf6e3]/70 mb-4">Couldn&apos;t load this series. Check your connection and try again.</p>
+            <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#1a1a1a] text-sm font-bold shadow transition hover:scale-105">
               ↻ Retry
             </button>
           </div>
         ) : songs.length === 0 ? (
-          <div className="text-center py-16 text-white/50">
+          <div className="text-center py-16 text-[#fdf6e3]/70">
             ♫
             <p>No songs in this series yet.</p>
           </div>
@@ -348,52 +349,51 @@ export default function VerseSongsSeriesPage() {
             {pageSongs.map(song => {
               const isPlaying = playingId === song.id;
               return (
-                <article key={song.id} className="group bg-[#1d1840] rounded-2xl overflow-hidden border border-white/10 shadow-xl hover:shadow-2xl hover:border-amber-400/30 transition-all">
+                <article key={song.id} className="group bg-black/70 backdrop-blur-xl rounded-3xl overflow-hidden border border-[#ece4d0] shadow hover:shadow-xl hover:border-[#e9c981] transition-all">
                   {/* Cover — tap the play button to play */}
-                  <div className="relative w-full aspect-square bg-slate-800 overflow-hidden">
+                  <div className="relative w-full aspect-square bg-[#1d4035] overflow-hidden">
                     {song.thumbnail ? (
                       <Image src={song.thumbnail} alt={song.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw" />
                     ) : (
-                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700">
+                      <div className="absolute inset-0 flex items-center justify-center bg-[#1d4035]">
                         ♫
                       </div>
                     )}
                     <button
                       onClick={() => togglePlay(song)}
-                      className={`absolute inset-0 m-auto w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/50' : 'bg-purple-600 text-white shadow-lg shadow-purple-600/50'}`}
+                      className={`absolute inset-0 m-auto w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-[#e9c981] text-[#1a1a1a] shadow' : 'bg-black/85 backdrop-blur-xl text-[#fdf6e3] border border-[#e9c981]/30 shadow'}`}
                       aria-label={isPlaying ? 'Pause' : 'Play'}
                     >
                       {isPlaying ? '❚❚' : '▶'}
                     </button>
                   </div>
 
-                  <div className="p-3">
-                    <h3 className="font-bold text-sm leading-snug mb-1 line-clamp-1">{song.title}</h3>
-                    {song.description && <p className="text-white/60 text-xs line-clamp-2 mb-2">{song.description}</p>}
+                  <div className="p-4">
+                    <h3 className="font-bold text-lg leading-snug mb-1 line-clamp-1 text-[#fdf6e3]">{song.title}</h3>
+                    {song.description && <p className="text-[#fdf6e3]/70 text-sm line-clamp-2 mb-3">{song.description}</p>}
 
-                    <div className="rounded-xl bg-black/30 border border-white/10 px-2 py-2 mb-2 flex items-center gap-2">
-                      <button onClick={() => togglePlay(song)} className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[11px] transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950' : 'bg-white text-slate-950'}`} aria-label={isPlaying ? 'Pause' : 'Play'}>
+                    <div className="rounded-2xl bg-black/85 backdrop-blur-2xl border border-[#ece4d0] px-3 py-2.5 mb-3 flex items-center gap-3">
+                      <button onClick={() => togglePlay(song)} className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-[#e9c981] text-[#1a1a1a] shadow' : 'bg-black/85 backdrop-blur-xl text-[#fdf6e3] border border-[#e9c981]/30'}`} aria-label={isPlaying ? 'Pause' : 'Play'}>
                         {isPlaying ? '❚❚' : '▶'}
                       </button>
-                      <span className="text-[11px] font-medium text-white/70 truncate">{isPlaying ? 'Now playing' : (playingId === song.id ? 'Paused' : 'Play')}</span>
-                      <span className="ml-auto text-[11px] font-medium tabular-nums text-white/70 shrink-0">{fmt(song.duration)}</span>
+                      <span className="text-xs font-medium text-[#fdf6e3]/70">{isPlaying ? 'Now playing' : (playingId === song.id ? 'Paused' : 'Play')}</span>
+                      <span className="ml-auto text-xs font-medium tabular-nums text-[#fdf6e3]/70 shrink-0">{fmt(song.duration)}</span>
                     </div>
-                      
 
-                    <p className="text-[11px] text-white/60 mb-2">Duration {fmt(song.duration)} · ❤ {song.likes_count}</p>
+                    <p className="flex items-center justify-between text-xs text-[#fdf6e3]/70 mb-3"><span>Duration {fmt(song.duration)} · ❤ {song.likes_count}</span>{song.user_favorited && <span className="text-[#a9852e] font-semibold">★ Saved</span>}</p>
 
-                    <div className="flex items-center gap-1.5 mb-1.5">
-                      <button onClick={() => handleLike(song)} className={`flex-1 py-1.5 px-1 rounded-full text-[11px] font-semibold flex items-center justify-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                    <div className="flex items-center gap-1.5 flex-nowrap">
+                      <button onClick={() => handleLike(song)} className={`flex-1 py-2 px-1 rounded-full text-xs font-semibold flex items-center justify-center gap-1 whitespace-nowrap transition ${song.user_liked ? 'bg-red-500 text-[#fdf6e3]' : 'bg-black/85 backdrop-blur-2xl border border-[#ece4d0] hover:bg-[#f3eedd] text-[#fdf6e3]'}`}>
                         ♥ Like
                       </button>
-                      <button onClick={() => handleFavorite(song)} className={`flex-1 py-1.5 px-1 rounded-full text-[11px] font-semibold flex items-center justify-center gap-1 transition ${song.user_favorited ? 'bg-amber-400 text-slate-950' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
+                      <button onClick={() => handleFavorite(song)} className={`flex-1 py-2 px-1 rounded-full text-xs font-semibold flex items-center justify-center gap-1 whitespace-nowrap transition ${song.user_favorited ? 'bg-[#e9c981] text-[#1a1a1a]' : 'bg-black/85 backdrop-blur-2xl border border-[#ece4d0] hover:bg-[#f3eedd] text-[#fdf6e3]'}`}>
                         🔖 Save
                       </button>
+                      {/* Buy / Download — goes to the Album Store, not a free file */}
+                      <Link href={`/verse-songs/store?album=${seriesId}`} className="flex-none py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center whitespace-nowrap bg-[#e9c981] text-[#1a1a1a] shadow transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
+                        Download
+                      </Link>
                     </div>
-                    {/* Buy / Download — goes to the Album Store, not a free file */}
-                    <Link href={`/verse-songs/store?album=${seriesId}`} className="w-full py-1.5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center gap-1 bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
-                      🔒 Download
-                    </Link>
                   </div>
                 </article>
               );
@@ -405,6 +405,7 @@ export default function VerseSongsSeriesPage() {
         {!loadError && songs.length > 0 && renderPagination('bottom')}
       </div>
 
+      </div>
       <style jsx>{`
         .slider-gold::-webkit-slider-thumb {
           appearance: none; width: 13px; height: 13px; border-radius: 50%;
