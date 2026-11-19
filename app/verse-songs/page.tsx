@@ -349,7 +349,7 @@ export default function VerseSongsLibraryPage() {
         {pageNumbers.map((p, i) => p === '…' ? (
           <span key={`e-${i}`} className="px-1 text-[#fdf6e3]/70">…</span>
         ) : (
-          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-[#e9c981] text-[#fdf6e3] shadow' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] hover:bg-[#f3eedd]'}`}>{p}</button>
+          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-[#e9c981] text-[#1a1a1a] shadow' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] hover:bg-[#f3eedd]'}`}>{p}</button>
         ))}
         <button onClick={() => goToPage(safePage + 1)} disabled={safePage >= totalPages} className="px-3 py-2 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
       </div>
@@ -358,7 +358,7 @@ export default function VerseSongsLibraryPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] flex flex-col items-center justify-center gap-3">
+      <div className="min-h-screen bg-black/85 backdrop-blur-2xl flex flex-col items-center justify-center gap-3">
         <img src="/assets/PrayRead-logo.png" alt="Pray-Read Bible" width={72} height={72} className="object-contain" />
         <p className="text-[#fdf6e3] font-semibold">Loading verse songs…</p>
       </div>
@@ -370,7 +370,7 @@ export default function VerseSongsLibraryPage() {
       <div className="absolute inset-0 bg-[#022c22]/75 pointer-events-none" />
       <div className="relative z-10">
       {/* Header — front-page colours + logo */}
-      <header className="sticky top-0 z-40 bg-[#04352a]/80 backdrop-blur-xl text-[#fdf6e3] border-b border-white/25 shadow-[0_8px_30px_rgba(0,0,0,0.25)]">
+      <header className="sticky top-0 z-40 bg-black/80 backdrop-blur-xl text-[#fdf6e3] border-b border-white/25 shadow-[0_8px_30px_rgba(0,0,0,0.25)]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-3 font-bold text-lg">
             <img src="/assets/PrayRead-logo.png" alt="Pray-Read Bible" width={42} height={42} className="object-contain rounded" />
@@ -379,7 +379,7 @@ export default function VerseSongsLibraryPage() {
           <nav className="hidden md:flex items-center gap-1 text-sm font-semibold">
             <Link href="/" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Home</Link>
             <Link href="/about" className="px-3 py-2 rounded-full hover:text-[#e9c981]">About Us</Link>
-            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-[#e9c981] text-[#fdf6e3]">Verse Songs</Link>
+            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-[#e9c981] text-[#1a1a1a]">Verse Songs</Link>
             <Link href="/verse-songs/store" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Album Store</Link>
             <Link href="/prayer-library" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Prayer Library</Link>
             <Link href="/dashboard" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Dashboard</Link>
@@ -394,7 +394,7 @@ export default function VerseSongsLibraryPage() {
           <nav className="md:hidden border-t border-white/10 px-4 py-3 flex flex-col gap-1 text-sm font-semibold">
             <Link href="/" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Home</Link>
             <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">About Us</Link>
-            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-[#e9c981] text-[#fdf6e3]">Verse Songs</Link>
+            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-[#e9c981] text-[#1a1a1a]">Verse Songs</Link>
             <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Album Store</Link>
             <Link href="/prayer-library" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Prayer Library</Link>
             <Link href="/dashboard" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10 backdrop-blur-xl">Dashboard</Link>
@@ -405,12 +405,12 @@ export default function VerseSongsLibraryPage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-32">
         <p className="text-[11px] font-bold tracking-[2px] text-[#a9852e] uppercase">Scripture · Prayer · Community</p>
         <h1 className="text-3xl font-bold text-[#fdf6e3] mt-1">Verse Songs</h1>
-        <p className="text-[#fdf6e3]/70 mt-1">Listen to Scripture set to music. Streaming is free.</p>
+        <p className="text-[#e9c981] mt-1 font-medium">Listen to Scripture set to music. Streaming is free.</p>
 
         <div className="flex flex-wrap gap-2 mt-6 mb-6">
           <button
             onClick={() => { setActiveTab('all'); setCurrentPage(1); }}
-            className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === 'all' ? 'bg-[#e9c981] text-[#fdf6e3] shadow' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-[#fdf6e3]'}`}
+            className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === 'all' ? 'bg-[#e9c981] text-[#1a1a1a] shadow' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-[#fdf6e3]'}`}
           >
             All Songs
           </button>
@@ -418,7 +418,7 @@ export default function VerseSongsLibraryPage() {
             <button
               key={s.id}
               onClick={() => { setActiveTab(s.id); setCurrentPage(1); }}
-              className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === s.id ? 'bg-[#e9c981] text-[#fdf6e3] shadow' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-[#fdf6e3]'}`}
+              className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === s.id ? 'bg-[#e9c981] text-[#1a1a1a] shadow' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-[#fdf6e3]'}`}
             >
               {s.title} · {counts[s.id] || 0}
             </button>
@@ -426,23 +426,23 @@ export default function VerseSongsLibraryPage() {
         </div>
 
         {filtered.length > 0 && (
-          <button onClick={() => playSong(filtered[0], filtered)} className="mb-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#fdf6e3] text-sm font-bold shadow transition hover:scale-105 active:scale-95">
+          <button onClick={() => playSong(filtered[0], filtered)} className="mb-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#1a1a1a] text-sm font-bold shadow transition hover:scale-105 active:scale-95">
             ▶ Play All · {filtered.length} songs
           </button>
         )}
 
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center gap-3 justify-between rounded-2xl border border-[#ece4d0] bg-[#f3eedd] px-5 py-4">
-          <p className="text-sm text-[#fdf6e3]">
+          <p className="text-sm text-[#04352a]">
             <span className="font-bold">Streaming is free.</span>{' '}
-            <span className="text-[#fdf6e3]/70">Buy the album or the full book to download any song for offline listening.</span>
+            <span className="text-[#1a3a2f]">Buy the album or the full book to download any song for offline listening.</span>
           </p>
-          <Link href="/verse-songs/store" className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#04352a]/85 backdrop-blur-xl text-[#fdf6e3] border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-sm font-bold transition hover:scale-105 active:scale-95">
+          <Link href="/verse-songs/store" className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full bg-black/85 backdrop-blur-xl text-[#fdf6e3] border-t border-[#e9c981]/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-sm font-bold transition hover:scale-105 active:scale-95">
             🔒 Album Store
           </Link>
         </div>
 
         {playerMsg && (
-          <div className="bg-[#fff7e0] border border-[#e9c981] text-[#fdf6e3] rounded-xl px-5 py-3 mb-4 text-sm font-medium">{playerMsg}</div>
+          <div className="bg-[#fff7e0] border border-[#e9c981] text-[#04352a] rounded-xl px-5 py-3 mb-4 text-sm font-medium">{playerMsg}</div>
         )}
 
         {!loadError && filtered.length > 0 && renderPagination('top')}
@@ -451,7 +451,7 @@ export default function VerseSongsLibraryPage() {
           <div className="text-center py-16">
             <span className="text-5xl block text-center mb-3">♫</span>
             <p className="text-[#fdf6e3]/70 mb-4">Couldn&apos;t load the songs. Check your connection and try again.</p>
-            <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#fdf6e3] text-sm font-bold shadow transition hover:scale-105">
+            <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#1a1a1a] text-sm font-bold shadow transition hover:scale-105">
               ↻ Retry
             </button>
           </div>
@@ -476,7 +476,7 @@ export default function VerseSongsLibraryPage() {
                       </div>
                     )}
                     {song.series_title && (
-                      <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-[#e9c981] text-[#fdf6e3] text-xs font-bold shadow">{song.series_title}</span>
+                      <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-[#e9c981] text-[#1a1a1a] text-xs font-bold shadow">{song.series_title}</span>
                     )}
                   </div>
 
@@ -484,10 +484,10 @@ export default function VerseSongsLibraryPage() {
                     <h3 className="font-bold text-lg leading-snug mb-1 line-clamp-1 text-[#fdf6e3]">{song.title}</h3>
                     {song.description && <p className="text-[#fdf6e3]/70 text-sm line-clamp-2 mb-3">{song.description}</p>}
 
-                    <div className="rounded-2xl bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] px-3 py-2.5 mb-3 flex items-center gap-3">
+                    <div className="rounded-2xl bg-black/85 backdrop-blur-2xl border border-[#ece4d0] px-3 py-2.5 mb-3 flex items-center gap-3">
                       <button
                         onClick={() => (isCurrent ? togglePlayPause() : playSong(song, filtered))}
-                        className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${playingThis ? 'bg-[#e9c981] text-[#fdf6e3] shadow' : 'bg-[#04352a]/85 backdrop-blur-xl text-[#fdf6e3] border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)]'}`}
+                        className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${playingThis ? 'bg-[#e9c981] text-[#1a1a1a] shadow' : 'bg-black/85 backdrop-blur-xl text-[#fdf6e3] border-t border-[#e9c981]/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)]'}`}
                         aria-label={playingThis ? 'Pause' : 'Play'}
                       >
                         {playingThis ? '❚❚' : '▶'}
@@ -500,15 +500,15 @@ export default function VerseSongsLibraryPage() {
                       {song.user_favorited && <span className="text-[#a9852e] font-semibold">★ Saved</span>}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handleLike(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-[#fdf6e3]' : 'bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] hover:bg-[#f3eedd] text-[#fdf6e3]'}`}>
+                    <div className="flex items-center gap-1.5 flex-nowrap">
+                      <button onClick={() => handleLike(song)} className={`flex-1 py-2 px-1 rounded-full text-xs font-semibold flex items-center justify-center gap-1 whitespace-nowrap transition ${song.user_liked ? 'bg-red-500 text-[#fdf6e3]' : 'bg-black/85 backdrop-blur-2xl border border-[#ece4d0] hover:bg-[#f3eedd] text-[#fdf6e3]'}`}>
                         ♥ {song.user_liked ? 'Liked' : 'Like'}
                       </button>
-                      <button onClick={() => handleFavorite(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_favorited ? 'bg-[#e9c981] text-[#fdf6e3]' : 'bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] hover:bg-[#f3eedd] text-[#fdf6e3]'}`}>
+                      <button onClick={() => handleFavorite(song)} className={`flex-1 py-2 px-1 rounded-full text-xs font-semibold flex items-center justify-center gap-1 whitespace-nowrap transition ${song.user_favorited ? 'bg-[#e9c981] text-[#1a1a1a]' : 'bg-black/85 backdrop-blur-2xl border border-[#ece4d0] hover:bg-[#f3eedd] text-[#fdf6e3]'}`}>
                         🔖 {song.user_favorited ? 'Saved' : 'Save'}
                       </button>
-                      <Link href={`/verse-songs/store?album=${song.series_id}`} className="flex-1 py-2 px-2 rounded-full text-xs font-bold flex items-center justify-center gap-1 bg-[#e9c981] text-[#fdf6e3] shadow transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
-                        🔒 Download
+                      <Link href={`/verse-songs/store?album=${song.series_id}`} className="flex-none py-2 px-3 rounded-full text-xs font-bold flex items-center justify-center whitespace-nowrap bg-[#e9c981] text-[#1a1a1a] shadow transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
+                        Download
                       </Link>
                     </div>
 
@@ -526,7 +526,7 @@ export default function VerseSongsLibraryPage() {
 
       {/* Mini player — tap anywhere to open the full player */}
       {currentSong && !showFullPlayer && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#04352a]/85 backdrop-blur-xl text-[#fdf6e3] border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] shadow-2xl">
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-black/85 backdrop-blur-xl text-[#fdf6e3] border-t border-[#e9c981]/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] shadow-2xl">
           <div className="h-1 bg-black/70 backdrop-blur-xl/20 cursor-pointer" onClick={(e) => { const r = (e.target as HTMLElement).getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * (totalDuration || 0)); }}>
             <div className="h-1 bg-[#e9c981]" style={{ width: `${totalDuration ? (currentTime / totalDuration) * 100 : 0}%` }} />
           </div>
@@ -539,7 +539,7 @@ export default function VerseSongsLibraryPage() {
               </span>
             </button>
             <button onClick={() => setShowFullPlayer(true)} className="text-xs bg-white/10 backdrop-blur-xl px-3 py-2 rounded-full shrink-0">▲ Full player</button>
-            <button onClick={togglePlayPause} className="w-11 h-11 rounded-full bg-[#e9c981] text-[#fdf6e3] font-bold text-lg shrink-0">{isPlaying ? '❚❚' : '▶'}</button>
+            <button onClick={togglePlayPause} className="w-11 h-11 rounded-full bg-[#e9c981] text-[#1a1a1a] font-bold text-lg shrink-0">{isPlaying ? '❚❚' : '▶'}</button>
             <button onClick={playNext} className="px-3 py-2 rounded-full bg-white/10 backdrop-blur-xl text-sm font-semibold shrink-0">Next →</button>
             <button onClick={closePlayer} className="text-sm text-[#fdf6e3]/70 shrink-0">✕</button>
           </div>
@@ -549,8 +549,8 @@ export default function VerseSongsLibraryPage() {
       {/* FULL PLAYER POPUP — progress, seek, volume, shuffle, repeat, speed, queue */}
       {currentSong && showFullPlayer && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-6" onClick={() => setShowFullPlayer(false)}>
-          <div className="bg-gradient-to-b from-[#065f46]/85 via-[#04352a]/85 to-[#022c22]/90 backdrop-blur-2xl text-[#fdf6e3] w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.45)] border border-white/30 relative overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <div className="bg-[#04352a]/85 backdrop-blur-xl text-[#fdf6e3] border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-3xl">
+          <div className="bg-black/85 backdrop-blur-2xl text-[#fdf6e3] w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-[0_20px_60px_rgba(0,0,0,0.45)] border border-white/30 relative overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-black/85 backdrop-blur-xl text-[#fdf6e3] border-t border-[#e9c981]/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-3xl">
               <div className="flex items-center gap-3 min-w-0">
                 <img src="/assets/PrayRead-logo.png" alt="" width={36} height={36} className="object-contain rounded shrink-0" />
                 <div className="min-w-0"><p className="font-bold truncate">Now Playing</p><p className="text-xs text-[#e9c981]">Verse Songs · Pray-Read Bible</p></div>
@@ -570,7 +570,7 @@ export default function VerseSongsLibraryPage() {
                   {currentSong.description && <p className="text-sm text-[#fdf6e3]/70 mt-2 line-clamp-3">{currentSong.description}</p>}
                   <div className="flex gap-2 mt-4">
                     <button onClick={() => currentSong && handleLike(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_liked ? 'bg-red-500 text-[#fdf6e3]' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>♥ {currentSong.user_liked ? 'Liked' : 'Like'} · {currentSong.likes_count}</button>
-                    <button onClick={() => currentSong && handleFavorite(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_favorited ? 'bg-[#e9c981] text-[#fdf6e3]' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>🔖 {currentSong.user_favorited ? 'Saved' : 'Save'}</button>
+                    <button onClick={() => currentSong && handleFavorite(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_favorited ? 'bg-[#e9c981] text-[#1a1a1a]' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>🔖 {currentSong.user_favorited ? 'Saved' : 'Save'}</button>
                   </div>
                 </div>
               </div>
@@ -591,11 +591,11 @@ export default function VerseSongsLibraryPage() {
 
               {/* Main controls */}
               <div className="flex items-center justify-center gap-3 mt-4">
-                <button onClick={() => setShuffleOn(s => !s)} title="Shuffle" className={`w-11 h-11 rounded-full text-lg font-bold ${shuffleOn ? 'bg-[#e9c981] text-[#fdf6e3]' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>⇄</button>
+                <button onClick={() => setShuffleOn(s => !s)} title="Shuffle" className={`w-11 h-11 rounded-full text-lg font-bold ${shuffleOn ? 'bg-[#e9c981] text-[#1a1a1a]' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>⇄</button>
                 <button onClick={playPrev} title="Previous" className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-xl font-bold">⏮</button>
-                <button onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Play'} className="w-16 h-16 rounded-full bg-[#04352a]/85 backdrop-blur-xl text-[#fdf6e3] border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-2xl font-bold shadow">{isPlaying ? '❚❚' : '▶'}</button>
+                <button onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Play'} className="w-16 h-16 rounded-full bg-black/85 backdrop-blur-xl text-[#fdf6e3] border-t border-[#e9c981]/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-2xl font-bold shadow">{isPlaying ? '❚❚' : '▶'}</button>
                 <button onClick={playNext} title="Next" className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] text-xl font-bold">⏭</button>
-                <button onClick={cycleRepeat} title="Repeat" className={`w-11 h-11 rounded-full text-sm font-bold ${repeatMode !== 'off' ? 'bg-[#e9c981] text-[#fdf6e3]' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>{repeatMode === 'one' ? '↻1' : '↻'}</button>
+                <button onClick={cycleRepeat} title="Repeat" className={`w-11 h-11 rounded-full text-sm font-bold ${repeatMode !== 'off' ? 'bg-[#e9c981] text-[#1a1a1a]' : 'bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3]'}`}>{repeatMode === 'one' ? '↻1' : '↻'}</button>
               </div>
               <p className="text-center text-xs text-[#fdf6e3]/70 mt-2">{shuffleOn ? 'Shuffle on · ' : ''}{repeatMode === 'off' ? 'Repeat off' : repeatMode === 'all' ? 'Repeat all' : 'Repeat this song'}</p>
 
@@ -604,24 +604,24 @@ export default function VerseSongsLibraryPage() {
                 <button onClick={() => applyVolume(volume, !isMuted)} className="text-lg">{isMuted || volume === 0 ? '🔇' : volume < 0.5 ? '🔈' : '🔊'}</button>
                 <input type="range" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={(e) => applyVolume(Number(e.target.value), false)} className="w-36 accent-[#1d4035] cursor-pointer" aria-label="Volume" />
                 <span className="text-xs text-[#fdf6e3]/70 w-10 tabular-nums">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
-                <button onClick={cycleSpeed} className="px-3 py-1.5 rounded-full bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] text-xs font-bold">{playbackRate}× speed</button>
-                <button onClick={() => setShowQueue(q => !q)} className="px-3 py-1.5 rounded-full bg-[#04352a]/85 backdrop-blur-xl text-[#fdf6e3] border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-xs font-bold">{showQueue ? 'Hide list ↑' : 'Show list ↓'} · {queue.length}</button>
+                <button onClick={cycleSpeed} className="px-3 py-1.5 rounded-full bg-black/85 backdrop-blur-2xl border border-[#ece4d0] text-xs font-bold">{playbackRate}× speed</button>
+                <button onClick={() => setShowQueue(q => !q)} className="px-3 py-1.5 rounded-full bg-black/85 backdrop-blur-xl text-[#fdf6e3] border-t border-[#e9c981]/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-xs font-bold">{showQueue ? 'Hide list ↑' : 'Show list ↓'} · {queue.length}</button>
               </div>
 
               {/* Popup music file list — tap any song to play it */}
               {showQueue && (
                 <div className="mt-5">
                   <h3 className="font-bold text-[#fdf6e3] mb-2">Up next — tap any song to play</h3>
-                  <div className="bg-white/10 backdrop-blur-xl border border-white/30 text-[#fdf6e3] rounded-2xl divide-y divide-[#f3eedd] max-h-72 overflow-y-auto">
+                  <div className="bg-black/70 backdrop-blur-xl border border-[#e9c981]/30 text-[#fdf6e3] rounded-2xl divide-y divide-[#e9c981]/20 max-h-72 overflow-y-auto">
                     {queue.map((q, i) => {
                       const active = q.id === currentSong.id;
                       return (
-                        <button key={q.id} onClick={() => playSong(q, queue)} className={`w-full flex items-center gap-3 px-4 py-3 text-left ${active ? 'bg-[#fff7e0]' : 'hover:bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a]'}`}>
-                          <span className="text-xs text-[#fdf6e3]/70 w-6 shrink-0">{active && isPlaying ? '♫' : `${i + 1}.`}</span>
+                        <button key={q.id} onClick={() => playSong(q, queue)} className={`w-full flex items-center gap-3 px-4 py-3 text-left ${active ? 'bg-[#fff7e0]' : 'hover:bg-black/85 backdrop-blur-2xl'}`}>
+                          <span className={`text-xs w-6 shrink-0 ${active ? 'text-[#1a1a1a]' : 'text-[#f5e9c8]/70'}`}>{active && isPlaying ? '♫' : `${i + 1}.`}</span>
                           <img src={q.thumbnail || '/assets/PrayRead-logo.png'} alt="" width={40} height={40} className="rounded object-cover shrink-0" />
-                          <span className="flex-1 min-w-0"><span className={`block truncate font-semibold ${active ? 'text-[#fdf6e3]' : ''}`}>{q.title}</span><span className="block text-xs text-[#fdf6e3]/70 truncate">{q.series_title || 'Verse Songs'}</span></span>
-                          <span className="text-xs text-[#fdf6e3]/70 tabular-nums shrink-0">{fmt(q.duration)}</span>
-                          {active && <span className="text-xs font-bold text-[#a9852e] shrink-0">Playing</span>}
+                          <span className="flex-1 min-w-0"><span className={`block truncate font-semibold ${active ? 'text-[#1a1a1a]' : 'text-[#fdf6e3]'}`}>{q.title}</span><span className={`block text-xs truncate ${active ? 'text-[#1a1a1a]/70' : 'text-[#f5e9c8]/70'}`}>{q.series_title || 'Verse Songs'}</span></span>
+                          <span className={`text-xs tabular-nums shrink-0 ${active ? 'text-[#1a1a1a]' : 'text-[#f5e9c8]/70'}`}>{fmt(q.duration)}</span>
+                          {active && <span className="text-xs font-bold text-[#1a1a1a] shrink-0">Playing</span>}
                         </button>
                       );
                     })}
