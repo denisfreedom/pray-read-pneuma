@@ -488,7 +488,7 @@ export default function VerseSongsLibraryPage() {
                         className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${playingThis ? 'bg-[#e9c981] text-[#1d4035] shadow' : 'bg-[#1d4035] text-white'}`}
                         aria-label={playingThis ? 'Pause' : 'Play'}
                       >
-                        {playingThis ? ❚❚ : ▶}
+                        {playingThis ? '❚❚' : '▶'}
                       </button>
                       <span className="text-xs font-medium text-[#5a6a61]">{isCurrent ? (playingThis ? 'Now playing' : 'Paused — tap play to resume') : song.mp3_url ? 'Play' : 'No audio file yet'}</span>
                       <span className="ml-auto text-xs font-medium tabular-nums text-[#5a6a61]">{fmt(song.duration)}</span>
