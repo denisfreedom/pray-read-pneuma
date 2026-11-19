@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 
-// app/verse-songs/page.tsx — V7 DATA LAYER (unchanged, proven) + FRONT-PAGE COLOURS + LOCAL PLAYER
+// app/verse-songs/page.tsx — V9: V8 + ?series= deep-link
+// The series index (/verse-songs/series) links here with ?series=<id>, so THIS
+// page is the ONLY place episodes are shown. The old /verse-songs/<id>
+// episodes page is gone — it just repeated these same cards.
 // KEPT from V7: series ONLY from /api/verse-songs/series, songs via per-series
 // detail endpoint first, 4 per row x 10 rows = 40 per page, tabs = series names.
 // CHANGED:
@@ -84,6 +87,13 @@ export default function VerseSongsLibraryPage() {
   const [series, setSeries] = useState<Series[]>([]);
   const [songs, setSongs] = useState<Song[]>([]);
   const [activeTab, setActiveTab] = useState<number | 'all'>('all');
+
+  // Deep-link from the series index: /verse-songs?series=2 opens Philemon's
+  // episodes. Reads window.location (no useSearchParams → no Suspense needed).
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get('series'));
+    if (Number.isFinite(id) && id > 0) { setActiveTab(id); setCurrentPage(1); }
+  }, []);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [userEmail, setUserEmail] = useState('');
@@ -384,6 +394,9 @@ export default function VerseSongsLibraryPage() {
               {s.title} · {counts[s.id] || 0}
             </button>
           ))}
+          <Link href="/verse-songs/series" className="px-4 py-2 rounded-full text-sm font-semibold transition bg-white/10 backdrop-blur-xl border border-white/30 text-[#e9c981] hover:border-[#e9c981]">
+            View all series →
+          </Link>
         </div>
 
         {filtered.length > 0 && (
@@ -473,8 +486,8 @@ export default function VerseSongsLibraryPage() {
                       </Link>
                     </div>
 
-                    <Link href={`/verse-songs/${song.series_id}`} className="mt-4 flex items-center justify-between text-sm text-[#a9852e] hover:text-[#fdf6e3] font-semibold">
-                      Open Series →
+                    <Link href="/verse-songs/series" className="mt-4 flex items-center justify-between text-sm text-[#a9852e] hover:text-[#fdf6e3] font-semibold">
+                      All Series →
                     </Link>
                   </div>
                 </article>
