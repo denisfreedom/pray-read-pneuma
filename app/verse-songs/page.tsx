@@ -343,32 +343,32 @@ export default function VerseSongsLibraryPage() {
 
   const renderPagination = (position: 'top' | 'bottom') => (
     <div key={position} className="flex flex-col sm:flex-row items-center justify-between gap-3 my-4">
-      <p className="text-xs text-[#5a6a61]">Showing {startIdx}–{endIdx} of {filtered.length} songs · Page {safePage} of {totalPages}</p>
+      <p className="text-xs text-white/70">Showing {startIdx}–{endIdx} of {filtered.length} songs · Page {safePage} of {totalPages}</p>
       <div className="flex items-center gap-1.5 flex-wrap justify-center">
-        <button onClick={() => goToPage(safePage - 1)} disabled={safePage <= 1} className="px-3 py-2 rounded-full bg-white border border-[#ece4d0] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
+        <button onClick={() => goToPage(safePage - 1)} disabled={safePage <= 1} className="px-3 py-2 rounded-full bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">← Prev</button>
         {pageNumbers.map((p, i) => p === '…' ? (
-          <span key={`e-${i}`} className="px-1 text-[#5a6a61]">…</span>
+          <span key={`e-${i}`} className="px-1 text-white/70">…</span>
         ) : (
-          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-[#e9c981] text-[#1d4035] shadow' : 'bg-white border border-[#ece4d0] hover:bg-[#f3eedd]'}`}>{p}</button>
+          <button key={p} onClick={() => goToPage(p as number)} className={`w-9 h-9 rounded-full text-sm font-semibold ${p === safePage ? 'bg-[#e9c981] text-white shadow' : 'bg-white/75 backdrop-blur-xl border border-[#ece4d0] hover:bg-[#f3eedd]'}`}>{p}</button>
         ))}
-        <button onClick={() => goToPage(safePage + 1)} disabled={safePage >= totalPages} className="px-3 py-2 rounded-full bg-white border border-[#ece4d0] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+        <button onClick={() => goToPage(safePage + 1)} disabled={safePage >= totalPages} className="px-3 py-2 rounded-full bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-sm font-semibold disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
       </div>
     </div>
   );
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#faf8f2] flex flex-col items-center justify-center gap-3">
+      <div className="min-h-screen bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] flex flex-col items-center justify-center gap-3">
         <img src="/assets/PrayRead-logo.png" alt="Pray-Read Bible" width={72} height={72} className="object-contain" />
-        <p className="text-[#1d4035] font-semibold">Loading verse songs…</p>
+        <p className="text-white font-semibold">Loading verse songs…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#faf8f2] text-[#22382f]">
+    <div className="min-h-screen bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] text-[#22382f]">
       {/* Header — front-page colours + logo */}
-      <header className="sticky top-0 z-40 bg-[#1d4035] text-white shadow">
+      <header className="sticky top-0 z-40 bg-[#04352a]/85 backdrop-blur-xl text-white border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-3 font-bold text-lg">
             <img src="/assets/PrayRead-logo.png" alt="Pray-Read Bible" width={42} height={42} className="object-contain rounded" />
@@ -377,38 +377,38 @@ export default function VerseSongsLibraryPage() {
           <nav className="hidden md:flex items-center gap-1 text-sm font-semibold">
             <Link href="/" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Home</Link>
             <Link href="/about" className="px-3 py-2 rounded-full hover:text-[#e9c981]">About Us</Link>
-            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-[#e9c981] text-[#1d4035]">Verse Songs</Link>
+            <Link href="/verse-songs" className="px-3 py-2 rounded-full bg-[#e9c981] text-white">Verse Songs</Link>
             <Link href="/verse-songs/store" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Album Store</Link>
             <Link href="/prayer-library" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Prayer Library</Link>
             <Link href="/dashboard" className="px-3 py-2 rounded-full hover:text-[#e9c981]">Dashboard</Link>
           </nav>
-          <button onClick={() => setMenuOpen(o => !o)} className="md:hidden p-2 rounded-lg bg-white/10 hover:bg-white/20" aria-label="Toggle menu">
-            <span className="block w-5 h-0.5 bg-white mb-1" />
-            <span className="block w-5 h-0.5 bg-white mb-1" />
-            <span className="block w-5 h-0.5 bg-white" />
+          <button onClick={() => setMenuOpen(o => !o)} className="md:hidden p-2 rounded-lg bg-white/75 backdrop-blur-xl/10 hover:bg-white/75 backdrop-blur-xl/20" aria-label="Toggle menu">
+            <span className="block w-5 h-0.5 bg-white/75 backdrop-blur-xl mb-1" />
+            <span className="block w-5 h-0.5 bg-white/75 backdrop-blur-xl mb-1" />
+            <span className="block w-5 h-0.5 bg-white/75 backdrop-blur-xl" />
           </button>
         </div>
         {menuOpen && (
           <nav className="md:hidden border-t border-white/10 px-4 py-3 flex flex-col gap-1 text-sm font-semibold">
-            <Link href="/" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10">Home</Link>
-            <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10">About Us</Link>
-            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-[#e9c981] text-[#1d4035]">Verse Songs</Link>
-            <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10">Album Store</Link>
-            <Link href="/prayer-library" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10">Prayer Library</Link>
-            <Link href="/dashboard" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/10">Dashboard</Link>
+            <Link href="/" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/75 backdrop-blur-xl/10">Home</Link>
+            <Link href="/about" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/75 backdrop-blur-xl/10">About Us</Link>
+            <Link href="/verse-songs" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg bg-[#e9c981] text-white">Verse Songs</Link>
+            <Link href="/verse-songs/store" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/75 backdrop-blur-xl/10">Album Store</Link>
+            <Link href="/prayer-library" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/75 backdrop-blur-xl/10">Prayer Library</Link>
+            <Link href="/dashboard" onClick={() => setMenuOpen(false)} className="px-3 py-2.5 rounded-lg hover:bg-white/75 backdrop-blur-xl/10">Dashboard</Link>
           </nav>
         )}
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 pb-32">
         <p className="text-[11px] font-bold tracking-[2px] text-[#a9852e] uppercase">Scripture · Prayer · Community</p>
-        <h1 className="text-3xl font-bold text-[#1d4035] mt-1">Verse Songs</h1>
-        <p className="text-[#5a6a61] mt-1">Listen to Scripture set to music. Streaming is free.</p>
+        <h1 className="text-3xl font-bold text-white mt-1">Verse Songs</h1>
+        <p className="text-white/70 mt-1">Listen to Scripture set to music. Streaming is free.</p>
 
         <div className="flex flex-wrap gap-2 mt-6 mb-6">
           <button
             onClick={() => { setActiveTab('all'); setCurrentPage(1); }}
-            className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === 'all' ? 'bg-[#e9c981] text-[#1d4035] shadow' : 'bg-white border border-[#ece4d0] text-[#1d4035]'}`}
+            className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === 'all' ? 'bg-[#e9c981] text-white shadow' : 'bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-white'}`}
           >
             All Songs
           </button>
@@ -416,7 +416,7 @@ export default function VerseSongsLibraryPage() {
             <button
               key={s.id}
               onClick={() => { setActiveTab(s.id); setCurrentPage(1); }}
-              className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === s.id ? 'bg-[#e9c981] text-[#1d4035] shadow' : 'bg-white border border-[#ece4d0] text-[#1d4035]'}`}
+              className={`px-4 py-2 rounded-full text-sm font-semibold transition ${activeTab === s.id ? 'bg-[#e9c981] text-white shadow' : 'bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-white'}`}
             >
               {s.title} · {counts[s.id] || 0}
             </button>
@@ -424,23 +424,23 @@ export default function VerseSongsLibraryPage() {
         </div>
 
         {filtered.length > 0 && (
-          <button onClick={() => playSong(filtered[0], filtered)} className="mb-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#1d4035] text-sm font-bold shadow transition hover:scale-105 active:scale-95">
+          <button onClick={() => playSong(filtered[0], filtered)} className="mb-4 inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-white text-sm font-bold shadow transition hover:scale-105 active:scale-95">
             ▶ Play All · {filtered.length} songs
           </button>
         )}
 
         <div className="mb-8 flex flex-col sm:flex-row sm:items-center gap-3 justify-between rounded-2xl border border-[#ece4d0] bg-[#f3eedd] px-5 py-4">
-          <p className="text-sm text-[#1d4035]">
+          <p className="text-sm text-white">
             <span className="font-bold">Streaming is free.</span>{' '}
-            <span className="text-[#5a6a61]">Buy the album or the full book to download any song for offline listening.</span>
+            <span className="text-white/70">Buy the album or the full book to download any song for offline listening.</span>
           </p>
-          <Link href="/verse-songs/store" className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#1d4035] text-white text-sm font-bold transition hover:scale-105 active:scale-95">
+          <Link href="/verse-songs/store" className="shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-full bg-[#04352a]/85 backdrop-blur-xl text-white border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-sm font-bold transition hover:scale-105 active:scale-95">
             🔒 Album Store
           </Link>
         </div>
 
         {playerMsg && (
-          <div className="bg-[#fff7e0] border border-[#e9c981] text-[#1d4035] rounded-xl px-5 py-3 mb-4 text-sm font-medium">{playerMsg}</div>
+          <div className="bg-[#fff7e0] border border-[#e9c981] text-white rounded-xl px-5 py-3 mb-4 text-sm font-medium">{playerMsg}</div>
         )}
 
         {!loadError && filtered.length > 0 && renderPagination('top')}
@@ -448,13 +448,13 @@ export default function VerseSongsLibraryPage() {
         {loadError ? (
           <div className="text-center py-16">
             <span className="text-5xl block text-center mb-3">♫</span>
-            <p className="text-[#5a6a61] mb-4">Couldn&apos;t load the songs. Check your connection and try again.</p>
-            <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-[#1d4035] text-sm font-bold shadow transition hover:scale-105">
+            <p className="text-white/70 mb-4">Couldn&apos;t load the songs. Check your connection and try again.</p>
+            <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-[#e9c981] text-white text-sm font-bold shadow transition hover:scale-105">
               ↻ Retry
             </button>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="text-center py-16 text-[#5a6a61]">
+          <div className="text-center py-16 text-white/70">
             <span className="text-5xl block text-center mb-3">♫</span>
             <p>No songs in this series yet.</p>
           </div>
@@ -464,7 +464,7 @@ export default function VerseSongsLibraryPage() {
               const isCurrent = currentSong?.id === song.id;
               const playingThis = isCurrent && isPlaying;
               return (
-                <article key={song.id} className="group bg-white rounded-3xl overflow-hidden border border-[#ece4d0] shadow hover:shadow-xl hover:border-[#e9c981] transition-all">
+                <article key={song.id} className="group bg-white/75 backdrop-blur-xl rounded-3xl overflow-hidden border border-[#ece4d0] shadow hover:shadow-xl hover:border-[#e9c981] transition-all">
                   <div className="relative w-full aspect-video bg-[#f3eedd] overflow-hidden">
                     {song.thumbnail ? (
                       <img src={song.thumbnail} alt={song.title} className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
@@ -474,43 +474,43 @@ export default function VerseSongsLibraryPage() {
                       </div>
                     )}
                     {song.series_title && (
-                      <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-[#e9c981] text-[#1d4035] text-xs font-bold shadow">{song.series_title}</span>
+                      <span className="absolute top-3 left-3 px-3 py-1 rounded-full bg-[#e9c981] text-white text-xs font-bold shadow">{song.series_title}</span>
                     )}
                   </div>
 
                   <div className="p-4">
-                    <h3 className="font-bold text-lg leading-snug mb-1 line-clamp-1 text-[#1d4035]">{song.title}</h3>
-                    {song.description && <p className="text-[#5a6a61] text-sm line-clamp-2 mb-3">{song.description}</p>}
+                    <h3 className="font-bold text-lg leading-snug mb-1 line-clamp-1 text-white">{song.title}</h3>
+                    {song.description && <p className="text-white/70 text-sm line-clamp-2 mb-3">{song.description}</p>}
 
-                    <div className="rounded-2xl bg-[#faf8f2] border border-[#ece4d0] px-3 py-2.5 mb-3 flex items-center gap-3">
+                    <div className="rounded-2xl bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] px-3 py-2.5 mb-3 flex items-center gap-3">
                       <button
                         onClick={() => (isCurrent ? togglePlayPause() : playSong(song, filtered))}
-                        className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${playingThis ? 'bg-[#e9c981] text-[#1d4035] shadow' : 'bg-[#1d4035] text-white'}`}
+                        className={`shrink-0 p-2.5 rounded-full transition-all hover:scale-110 active:scale-95 ${playingThis ? 'bg-[#e9c981] text-white shadow' : 'bg-[#04352a]/85 backdrop-blur-xl text-white border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)]'}`}
                         aria-label={playingThis ? 'Pause' : 'Play'}
                       >
                         {playingThis ? '❚❚' : '▶'}
                       </button>
-                      <span className="text-xs font-medium text-[#5a6a61]">{isCurrent ? (playingThis ? 'Now playing' : 'Paused — tap play to resume') : song.mp3_url ? 'Play' : 'No audio file yet'}</span>
-                      <span className="ml-auto text-xs font-medium tabular-nums text-[#5a6a61]">{fmt(song.duration)}</span>
+                      <span className="text-xs font-medium text-white/70">{isCurrent ? (playingThis ? 'Now playing' : 'Paused — tap play to resume') : song.mp3_url ? 'Play' : 'No audio file yet'}</span>
+                      <span className="ml-auto text-xs font-medium tabular-nums text-white/70">{fmt(song.duration)}</span>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-[#5a6a61] mb-3">
+                    <div className="flex items-center justify-between text-xs text-white/70 mb-3">
                       <span>Duration {fmt(song.duration)} · ❤ {song.likes_count}</span>
                       {song.user_favorited && <span className="text-[#a9852e] font-semibold">★ Saved</span>}
                     </div>
 
                     <div className="flex items-center gap-2">
-                      <button onClick={() => handleLike(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-white' : 'bg-[#faf8f2] border border-[#ece4d0] hover:bg-[#f3eedd] text-[#1d4035]'}`}>
+                      <button onClick={() => handleLike(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-white' : 'bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] hover:bg-[#f3eedd] text-white'}`}>
                         ♥ {song.user_liked ? 'Liked' : 'Like'}
                       </button>
-                      <button onClick={() => handleFavorite(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_favorited ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-[#faf8f2] border border-[#ece4d0] hover:bg-[#f3eedd] text-[#1d4035]'}`}>
+                      <button onClick={() => handleFavorite(song)} className={`flex-1 py-2 px-2 rounded-full text-xs font-semibold flex items-center justify-center gap-1 transition ${song.user_favorited ? 'bg-[#e9c981] text-white' : 'bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] hover:bg-[#f3eedd] text-white'}`}>
                         🔖 {song.user_favorited ? 'Saved' : 'Save'}
                       </button>
-                      <Link href={`/verse-songs/store?album=${song.series_id}`} className="flex-1 py-2 px-2 rounded-full text-xs font-bold flex items-center justify-center gap-1 bg-[#e9c981] text-[#1d4035] shadow transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
+                      <Link href={`/verse-songs/store?album=${song.series_id}`} className="flex-1 py-2 px-2 rounded-full text-xs font-bold flex items-center justify-center gap-1 bg-[#e9c981] text-white shadow transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
                         🔒 Download
                       </Link>
                     </div>
 
-                    <Link href={`/verse-songs/${song.series_id}`} className="mt-4 flex items-center justify-between text-sm text-[#a9852e] hover:text-[#1d4035] font-semibold">
+                    <Link href={`/verse-songs/${song.series_id}`} className="mt-4 flex items-center justify-between text-sm text-[#a9852e] hover:text-white font-semibold">
                       Open Series →
                     </Link>
                   </div>
@@ -524,8 +524,8 @@ export default function VerseSongsLibraryPage() {
 
       {/* Mini player — tap anywhere to open the full player */}
       {currentSong && !showFullPlayer && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#1d4035] text-white shadow-2xl">
-          <div className="h-1 bg-white/20 cursor-pointer" onClick={(e) => { const r = (e.target as HTMLElement).getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * (totalDuration || 0)); }}>
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#04352a]/85 backdrop-blur-xl text-white border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] shadow-2xl">
+          <div className="h-1 bg-white/75 backdrop-blur-xl/20 cursor-pointer" onClick={(e) => { const r = (e.target as HTMLElement).getBoundingClientRect(); seekTo(((e.clientX - r.left) / r.width) * (totalDuration || 0)); }}>
             <div className="h-1 bg-[#e9c981]" style={{ width: `${totalDuration ? (currentTime / totalDuration) * 100 : 0}%` }} />
           </div>
           <div className="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
@@ -536,9 +536,9 @@ export default function VerseSongsLibraryPage() {
                 <span className="text-xs text-[#e9c981] truncate block">{currentSong.series_title || 'Verse Songs'} · {fmt(currentTime)} / {fmt(totalDuration || currentSong.duration)}</span>
               </span>
             </button>
-            <button onClick={() => setShowFullPlayer(true)} className="text-xs bg-white/10 px-3 py-2 rounded-full shrink-0">▲ Full player</button>
-            <button onClick={togglePlayPause} className="w-11 h-11 rounded-full bg-[#e9c981] text-[#1d4035] font-bold text-lg shrink-0">{isPlaying ? '❚❚' : '▶'}</button>
-            <button onClick={playNext} className="px-3 py-2 rounded-full bg-white/10 text-sm font-semibold shrink-0">Next →</button>
+            <button onClick={() => setShowFullPlayer(true)} className="text-xs bg-white/75 backdrop-blur-xl/10 px-3 py-2 rounded-full shrink-0">▲ Full player</button>
+            <button onClick={togglePlayPause} className="w-11 h-11 rounded-full bg-[#e9c981] text-white font-bold text-lg shrink-0">{isPlaying ? '❚❚' : '▶'}</button>
+            <button onClick={playNext} className="px-3 py-2 rounded-full bg-white/75 backdrop-blur-xl/10 text-sm font-semibold shrink-0">Next →</button>
             <button onClick={closePlayer} className="text-sm text-white/70 shrink-0">✕</button>
           </div>
         </div>
@@ -547,15 +547,15 @@ export default function VerseSongsLibraryPage() {
       {/* FULL PLAYER POPUP — progress, seek, volume, shuffle, repeat, speed, queue */}
       {currentSong && showFullPlayer && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-6" onClick={() => setShowFullPlayer(false)}>
-          <div className="bg-[#faf8f2] text-[#22382f] w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="bg-[#1d4035] text-white px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-3xl">
+          <div className="bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] text-[#22382f] w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-[#04352a]/85 backdrop-blur-xl text-white border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] px-5 py-4 flex items-center justify-between rounded-t-3xl sm:rounded-t-3xl">
               <div className="flex items-center gap-3 min-w-0">
                 <img src="/assets/PrayRead-logo.png" alt="" width={36} height={36} className="object-contain rounded shrink-0" />
                 <div className="min-w-0"><p className="font-bold truncate">Now Playing</p><p className="text-xs text-[#e9c981]">Verse Songs · Pray-Read Bible</p></div>
               </div>
               <div className="flex gap-2 shrink-0">
-                <button onClick={() => setShowFullPlayer(false)} className="px-3 py-1.5 rounded-full bg-white/10 text-sm">Minimise ↓</button>
-                <button onClick={closePlayer} className="px-3 py-1.5 rounded-full bg-white/10 text-sm">✕ Close</button>
+                <button onClick={() => setShowFullPlayer(false)} className="px-3 py-1.5 rounded-full bg-white/75 backdrop-blur-xl/10 text-sm">Minimise ↓</button>
+                <button onClick={closePlayer} className="px-3 py-1.5 rounded-full bg-white/75 backdrop-blur-xl/10 text-sm">✕ Close</button>
               </div>
             </div>
 
@@ -564,11 +564,11 @@ export default function VerseSongsLibraryPage() {
                 <img src={currentSong.thumbnail || '/assets/PrayRead-logo.png'} alt={currentSong.title} className="w-full sm:w-56 h-56 object-cover rounded-2xl border border-[#ece4d0] shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-bold tracking-[2px] text-[#a9852e] uppercase">{currentSong.series_title || 'Verse Songs'}</p>
-                  <h2 className="text-2xl font-bold text-[#1d4035] leading-snug">{currentSong.title}</h2>
-                  {currentSong.description && <p className="text-sm text-[#5a6a61] mt-2 line-clamp-3">{currentSong.description}</p>}
+                  <h2 className="text-2xl font-bold text-white leading-snug">{currentSong.title}</h2>
+                  {currentSong.description && <p className="text-sm text-white/70 mt-2 line-clamp-3">{currentSong.description}</p>}
                   <div className="flex gap-2 mt-4">
-                    <button onClick={() => currentSong && handleLike(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_liked ? 'bg-red-500 text-white' : 'bg-white border border-[#ece4d0]'}`}>♥ {currentSong.user_liked ? 'Liked' : 'Like'} · {currentSong.likes_count}</button>
-                    <button onClick={() => currentSong && handleFavorite(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_favorited ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-white border border-[#ece4d0]'}`}>🔖 {currentSong.user_favorited ? 'Saved' : 'Save'}</button>
+                    <button onClick={() => currentSong && handleLike(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_liked ? 'bg-red-500 text-white' : 'bg-white/75 backdrop-blur-xl border border-[#ece4d0]'}`}>♥ {currentSong.user_liked ? 'Liked' : 'Like'} · {currentSong.likes_count}</button>
+                    <button onClick={() => currentSong && handleFavorite(currentSong)} className={`px-4 py-2 rounded-full text-sm font-semibold ${currentSong.user_favorited ? 'bg-[#e9c981] text-white' : 'bg-white/75 backdrop-blur-xl border border-[#ece4d0]'}`}>🔖 {currentSong.user_favorited ? 'Saved' : 'Save'}</button>
                   </div>
                 </div>
               </div>
@@ -580,50 +580,50 @@ export default function VerseSongsLibraryPage() {
                   onChange={(e) => seekTo(Number(e.target.value))}
                   className="w-full accent-[#1d4035] cursor-pointer" aria-label="Seek"
                 />
-                <div className="flex justify-between text-xs text-[#5a6a61] font-medium tabular-nums"><span>{fmt(currentTime)}</span><span>{fmt(totalDuration || currentSong.duration)}</span></div>
+                <div className="flex justify-between text-xs text-white/70 font-medium tabular-nums"><span>{fmt(currentTime)}</span><span>{fmt(totalDuration || currentSong.duration)}</span></div>
                 <div className="flex justify-center gap-2 mt-1">
-                  <button onClick={() => skipBy(-10)} className="px-3 py-1.5 rounded-full bg-white border border-[#ece4d0] text-xs font-semibold">↩ −10s</button>
-                  <button onClick={() => skipBy(10)} className="px-3 py-1.5 rounded-full bg-white border border-[#ece4d0] text-xs font-semibold">+10s ↪</button>
+                  <button onClick={() => skipBy(-10)} className="px-3 py-1.5 rounded-full bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-xs font-semibold">↩ −10s</button>
+                  <button onClick={() => skipBy(10)} className="px-3 py-1.5 rounded-full bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-xs font-semibold">+10s ↪</button>
                 </div>
               </div>
 
               {/* Main controls */}
               <div className="flex items-center justify-center gap-3 mt-4">
-                <button onClick={() => setShuffleOn(s => !s)} title="Shuffle" className={`w-11 h-11 rounded-full text-lg font-bold ${shuffleOn ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-white border border-[#ece4d0]'}`}>⇄</button>
-                <button onClick={playPrev} title="Previous" className="w-12 h-12 rounded-full bg-white border border-[#ece4d0] text-xl font-bold">⏮</button>
-                <button onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Play'} className="w-16 h-16 rounded-full bg-[#1d4035] text-white text-2xl font-bold shadow">{isPlaying ? '❚❚' : '▶'}</button>
-                <button onClick={playNext} title="Next" className="w-12 h-12 rounded-full bg-white border border-[#ece4d0] text-xl font-bold">⏭</button>
-                <button onClick={cycleRepeat} title="Repeat" className={`w-11 h-11 rounded-full text-sm font-bold ${repeatMode !== 'off' ? 'bg-[#e9c981] text-[#1d4035]' : 'bg-white border border-[#ece4d0]'}`}>{repeatMode === 'one' ? '↻1' : '↻'}</button>
+                <button onClick={() => setShuffleOn(s => !s)} title="Shuffle" className={`w-11 h-11 rounded-full text-lg font-bold ${shuffleOn ? 'bg-[#e9c981] text-white' : 'bg-white/75 backdrop-blur-xl border border-[#ece4d0]'}`}>⇄</button>
+                <button onClick={playPrev} title="Previous" className="w-12 h-12 rounded-full bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-xl font-bold">⏮</button>
+                <button onClick={togglePlayPause} title={isPlaying ? 'Pause' : 'Play'} className="w-16 h-16 rounded-full bg-[#04352a]/85 backdrop-blur-xl text-white border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-2xl font-bold shadow">{isPlaying ? '❚❚' : '▶'}</button>
+                <button onClick={playNext} title="Next" className="w-12 h-12 rounded-full bg-white/75 backdrop-blur-xl border border-[#ece4d0] text-xl font-bold">⏭</button>
+                <button onClick={cycleRepeat} title="Repeat" className={`w-11 h-11 rounded-full text-sm font-bold ${repeatMode !== 'off' ? 'bg-[#e9c981] text-white' : 'bg-white/75 backdrop-blur-xl border border-[#ece4d0]'}`}>{repeatMode === 'one' ? '↻1' : '↻'}</button>
               </div>
-              <p className="text-center text-xs text-[#5a6a61] mt-2">{shuffleOn ? 'Shuffle on · ' : ''}{repeatMode === 'off' ? 'Repeat off' : repeatMode === 'all' ? 'Repeat all' : 'Repeat this song'}</p>
+              <p className="text-center text-xs text-white/70 mt-2">{shuffleOn ? 'Shuffle on · ' : ''}{repeatMode === 'off' ? 'Repeat off' : repeatMode === 'all' ? 'Repeat all' : 'Repeat this song'}</p>
 
               {/* Volume + speed */}
-              <div className="flex flex-wrap items-center justify-center gap-4 mt-4 bg-white border border-[#ece4d0] rounded-2xl px-4 py-3">
+              <div className="flex flex-wrap items-center justify-center gap-4 mt-4 bg-white/75 backdrop-blur-xl border border-[#ece4d0] rounded-2xl px-4 py-3">
                 <button onClick={() => applyVolume(volume, !isMuted)} className="text-lg">{isMuted || volume === 0 ? '🔇' : volume < 0.5 ? '🔈' : '🔊'}</button>
                 <input type="range" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={(e) => applyVolume(Number(e.target.value), false)} className="w-36 accent-[#1d4035] cursor-pointer" aria-label="Volume" />
-                <span className="text-xs text-[#5a6a61] w-10 tabular-nums">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
-                <button onClick={cycleSpeed} className="px-3 py-1.5 rounded-full bg-[#faf8f2] border border-[#ece4d0] text-xs font-bold">{playbackRate}× speed</button>
-                <button onClick={() => setShowQueue(q => !q)} className="px-3 py-1.5 rounded-full bg-[#1d4035] text-white text-xs font-bold">{showQueue ? 'Hide list ↑' : 'Show list ↓'} · {queue.length}</button>
+                <span className="text-xs text-white/70 w-10 tabular-nums">{Math.round((isMuted ? 0 : volume) * 100)}%</span>
+                <button onClick={cycleSpeed} className="px-3 py-1.5 rounded-full bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a] border border-[#ece4d0] text-xs font-bold">{playbackRate}× speed</button>
+                <button onClick={() => setShowQueue(q => !q)} className="px-3 py-1.5 rounded-full bg-[#04352a]/85 backdrop-blur-xl text-white border-t border-white/30 shadow-[0_-8px_40px_rgba(0,0,0,0.35)] text-xs font-bold">{showQueue ? 'Hide list ↑' : 'Show list ↓'} · {queue.length}</button>
               </div>
 
               {/* Popup music file list — tap any song to play it */}
               {showQueue && (
                 <div className="mt-5">
-                  <h3 className="font-bold text-[#1d4035] mb-2">Up next — tap any song to play</h3>
-                  <div className="bg-white border border-[#ece4d0] rounded-2xl divide-y divide-[#f3eedd] max-h-72 overflow-y-auto">
+                  <h3 className="font-bold text-white mb-2">Up next — tap any song to play</h3>
+                  <div className="bg-white/75 backdrop-blur-xl border border-[#ece4d0] rounded-2xl divide-y divide-[#f3eedd] max-h-72 overflow-y-auto">
                     {queue.map((q, i) => {
                       const active = q.id === currentSong.id;
                       return (
-                        <button key={q.id} onClick={() => playSong(q, queue)} className={`w-full flex items-center gap-3 px-4 py-3 text-left ${active ? 'bg-[#fff7e0]' : 'hover:bg-[#faf8f2]'}`}>
-                          <span className="text-xs text-[#5a6a61] w-6 shrink-0">{active && isPlaying ? '♫' : `${i + 1}.`}</span>
+                        <button key={q.id} onClick={() => playSong(q, queue)} className={`w-full flex items-center gap-3 px-4 py-3 text-left ${active ? 'bg-[#fff7e0]' : 'hover:bg-gradient-to-b from-[#04352a] via-[#065f46] to-[#0a7a5a]'}`}>
+                          <span className="text-xs text-white/70 w-6 shrink-0">{active && isPlaying ? '♫' : `${i + 1}.`}</span>
                           <img src={q.thumbnail || '/assets/PrayRead-logo.png'} alt="" width={40} height={40} className="rounded object-cover shrink-0" />
-                          <span className="flex-1 min-w-0"><span className={`block truncate font-semibold ${active ? 'text-[#1d4035]' : ''}`}>{q.title}</span><span className="block text-xs text-[#5a6a61] truncate">{q.series_title || 'Verse Songs'}</span></span>
-                          <span className="text-xs text-[#5a6a61] tabular-nums shrink-0">{fmt(q.duration)}</span>
+                          <span className="flex-1 min-w-0"><span className={`block truncate font-semibold ${active ? 'text-white' : ''}`}>{q.title}</span><span className="block text-xs text-white/70 truncate">{q.series_title || 'Verse Songs'}</span></span>
+                          <span className="text-xs text-white/70 tabular-nums shrink-0">{fmt(q.duration)}</span>
                           {active && <span className="text-xs font-bold text-[#a9852e] shrink-0">Playing</span>}
                         </button>
                       );
                     })}
-                    {queue.length === 0 && <p className="px-4 py-4 text-sm text-[#5a6a61]">No songs in this queue yet.</p>}
+                    {queue.length === 0 && <p className="px-4 py-4 text-sm text-white/70">No songs in this queue yet.</p>}
                   </div>
                 </div>
               )}
