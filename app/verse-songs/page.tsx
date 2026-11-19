@@ -102,7 +102,7 @@ export default function VerseSongsLibraryPage() {
   const [shuffleOn, setShuffleOn] = useState(false);
   const [repeatMode, setRepeatMode] = useState<'off' | 'all' | 'one'>('off');
   const [playbackRate, setPlaybackRate] = useState(1);
-  const [false /* global player */, setShowFullPlayer] = useState(false);
+  const [showFullPlayer, setShowFullPlayer] = useState(false); // kept for compatibility, global player owns the popup now
   const [showQueue, setShowQueue] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   // Sync card labels with the GLOBAL player (layout) — no local <audio> anymore.
@@ -217,10 +217,8 @@ export default function VerseSongsLibraryPage() {
   }
 
   function togglePlayPause() {
-
-    const a = audioRef.current;
-    if (!a || !currentSong) return;
-    if (a.paused) a.play().catch(() => {}); else a.pause();
+    if (!currentSong) return;
+    window.dispatchEvent(new Event('prayread-toggle'));
   }
 
   function playNext() {
@@ -250,18 +248,15 @@ export default function VerseSongsLibraryPage() {
   }
 
   function applyVolume(v: number, muted?: boolean) {
-    const a = audioRef.current;
     setVolume(v);
     if (muted !== undefined) setIsMuted(muted);
-    if (a) { a.volume = v; a.muted = muted ?? isMuted; }
+    // Volume lives in the global player now — it reads its own controls. This keeps card state in sync.
   }
 
   function cycleSpeed() {
     const speeds = [1, 1.25, 1.5, 2, 0.75];
     const next = speeds[(speeds.indexOf(playbackRate) + 1) % speeds.length];
     setPlaybackRate(next);
-    const a = audioRef.current;
-    if (a) a.playbackRate = next;
   }
 
   function closePlayer() {
