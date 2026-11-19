@@ -1,28 +1,20 @@
-// app/verse-songs/[seriesId]/page.tsx — SERIES DETAIL V3 (All Episodes: 6×6 pagination)
-// BUG FIX: the file pasted before was the [id] version, which reads params.id.
-// In a [seriesId] folder params.id is empty, so the page thought the series
-// id was 0 and sat on "Loading series..." forever. V3 reads EITHER param
-// name, so it works in a [seriesId] folder AND in an [id] folder.
-// It also never hangs: a missing id now shows the error screen instead of
-// loading forever. Keep ONE folder only ([seriesId] OR [id]), never both.
-// Layout: 6 audio files per row, 6 rows per page = 36 songs per page,
-// with Next / Prev pagination buttons BOTH above the grid and below it.
-// Also carries the same header menu as the library page
-// (Home, About Us, Verse Songs, Album Store, Dashboard).
-// Self-contained: each card has its own mini-player, so this page does not
-// depend on the separate VerseSongPlayer component.
-// Data layer — same guards as Library V3, so songs and series can never
-// be confused: series only from /api/verse-songs/series/{id}; song-shaped
-// rows (have mp3_url) are the only rows treated as songs; every response
-// shape (array, { songs }, { data }) is accepted.
+// app/verse-songs/[seriesId]/page.tsx — SERIES DETAIL V5 (All Episodes: 6x6 pagination)
+// GLOBAL PLAYER, NO LUCIDE, NO MISSING HOOK.
+// Play dispatches to the global player in layout — same as the main list page.
+// No per-card <audio>, no lucide-react, no useVerseSongPlayer import.
+// Reads params.seriesId OR params.id. Keep ONE folder only ([seriesId] OR [id]).
+// Layout: 6 per row x 6 rows = 36 songs per page, pagination ABOVE and BELOW grid.
+// Header menu: Home, About Us, Verse Songs, Album Store, Dashboard.
 'use client';
+// SERIES DETAIL V5 — GLOBAL PLAYER, NO LUCIDE, NO MISSING HOOK
+// Reads params.seriesId OR params.id (works in [seriesId] OR [id] folder).
+// Play dispatches to the global player in layout — same as the main list page.
+// No per-card <audio>, no lucide-react, no useVerseSongPlayer import (that hook never existed).
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useParams } from 'next/navigation';
-import { Play, Pause, Heart, Bookmark, Lock, Music, ChevronLeft, RefreshCw } from 'lucide-react';
-import { useVerseSongPlayer } from '../../components/GlobalVerseSongPlayer';
 
 interface Series { id: number; title: string; description?: string; thumbnail?: string; }
 interface Song {
@@ -82,28 +74,32 @@ function normalizeSong(sg: any, fallbackSeries?: Series): Song {
 
 export default function VerseSongsSeriesPage() {
   const params = useParams();
-  // Works in a [seriesId] folder AND in an [id] folder.
   const seriesId = Number((params as any).seriesId ?? (params as any).id) || 0;
   const [series, setSeries] = useState<Series | null>(null);
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [userEmail, setUserEmail] = useState('');
-  // The floating global player (lives in the root layout, keeps playing
-  // across pages and with the screen off). Cards only tell it what to play.
-  const player = useVerseSongPlayer();
   const [currentPage, setCurrentPage] = useState(1);
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Global player — this page only dispatches. Sync playing state from it.
+  const [playingId, setPlayingId] = useState<number | null>(null);
+  const [times, setTimes] = useState<Record<number, number>>({});
+  useEffect(() => {
+    const onState = (e: any) => {
+      const d = e?.detail || {};
+      if (d.song) setPlayingId(d.song.id ?? null);
+      if (typeof d.isPlaying === "boolean" && !d.isPlaying) setPlayingId(null);
+      if (d.song && typeof d.currentTime === "number") setTimes(prev => ({ ...prev, [d.song.id]: d.currentTime }));
+    };
+    window.addEventListener("prayread-player-state", onState);
+    return () => window.removeEventListener("prayread-player-state", onState);
+  }, []);
+  const lastSavedRef = useRef<Record<number, number>>({});
 
   const loadAll = useCallback(async () => {
-    if (!seriesId) {
-      // No id in the URL (wrong folder/param name) — show the error
-      // screen instead of sitting on "Loading series..." forever.
-      setLoading(false);
-      setLoadError(true);
-      return;
-    }
+    if (!seriesId) { setLoading(false); setLoadError(true); return; }
     setLoading(true);
     setLoadError(false);
     setCurrentPage(1);
@@ -168,16 +164,56 @@ export default function VerseSongsSeriesPage() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  const handleLike = (song: Song) => {
-    const liked = !song.user_liked;
-    setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_liked: liked, likes_count: Math.max(0, s.likes_count + (liked ? 1 : -1)) } : s));
-    player.toggleLike(song);
+  const togglePlay = (song: Song) => {
+    if (!song.mp3_url) return;
+    if (playingId === song.id) { window.dispatchEvent(new Event("prayread-toggle")); return; }
+    window.dispatchEvent(new CustomEvent("prayread-play-song", { detail: { song, queue: songs } }));
+    try { fetch("/api/verse-songs/play", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verseSongId: song.id, userEmail: userEmail || undefined }) }).catch(() => {}); } catch {}
   };
 
-  const handleFavorite = (song: Song) => {
+  const saveProgress = async (song: Song, seconds: number, completed: boolean) => {
+    if (!userEmail) return;
+    const now = Date.now();
+    if (!completed && now - (lastSavedRef.current[song.id] || 0) < 5000) return;
+    lastSavedRef.current[song.id] = now;
+    try {
+      await fetch('/api/verse-songs/progress', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verseSongId: song.id, userEmail, last_position_seconds: Math.floor(seconds), completed }),
+      });
+    } catch { /* progress is best-effort */ }
+  };
+
+  const handleEnded = async (song: Song) => { setPlayingId(null); setTimes(t => ({ ...t, [song.id]: 0 })); };
+
+  const handleLike = async (song: Song) => {
+    const liked = !song.user_liked;
+    setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_liked: liked, likes_count: Math.max(0, s.likes_count + (liked ? 1 : -1)) } : s));
+    if (!userEmail) return;
+    try {
+      const res = await fetch('/api/verse-songs/likes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verseSongId: song.id, userEmail, liked }),
+      });
+      if (!res.ok) throw new Error('like failed');
+    } catch {
+      setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_liked: !liked, likes_count: Math.max(0, s.likes_count + (liked ? -1 : 1)) } : s));
+    }
+  };
+
+  const handleFavorite = async (song: Song) => {
     const favorited = !song.user_favorited;
     setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_favorited: favorited } : s));
-    player.toggleFavorite(song);
+    if (!userEmail) return;
+    try {
+      const res = await fetch('/api/verse-songs/favorites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verseSongId: song.id, userEmail, favorited }),
+      });
+      if (!res.ok) throw new Error('favorite failed');
+    } catch {
+      setSongs(prev => prev.map(s => s.id === song.id ? { ...s, user_favorited: !favorited } : s));
+    }
   };
 
   // ── Pagination: 6 per row × 6 rows = 36 songs per page ───────────
@@ -263,7 +299,7 @@ export default function VerseSongsSeriesPage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         <Link href="/verse-songs" className="inline-flex items-center gap-1 text-sm text-purple-300 hover:text-purple-200 font-semibold mb-5">
-          <ChevronLeft size={16} /> Back to Verse-Songs
+          ← Back to Verse Songs
         </Link>
 
         {/* Series hero */}
@@ -273,7 +309,7 @@ export default function VerseSongsSeriesPage() {
               <Image src={series.thumbnail} alt={series.title} fill className="object-cover" sizes="128px" />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700">
-                <Music size={40} className="text-white opacity-60" />
+                ♫
               </div>
             )}
           </div>
@@ -282,8 +318,8 @@ export default function VerseSongsSeriesPage() {
             {series?.description && <p className="text-white/60 mt-1.5 text-sm sm:text-base">{series.description}</p>}
             <span className="inline-block mt-3 px-3 py-1 rounded-full bg-purple-600 text-white text-xs font-bold shadow">🎵 {songs.length} Songs</span>
             {songs.length > 0 && (
-              <button onClick={() => player.playQueue(songs, songs[0])} className="ml-2 mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-amber-400 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95">
-                <Play className="w-3.5 h-3.5" fill="currentColor" /> Play All
+              <button onClick={() => togglePlay(songs[0])} className="ml-2 mt-3 inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-amber-400 text-slate-950 text-xs font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95">
+                ▶ Play All
               </button>
             )}
           </div>
@@ -296,22 +332,21 @@ export default function VerseSongsSeriesPage() {
 
         {loadError ? (
           <div className="text-center py-16">
-            <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            ♫
             <p className="text-white/70 mb-4">Couldn&apos;t load this series. Check your connection and try again.</p>
             <button onClick={loadAll} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-400 text-slate-950 text-sm font-bold shadow-lg shadow-amber-500/30 transition hover:scale-105">
-              <RefreshCw className="w-4 h-4" /> Retry
+              ↻ Retry
             </button>
           </div>
         ) : songs.length === 0 ? (
           <div className="text-center py-16 text-white/50">
-            <Music className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            ♫
             <p>No songs in this series yet.</p>
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
             {pageSongs.map(song => {
-              const isCurrent = player.currentSong?.id === song.id;
-              const isPlaying = isCurrent && player.isPlaying;
+              const isPlaying = playingId === song.id;
               return (
                 <article key={song.id} className="group bg-[#1d1840] rounded-2xl overflow-hidden border border-white/10 shadow-xl hover:shadow-2xl hover:border-amber-400/30 transition-all">
                   {/* Cover — tap the play button to play */}
@@ -320,15 +355,15 @@ export default function VerseSongsSeriesPage() {
                       <Image src={song.thumbnail} alt={song.title} fill className="object-cover group-hover:scale-105 transition-transform duration-500" sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 16vw" />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-indigo-600 to-purple-700">
-                        <Music size={48} strokeWidth={1.5} className="text-white opacity-60" />
+                        ♫
                       </div>
                     )}
                     <button
-                      onClick={() => player.playQueue(songs, song)}
+                      onClick={() => togglePlay(song)}
                       className={`absolute inset-0 m-auto w-12 h-12 rounded-full flex items-center justify-center transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950 shadow-lg shadow-amber-500/50' : 'bg-purple-600 text-white shadow-lg shadow-purple-600/50'}`}
                       aria-label={isPlaying ? 'Pause' : 'Play'}
                     >
-                      {isPlaying ? <Pause className="w-5 h-5" fill="currentColor" /> : <Play className="w-5 h-5 ml-0.5" fill="currentColor" />}
+                      {isPlaying ? '❚❚' : '▶'}
                     </button>
                   </div>
 
@@ -336,31 +371,28 @@ export default function VerseSongsSeriesPage() {
                     <h3 className="font-bold text-sm leading-snug mb-1 line-clamp-1">{song.title}</h3>
                     {song.description && <p className="text-white/60 text-xs line-clamp-2 mb-2">{song.description}</p>}
 
-                    {/* Play row — audio comes from the floating global player, not this card */}
                     <div className="rounded-xl bg-black/30 border border-white/10 px-2 py-2 mb-2 flex items-center gap-2">
-                      <button
-                        onClick={() => player.playQueue(songs, song)}
-                        className={`shrink-0 p-2 rounded-full transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950' : 'bg-white text-slate-950'}`}
-                        aria-label={isPlaying ? 'Pause' : 'Play'}
-                      >
-                        {isPlaying ? <Pause className="w-3 h-3" fill="currentColor" /> : <Play className="w-3 h-3 ml-0.5" fill="currentColor" />}
+                      <button onClick={() => togglePlay(song)} className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-[11px] transition-all hover:scale-110 active:scale-95 ${isPlaying ? 'bg-amber-400 text-slate-950' : 'bg-white text-slate-950'}`} aria-label={isPlaying ? 'Pause' : 'Play'}>
+                        {isPlaying ? '❚❚' : '▶'}
                       </button>
-                      <span className="text-[11px] font-medium text-white/70 truncate">{isCurrent ? (isPlaying ? 'Now playing' : 'Paused') : 'Play'}</span>
+                      <span className="text-[11px] font-medium text-white/70 truncate">{isPlaying ? 'Now playing' : (playingId === song.id ? 'Paused' : 'Play')}</span>
                       <span className="ml-auto text-[11px] font-medium tabular-nums text-white/70 shrink-0">{fmt(song.duration)}</span>
                     </div>
+                      
+
                     <p className="text-[11px] text-white/60 mb-2">Duration {fmt(song.duration)} · ❤ {song.likes_count}</p>
 
                     <div className="flex items-center gap-1.5 mb-1.5">
                       <button onClick={() => handleLike(song)} className={`flex-1 py-1.5 px-1 rounded-full text-[11px] font-semibold flex items-center justify-center gap-1 transition ${song.user_liked ? 'bg-red-500 text-white' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
-                        <Heart size={11} fill={song.user_liked ? 'white' : 'none'} /> Like
+                        ♥ Like
                       </button>
                       <button onClick={() => handleFavorite(song)} className={`flex-1 py-1.5 px-1 rounded-full text-[11px] font-semibold flex items-center justify-center gap-1 transition ${song.user_favorited ? 'bg-amber-400 text-slate-950' : 'bg-white/10 hover:bg-white/20 text-white'}`}>
-                        <Bookmark size={11} fill={song.user_favorited ? 'currentColor' : 'none'} /> Save
+                        🔖 Save
                       </button>
                     </div>
                     {/* Buy / Download — goes to the Album Store, not a free file */}
                     <Link href={`/verse-songs/store?album=${seriesId}`} className="w-full py-1.5 px-1 rounded-full text-[11px] font-bold flex items-center justify-center gap-1 bg-gradient-to-br from-amber-300 to-yellow-600 text-slate-950 shadow-lg shadow-amber-500/30 transition hover:scale-105 active:scale-95" title="Buy the album to download this song">
-                      <Lock size={11} /> Download
+                      🔒 Download
                     </Link>
                   </div>
                 </article>
