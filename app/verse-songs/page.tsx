@@ -240,12 +240,6 @@ export default function VerseSongsLibraryPage() {
   }
 
   function handleEnded() {}
-    if (repeatMode === 'off') {
-      const idx = queue.findIndex(s => s.id === currentSong?.id);
-      if (idx >= 0 && idx === queue.length - 1) { setIsPlaying(false); return; }
-    }
-    playNext();
-  }
 
   function applyVolume(v: number, muted?: boolean) {
     setVolume(v);
