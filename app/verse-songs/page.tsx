@@ -20,13 +20,13 @@ function fmt(s: number) {
 
 export default function GlobalVerseSongPlayer() {
   const router = useRouter();
+  const [song, setSong] = useState<Song | null>(null);
+  const [queue, setQueue] = useState<Song[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const queueRef = useRef<Song[]>([]);
   useEffect(() => { queueRef.current = queue; }, [queue]);
   const songRef = useRef<Song | null>(null);
   useEffect(() => { songRef.current = song; }, [song]);
-  const [song, setSong] = useState<Song | null>(null);
-  const [queue, setQueue] = useState<Song[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -41,10 +41,20 @@ export default function GlobalVerseSongPlayer() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem("prayread-current-song");
-      if (raw) { const s = JSON.parse(raw); setSong(s); setQueue([s]); }
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s && typeof s === "object" && (s.id || s.mp3_url)) { setSong(s); setQueue([s]); }
+        else { localStorage.removeItem("prayread-current-song"); }
+      }
       const q = localStorage.getItem("prayread-queue");
-      if (q) setQueue(JSON.parse(q));
-    } catch {}
+      if (q) {
+        const parsed = JSON.parse(q);
+        if (Array.isArray(parsed)) setQueue(parsed);
+        else localStorage.removeItem("prayread-queue");
+      }
+    } catch {
+      try { localStorage.removeItem("prayread-current-song"); localStorage.removeItem("prayread-queue"); } catch {}
+    }
   }, []);
 
   const broadcast = useCallback((s: Song | null, playing: boolean, ct: number, dur: number) => {
@@ -115,10 +125,11 @@ export default function GlobalVerseSongPlayer() {
         onPlay={() => { setIsPlaying(true); broadcast(song, true, currentTime, duration); }}
         onPause={() => { setIsPlaying(false); broadcast(song, false, currentTime, duration); }}
         onTimeUpdate={() => { const a = audioRef.current; if (a) { setCurrentTime(a.currentTime); broadcast(song, !a.paused, a.currentTime, a.duration || duration); } }}
-        onLoadedMetadata={() => { const a = audioRef.current; if (a) setDuration(a.duration || song.duration || 0); }}
+        onLoadedMetadata={() => { const a = audioRef.current; if (a) setDuration(a.duration || song?.duration || 0); }}
         onEnded={() => {
           if (repeat) { const a = audioRef.current; if (a) { a.currentTime = 0; a.play().catch(()=>{}); } return; }
           if (!queue.length) return;
+          if (!song) return;
           const idx = queue.findIndex((x: any) => x.id === song.id);
           const next = shuffle ? queue[Math.floor(Math.random() * queue.length)] : queue[(idx + 1) % queue.length];
           if (next) playSong(next, queue);
@@ -141,7 +152,8 @@ export default function GlobalVerseSongPlayer() {
             </div>
             <button onClick={() => setShowFull(true)} className="hidden sm:block px-3 py-1.5 rounded-full bg-white/10 text-xs font-semibold whitespace-nowrap">▲ Full player</button>
             <button onClick={() => window.dispatchEvent(new Event("prayread-toggle"))} className="w-11 h-11 rounded-full bg-[#e9c981] text-[#1a1a1a] font-bold text-lg shrink-0">{isPlaying ? "❚❚" : "▶"}</button>
-            <button onClick={() => { const idx = queue.findIndex((x: any) => x.id === song.id); const n = queue[(idx + 1) % queue.length]; if (n) playSong(n, queue); }} className="px-3 py-1.5 rounded-full bg-white/10 text-xs font-semibold whitespace-nowrap">Next →</button>
+            <button onClick={() => { if (!song) return;
+          const idx = queue.findIndex((x: any) => x.id === song.id); const n = queue[(idx + 1) % queue.length]; if (n) playSong(n, queue); }} className="px-3 py-1.5 rounded-full bg-white/10 text-xs font-semibold whitespace-nowrap">Next →</button>
             <button onClick={() => window.dispatchEvent(new Event("prayread-close"))} className="text-[#f5e9c8]/70 text-lg px-1">✕</button>
           </div>
         </div>
@@ -195,7 +207,7 @@ export default function GlobalVerseSongPlayer() {
                 <div className="mt-5">
                   <h3 className="font-bold text-[#fdf6e3] mb-2">Up next — tap any song to play</h3>
                   <div className="bg-black/70 border border-[#e9c981]/30 rounded-2xl divide-y divide-[#e9c981]/20 max-h-72 overflow-y-auto">
-                    {queue.map((q: any, i: number) => {
+                    {(Array.isArray(queue) ? queue : []).map((q: any, i: number) => {
                       const active = q.id === song.id;
                       return (
                         <button key={q.id} onClick={() => playSong(q, queue)} className={`w-full flex items-center gap-3 px-4 py-3 text-left ${active ? "bg-[#e9c981]" : "hover:bg-black/50"}`}>
