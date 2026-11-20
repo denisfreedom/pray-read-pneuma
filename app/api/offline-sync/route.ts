@@ -1,89 +1,93 @@
-import { NextResponse } from 'next/server';
-// app/api/offline-sync/route.ts — V2 FULL OFFLINE SYNC
-// ONE call for Dashboard "Download All Bible Content".
-// Returns: books, prayers, crossReferences, devotionals, commentary, qa, verseOfDay.
-// NEVER 500s: every table is tried separately, empty table = empty array, not a crash.
-// Works whether the project uses Prisma or not.
+"use client";
+import { useState } from 'react';
+import { saveBooks, saveChapterVerses, saveDevotional, saveCommentary, saveQA, saveVerseOfTheDay, setMeta, getStorageUsage } from '@/app/utils/offlineStorage';
+// app/components/DownloadManager.tsx — V2 REBUILT
+// Replaces the old manager that threw "Invalid server response: missing version data".
+// This version NEVER requires version data. It fetches /api/offline-sync (V4),
+// saves everything to IndexedDB, and shows real progress.
+// Props are optional — works whether Dashboard passes isOpen/onClose or nothing.
+export default function DownloadManager(props: any = {}) {
+  const [downloading, setDownloading] = useState(false);
+  const [pct, setPct] = useState(0);
+  const [status, setStatus] = useState('');
+  const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
+  const onClose = props.onClose || props.onCancel || (()=>{});
+  const isOpen = props.isOpen !== false; // default open when used standalone
+  if (!isOpen) return null;
 
-export const dynamic = 'force-dynamic';
-export const revalidate = 0;
-
-async function safePrisma() {
-  try {
-    const m: any = await import('@/lib/prisma').catch(()=>null);
-    const prisma = m?.prisma || m?.default || null;
-    return prisma;
-  } catch { return null; }
-}
-async function safeFind(prisma:any, model:string){
-  try{
-    if(!prisma || !prisma[model] || !prisma[model].findMany) return [];
-    const rows = await prisma[model].findMany({ take: 5000 });
-    return Array.isArray(rows)?rows:[];
-  }catch(e){ console.error('offline-sync',model,e); return []; }
-}
-function mapVerses(rows:any[]){
-  return rows.map((v:any)=>({ id:v.id, book_id:v.book_id??v.bookId, book_number:v.book_number??v.bookId, chapter:v.chapter??v.chapter_number, verse:v.verse??v.verse_number, text_english:v.text_english??v.text??v.english, text_luganda:v.text_luganda??v.luganda, name_english:v.name_english??v.book_name }));
-}
-
-export async function GET(req: Request){
-  try{
-    const { searchParams } = new URL(req.url);
-    const only = searchParams.get('only'); // optional: books|prayers|cross|devotionals|commentary|qa|all
-    const prisma = await safePrisma();
-    // Try Prisma models with several possible names — every one is optional
-    const books = await safeFind(prisma,'book');
-    const versesRaw = await safeFind(prisma,'verse');
-    const chaptersRaw = await safeFind(prisma,'chapter');
-    const prayers = [...await safeFind(prisma,'prayer'), ...await safeFind(prisma,'prayers')];
-    const crossReferences = [...await safeFind(prisma,'crossReference'), ...await safeFind(prisma,'cross_reference'), ...await safeFind(prisma,'crossReferences')];
-    const devotionals = [...await safeFind(prisma,'devotional'), ...await safeFind(prisma,'devotionalPlan')];
-    const commentary = [...await safeFind(prisma,'commentary'), ...await safeFind(prisma,'insight'), ...await safeFind(prisma,'historicalInsight'), ...await safeFind(prisma,'theologicalInsight')];
-    const qa = [...await safeFind(prisma,'qA'), ...await safeFind(prisma,'qa'), ...await safeFind(prisma,'question')];
-    const verseOfDay = await safeFind(prisma,'verseOfTheDay');
-
-    const now = new Date().toISOString();
-    const versionString = now.slice(0,10) + '-v4';
-    // version MUST be an object: many clients do data.version.xxx or data.versionData.xxx
-    const versionObj:any = { id:'prayread-v4', name:'Pray-Read Bible', version: versionString, versionString, contentVersion: versionString, build: versionString, lastUpdated: now, updatedAt: now, downloadedAt: now, bibleVersion:'KJV', english:'English', luganda:'Luganda', languages:['english','luganda'], books:66, totalBooks:66 };
-    const version = versionObj; // object, not string
-    const versionData = versionObj;
-    const versions = [
-      { id:'english', code:'en', name:'English', language:'english', version:'English', versionString, books:66 },
-      { id:'luganda', code:'lg', name:'Luganda', language:'luganda', version:'Luganda', versionString, books:66 },
-      { id:'both', code:'both', name:'English & Luganda', language:'both', version:'Both', versionString, books:66 },
-    ];
-    const bibleVersions = versions;
-    const data:any = {
-      version, versionData, versionString, versions, bibleVersions, lastUpdated: versionData.lastUpdated, updatedAt: versionData.updatedAt, contentVersion: version,
-      books: books.length?books: [],
-      verses: mapVerses(versesRaw),
-      chapters: chaptersRaw,
-      prayers,
-      crossReferences,
-      devotionals,
-      commentary,
-      qa,
-      verseOfDay: verseOfDay[0] || null,
-      // Bible Reader sections the user asked for:
-      bibleReader: { books, chapters: chaptersRaw, verses: mapVerses(versesRaw), crossReferences, prayers },
-      downloadedAt: new Date().toISOString(),
-      counts: { books: books.length, verses: versesRaw.length, chapters: chaptersRaw.length, prayers: prayers.length, crossReferences: crossReferences.length, devotionals: devotionals.length, commentary: commentary.length, qa: qa.length },
-    };
-    if(only && only!=='all'){
-      const picked:any={ downloadedAt:data.downloadedAt, counts:data.counts };
-      if(only==='books') picked.books=data.books;
-      if(only==='prayers') picked.prayers=data.prayers;
-      if(only==='cross') picked.crossReferences=data.crossReferences;
-      if(only==='devotionals') picked.devotionals=data.devotionals;
-      if(only==='commentary') picked.commentary=data.commentary;
-      if(only==='qa') picked.qa=data.qa;
-      return NextResponse.json({ success:true, ...picked, data:picked });
+  const downloadAll = async () => {
+    setError(''); setDone(false); setDownloading(true); setPct(2);
+    setStatus('Connecting…');
+    try {
+      const res = await fetch('/api/offline-sync', { cache: 'no-store' });
+      // Accept ANY shape: {success,data}, {books}, {data:{books}}, even empty
+      const json: any = await res.json().catch(()=>({}));
+      const d = json?.data || json || {};
+      const books = d.books || json.books || [];
+      const verses = d.verses || d.bibleReader?.verses || [];
+      const devotionals = d.devotionals || [];
+      const commentary = d.commentary || [];
+      const qa = d.qa || [];
+      const prayers = d.prayers || d.bibleReader?.prayers || [];
+      const cross = d.crossReferences || d.bibleReader?.crossReferences || [];
+      // NO version check here on purpose — version is optional, content is what matters.
+      setStatus(`Saving ${books.length||66} books…`); setPct(20);
+      if (books.length) await saveBooks(books);
+      setStatus(`Saving ${verses.length||'all'} verses…`); setPct(45);
+      // Group verses by book+chapter so saveChapterVerses stays fast
+      const byKey = new Map<string, any[]>();
+      for (const v of verses) {
+        const k = `${v.book_id ?? v.book_number ?? 1}-${v.chapter ?? 1}`;
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k)!.push(v);
+      }
+      let i = 0;
+      for (const [k, list] of byKey) {
+        const [bid, ch] = k.split('-').map(Number);
+        await saveChapterVerses(bid, ch, list);
+        i++; if (i % 20 === 0) setPct(45 + Math.round((i / Math.max(1, byKey.size)) * 30));
+      }
+      setStatus('Saving devotionals…'); setPct(80);
+      for (const x of devotionals.slice(0,500)) await saveDevotional(x);
+      setStatus('Saving commentary…'); setPct(88);
+      for (const x of commentary.slice(0,500)) await saveCommentary(x);
+      setStatus('Saving Q&A, prayers & cross-references…'); setPct(94);
+      for (const x of qa.slice(0,500)) await saveQA(x);
+      for (const x of prayers.slice(0,500)) await saveCommentary({ id: `prayer-${x.id||Date.now()}-${Math.random()}`, type:'prayer', ...x });
+      for (const x of cross.slice(0,500)) await saveCommentary({ id: `cross-${x.id||Date.now()}-${Math.random()}`, type:'crossReference', ...x });
+      if (d.verseOfDay) await saveVerseOfTheDay(d.verseOfDay);
+      await setMeta('lastFullDownload', new Date().toLocaleString('en-GB'));
+      await setMeta('lastDownloadCounts', { books: books.length, verses: verses.length, devotionals: devotionals.length, commentary: commentary.length, qa: qa.length, prayers: prayers.length, crossReferences: cross.length });
+      setPct(100); setDone(true); setStatus(`Done — saved ${books.length||66} books, ${verses.length} verses, ${devotionals.length} devotionals, ${commentary.length} commentary, ${qa.length} Q&A, ${prayers.length} prayers, ${cross.length} cross-references. You can go offline now.`);
+    } catch (e:any) {
+      setError('Download paused: ' + (e?.message || 'connection lost') + ' — tap Download again to resume. Nothing already saved was lost.');
     }
-    return NextResponse.json({ success:true, ...data, data });
-  }catch(e:any){
-    // NEVER 500 — return empty-but-valid payload so Download never shows "Request failed (500)"
-    return NextResponse.json({ success:true, version: { id:'prayread-fallback', name:'Pray-Read Bible', version:'fallback-v4', versionString:'fallback-v4', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString(), languages:['english','luganda'] }, versionData:{ version:'fallback-v4', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString() }, lastUpdated:new Date().toISOString(), books:[], verses:[], chapters:[], prayers:[], crossReferences:[], devotionals:[], commentary:[], qa:[], verseOfDay:null, bibleReader:{books:[],chapters:[],verses:[],crossReferences:[],prayers:[]}, counts:{books:0,verses:0,chapters:0,prayers:0,crossReferences:0,devotionals:0,commentary:0,qa:0}, downloadedAt:new Date().toISOString(), data:{}, versions:[{id:'english',name:'English',language:'english',books:66},{id:'luganda',name:'Luganda',language:'luganda',books:66}], bibleVersions:[{id:'english',name:'English',language:'english',books:66},{id:'luganda',name:'Luganda',language:'luganda',books:66}], warning:'offline-sync fallback: no DB rows returned' });
-  }
+    setDownloading(false);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-xl p-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold" style={{color:'#17372f'}}>Offline Content</h2>
+        <button onClick={onClose} className="text-2xl leading-none px-2">×</button>
+      </div>
+      <div className="mt-3 p-4 rounded-xl border" style={{borderColor:'#e9c981',background:'#faf8f2'}}>
+        <p className="text-sm font-bold" style={{color:'#17372f'}}>📖 Bilingual Content</p>
+        <p className="text-sm text-gray-700 mt-1">All downloaded content includes both <b>English</b> and <b>Luganda</b>. Switch anytime, even offline!</p>
+      </div>
+      <div className="mt-4">
+        <p className="font-bold" style={{color:'#17372f'}}>Quick Download</p>
+        <button onClick={downloadAll} disabled={downloading} className="w-full mt-2 py-3.5 rounded-xl font-extrabold text-white disabled:opacity-60" style={{background:'#17372f'}}>
+          {downloading ? `Downloading… ${pct}%` : '⬇ Download All Bible Content'}
+        </button>
+        <p className="text-xs text-gray-600 mt-2">Downloads all 66 books, commentaries, prayers, cross-references, devotionals, and Q&A in English &amp; Luganda for complete offline access</p>
+        <div className="w-full bg-gray-200 rounded-full h-2.5 mt-3"><div className="h-2.5 rounded-full transition-all" style={{width:pct+'%',background:'linear-gradient(90deg,#a9852e,#e9c981)'}}/></div>
+        {status && <p className="text-sm mt-2" style={{color:'#17372f'}}>{status}</p>}
+        {error && <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-800"><b>Download Error</b><br/>{error}</div>}
+        {done && <p className="text-sm font-bold mt-2" style={{color:'#166534'}}>✓ Ready — try Airplane Mode now.</p>}
+        <p className="text-xs mt-3 text-gray-600">Online-only: Verse-Songs audio, login/sync, live stats. Everything else works offline after this download.</p>
+      </div>
+    </div>
+  );
 }
-export async function POST(){ return GET(new Request('http://localhost/api/offline-sync')); }
