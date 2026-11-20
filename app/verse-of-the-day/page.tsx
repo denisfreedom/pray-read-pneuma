@@ -1,4 +1,7 @@
 "use client";
+
+export const dynamic = 'force-dynamic';
+// V3: skip static prerender — fixes “Objects are not valid as a React child” build failure
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
@@ -83,7 +86,7 @@ export default function VerseOfTheDayPage() {
     } catch { return ''; }
   })();
 
-  const ref = verse ? `${verse.name_english} ${verse.chapter}:${verse.verse}` : '';
+  const ref: string = verse ? `${verse.name_english} ${verse.chapter}:${verse.verse}` : '';
   const bookNum = verse ? (verse.book_number ?? verse.book_id ?? 1) : 1;
   const readerUrl = verse ? `/bible-reader/${bookNum}/${verse.chapter}#verse-${verse.verse}` : '/bible-reader';
   const shareText = verse ? `✨ Verse of the Day — ${ref}\n\n"${verse.text_english}"\n\n👉 Read more: https://prayreadbible.org${readerUrl}` : '';
@@ -120,7 +123,7 @@ export default function VerseOfTheDayPage() {
         </div>
       </header>
       <div className="max-w-3xl mx-auto px-4 py-10 md:py-14">
-        {{/* ART HEADER — front emerald + gold, same shape as before */}}
+        {/* ART HEADER — front emerald + gold, same shape as before */}
         <div className="relative overflow-hidden rounded-[28px] text-center" style={{ background: 'linear-gradient(135deg,#17372f 0%,#1d4035 45%,#a9852e 100%)', border: '1px solid #e9c981' }}>
           <div style={{ position: 'absolute', right: -30, top: -30, width: 170, height: 170, borderRadius: '50%', border: '22px solid rgba(233,201,129,0.18)' }} />
           <div style={{ position: 'absolute', right: 40, top: 24, width: 90, height: 90, borderRadius: '50%', border: '2px solid rgba(233,201,129,0.35)' }} />
