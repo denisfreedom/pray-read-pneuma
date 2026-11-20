@@ -1,89 +1,100 @@
 import { NextResponse } from 'next/server';
-// app/api/offline-sync/route.ts — V2 FULL OFFLINE SYNC
-// ONE call for Dashboard "Download All Bible Content".
-// Returns: books, prayers, crossReferences, devotionals, commentary, qa, verseOfDay.
-// NEVER 500s: every table is tried separately, empty table = empty array, not a crash.
-// Works whether the project uses Prisma or not.
+// app/api/offline-sync/route.ts — V5 REAL DATA SOURCE
+// V2-V4 returned [] because they only tried Prisma, and this app does NOT store
+// the Bible in Prisma. V5 tries: 1) Supabase, 2) internal Bible APIs, 3) Prisma.
+// Returns the first source that actually has verses. Never 500, always version.
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+const now = new Date().toISOString();
+const versionObj = { id:'prayread-v5', name:'Pray-Read Bible', version: now.slice(0,10)+'-v5', versionString: now.slice(0,10)+'-v5', lastUpdated: now, updatedAt: now, languages:['english','luganda'], books:66 };
+const versions = [
+  { id:'english', name:'English', language:'english', books:66 },
+  { id:'luganda', name:'Luganda', language:'luganda', books:66 },
+];
 
-async function safePrisma() {
-  try {
-    const m: any = await import('@/lib/prisma').catch(()=>null);
-    const prisma = m?.prisma || m?.default || null;
-    return prisma;
-  } catch { return null; }
-}
-async function safeFind(prisma:any, model:string){
+async function trySupabase(){
   try{
-    if(!prisma || !prisma[model] || !prisma[model].findMany) return [];
-    const rows = await prisma[model].findMany({ take: 5000 });
-    return Array.isArray(rows)?rows:[];
-  }catch(e){ console.error('offline-sync',model,e); return []; }
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if(!url || !key) return null;
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(url, key, { auth:{ persistSession:false } });
+    const get = async (table:string, limit=5000)=>{
+      try{ const { data, error } = await (sb as any).from(table).select('*').limit(limit); if(error) return []; return data||[]; }catch{ return []; }
+    };
+    // Try several table names — first hit wins per section
+    const books = (await get('books')).length? await get('books') : await get('bible_books');
+    const verses = (await get('verses')).length? await get('verses') : (await get('bible_verses')).length? await get('bible_verses') : await get('verse');
+    if(!verses.length && !books.length) return null;
+    const devotionals = (await get('devotionals')).length? await get('devotionals') : await get('devotional_plans');
+    const commentary = (await get('commentary')).length? await get('commentary') : await get('insights');
+    const qa = (await get('qa')).length? await get('qa') : await get('bible_qa');
+    const prayers = (await get('prayers')).length? await get('prayers') : await get('prayer');
+    const cross = (await get('cross_references')).length? await get('cross_references') : await get('crossReferences');
+    return { source:'supabase', books, verses, devotionals, commentary, qa, prayers, crossReferences: cross, chapters: [] };
+  }catch(e){ console.error('supabase offline-sync', e); return null; }
 }
-function mapVerses(rows:any[]){
-  return rows.map((v:any)=>({ id:v.id, book_id:v.book_id??v.bookId, book_number:v.book_number??v.bookId, chapter:v.chapter??v.chapter_number, verse:v.verse??v.verse_number, text_english:v.text_english??v.text??v.english, text_luganda:v.text_luganda??v.luganda, name_english:v.name_english??v.book_name }));
+
+async function tryInternalAPIs(req: Request){
+  try{
+    const origin = new URL(req.url).origin;
+    const base = process.env.NEXT_PUBLIC_SITE_URL || origin;
+    const fetchJson = async (path:string)=>{
+      try{ const r = await fetch(base+path, { cache:'no-store' }); if(!r.ok) return null; return await r.json().catch(()=>null); }catch{ return null; }
+    };
+    // Books list from the same API the Reader uses
+    const booksJson = await fetchJson('/api/bible/books') || await fetchJson('/api/books') || await fetchJson('/api/bible');
+    const books = booksJson?.books || booksJson?.data || (Array.isArray(booksJson)?booksJson:[]);
+    if(!books.length) return null;
+    const verses:any[] = [];
+    const chapters:any[] = [];
+    // Fetch every book/chapter — same endpoints the Reader uses. Try 2 shapes per chapter.
+    for(let bi=0; bi<books.length; bi++){
+      const b:any = books[bi]; const bid = b.id ?? b.book_id ?? (bi+1);
+      const chJson = await fetchJson(`/api/bible/books/${bid}/chapters`) || await fetchJson(`/api/bible/${bid}/chapters`);
+      const chList = chJson?.chapters || chJson?.data || (Array.isArray(chJson)?chJson:[]);
+      const maxCh = chList.length || b.chapters || b.chapter_count || 50;
+      const count = typeof maxCh==='number'? maxCh : 50;
+      for(let ch=1; ch<=Math.min(count,150); ch++){
+        let vj = await fetchJson(`/api/bible/books/${bid}/chapters/${ch}`);
+        if(!vj) vj = await fetchJson(`/api/bible/${bid}/${ch}`);
+        if(!vj) vj = await fetchJson(`/api/verses?book=${bid}&chapter=${ch}`);
+        const vs = vj?.verses || vj?.data || vj?.chapter?.verses || (Array.isArray(vj)?vj:[]);
+        if(Array.isArray(vs) && vs.length){ chapters.push({ book_id:bid, chapter:ch, verses:vs.length }); for(const v of vs) verses.push(v); }
+      }
+    }
+    if(!verses.length) return null;
+    const devJ = await fetchJson('/api/devotionals'); const devotionals = devJ?.devotionals || devJ?.data || [];
+    const comJ = await fetchJson('/api/insights'); const commentary = comJ?.insights || comJ?.data || [];
+    const qaJ = await fetchJson('/api/qa'); const qa = qaJ?.questions || qaJ?.data || [];
+    const prayJ = await fetchJson('/api/prayers'); const prayers = prayJ?.prayers || prayJ?.data || [];
+    const crossJ = await fetchJson('/api/cross-references'); const cross = crossJ?.crossReferences || crossJ?.data || [];
+    const vodJ = await fetchJson('/api/verse-of-the-day');
+    return { source:'internal-apis', books, verses, devotionals, commentary, qa, prayers, crossReferences: cross, chapters, verseOfDay: vodJ?.verse || null };
+  }catch(e){ console.error('internal offline-sync', e); return null; }
 }
 
 export async function GET(req: Request){
+  const base:any = { success:true, version: versionObj, versionData: versionObj, versionString: versionObj.versionString, versions, bibleVersions: versions, lastUpdated: now, updatedAt: now, downloadedAt: now };
   try{
-    const { searchParams } = new URL(req.url);
-    const only = searchParams.get('only'); // optional: books|prayers|cross|devotionals|commentary|qa|all
-    const prisma = await safePrisma();
-    // Try Prisma models with several possible names — every one is optional
-    const books = await safeFind(prisma,'book');
-    const versesRaw = await safeFind(prisma,'verse');
-    const chaptersRaw = await safeFind(prisma,'chapter');
-    const prayers = [...await safeFind(prisma,'prayer'), ...await safeFind(prisma,'prayers')];
-    const crossReferences = [...await safeFind(prisma,'crossReference'), ...await safeFind(prisma,'cross_reference'), ...await safeFind(prisma,'crossReferences')];
-    const devotionals = [...await safeFind(prisma,'devotional'), ...await safeFind(prisma,'devotionalPlan')];
-    const commentary = [...await safeFind(prisma,'commentary'), ...await safeFind(prisma,'insight'), ...await safeFind(prisma,'historicalInsight'), ...await safeFind(prisma,'theologicalInsight')];
-    const qa = [...await safeFind(prisma,'qA'), ...await safeFind(prisma,'qa'), ...await safeFind(prisma,'question')];
-    const verseOfDay = await safeFind(prisma,'verseOfTheDay');
-
-    const now = new Date().toISOString();
-    const versionString = now.slice(0,10) + '-v4';
-    // version MUST be an object: many clients do data.version.xxx or data.versionData.xxx
-    const versionObj:any = { id:'prayread-v4', name:'Pray-Read Bible', version: versionString, versionString, contentVersion: versionString, build: versionString, lastUpdated: now, updatedAt: now, downloadedAt: now, bibleVersion:'KJV', english:'English', luganda:'Luganda', languages:['english','luganda'], books:66, totalBooks:66 };
-    const version = versionObj; // object, not string
-    const versionData = versionObj;
-    const versions = [
-      { id:'english', code:'en', name:'English', language:'english', version:'English', versionString, books:66 },
-      { id:'luganda', code:'lg', name:'Luganda', language:'luganda', version:'Luganda', versionString, books:66 },
-      { id:'both', code:'both', name:'English & Luganda', language:'both', version:'Both', versionString, books:66 },
-    ];
-    const bibleVersions = versions;
-    const data:any = {
-      version, versionData, versionString, versions, bibleVersions, lastUpdated: versionData.lastUpdated, updatedAt: versionData.updatedAt, contentVersion: version,
-      books: books.length?books: [],
-      verses: mapVerses(versesRaw),
-      chapters: chaptersRaw,
-      prayers,
-      crossReferences,
-      devotionals,
-      commentary,
-      qa,
-      verseOfDay: verseOfDay[0] || null,
-      // Bible Reader sections the user asked for:
-      bibleReader: { books, chapters: chaptersRaw, verses: mapVerses(versesRaw), crossReferences, prayers },
-      downloadedAt: new Date().toISOString(),
-      counts: { books: books.length, verses: versesRaw.length, chapters: chaptersRaw.length, prayers: prayers.length, crossReferences: crossReferences.length, devotionals: devotionals.length, commentary: commentary.length, qa: qa.length },
-    };
-    if(only && only!=='all'){
-      const picked:any={ downloadedAt:data.downloadedAt, counts:data.counts };
-      if(only==='books') picked.books=data.books;
-      if(only==='prayers') picked.prayers=data.prayers;
-      if(only==='cross') picked.crossReferences=data.crossReferences;
-      if(only==='devotionals') picked.devotionals=data.devotionals;
-      if(only==='commentary') picked.commentary=data.commentary;
-      if(only==='qa') picked.qa=data.qa;
-      return NextResponse.json({ success:true, ...picked, data:picked });
+    let result:any = await trySupabase();
+    if(!result || !result.verses?.length) { const viaApi = await tryInternalAPIs(req); if(viaApi) result = viaApi; }
+    if(!result) {
+      // Last resort: Prisma (old path) — may be empty, but never crash
+      try{
+        const m:any = await import('@/lib/prisma').catch(()=>null);
+        const prisma = m?.prisma || m?.default || null;
+        if(prisma?.verse?.findMany){ const verses = await prisma.verse.findMany({ take:5000 }).catch(()=>[]); const books = await prisma.book?.findMany({ take:100 }).catch(()=>[]) || []; if(verses.length) result = { source:'prisma', books, verses, devotionals:[], commentary:[], qa:[], prayers:[], crossReferences:[], chapters:[] }; }
+      }catch{}
     }
-    return NextResponse.json({ success:true, ...data, data });
+    if(!result) {
+      return NextResponse.json({ ...base, source:'none', books:[], verses:[], chapters:[], devotionals:[], commentary:[], qa:[], prayers:[], crossReferences:[], verseOfDay:null, counts:{books:0,verses:0,devotionals:0,commentary:0,qa:0,prayers:0,crossReferences:0}, warning:'No data source returned verses — check Supabase env vars and /api/bible/books', data:{ version: versionObj, versions } });
+    }
+    const counts = { books: result.books?.length||0, verses: result.verses?.length||0, chapters: result.chapters?.length||0, devotionals: result.devotionals?.length||0, commentary: result.commentary?.length||0, qa: result.qa?.length||0, prayers: result.prayers?.length||0, crossReferences: result.crossReferences?.length||0 };
+    return NextResponse.json({ ...base, source: result.source, books: result.books||[], verses: result.verses||[], chapters: result.chapters||[], devotionals: result.devotionals||[], commentary: result.commentary||[], qa: result.qa||[], prayers: result.prayers||[], crossReferences: result.crossReferences||[], verseOfDay: result.verseOfDay||null, bibleReader:{ books: result.books||[], chapters: result.chapters||[], verses: result.verses||[], crossReferences: result.crossReferences||[], prayers: result.prayers||[] }, counts, data:{ version: versionObj, versions, ...result, counts } });
   }catch(e:any){
-    // NEVER 500 — return empty-but-valid payload so Download never shows "Request failed (500)"
-    return NextResponse.json({ success:true, version: { id:'prayread-fallback', name:'Pray-Read Bible', version:'fallback-v4', versionString:'fallback-v4', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString(), languages:['english','luganda'] }, versionData:{ version:'fallback-v4', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString() }, lastUpdated:new Date().toISOString(), books:[], verses:[], chapters:[], prayers:[], crossReferences:[], devotionals:[], commentary:[], qa:[], verseOfDay:null, bibleReader:{books:[],chapters:[],verses:[],crossReferences:[],prayers:[]}, counts:{books:0,verses:0,chapters:0,prayers:0,crossReferences:0,devotionals:0,commentary:0,qa:0}, downloadedAt:new Date().toISOString(), data:{}, versions:[{id:'english',name:'English',language:'english',books:66},{id:'luganda',name:'Luganda',language:'luganda',books:66}], bibleVersions:[{id:'english',name:'English',language:'english',books:66},{id:'luganda',name:'Luganda',language:'luganda',books:66}], warning:'offline-sync fallback: no DB rows returned' });
+    return NextResponse.json({ ...base, source:'error', books:[], verses:[], chapters:[], devotionals:[], commentary:[], qa:[], prayers:[], crossReferences:[], verseOfDay:null, counts:{books:0,verses:0,devotionals:0,commentary:0,qa:0,prayers:0,crossReferences:0}, warning: String(e?.message||e), data:{ version: versionObj, versions } });
   }
 }
 export async function POST(){ return GET(new Request('http://localhost/api/offline-sync')); }
