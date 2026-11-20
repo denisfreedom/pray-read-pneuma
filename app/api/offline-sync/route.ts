@@ -42,10 +42,20 @@ export async function GET(req: Request){
     const qa = [...await safeFind(prisma,'qA'), ...await safeFind(prisma,'qa'), ...await safeFind(prisma,'question')];
     const verseOfDay = await safeFind(prisma,'verseOfTheDay');
 
-    const version = new Date().toISOString().slice(0,10) + '-v2';
-    const versionData = { version, lastUpdated: new Date().toISOString(), updatedAt: new Date().toISOString(), build: version, contentVersion: version };
+    const now = new Date().toISOString();
+    const versionString = now.slice(0,10) + '-v4';
+    // version MUST be an object: many clients do data.version.xxx or data.versionData.xxx
+    const versionObj:any = { id:'prayread-v4', name:'Pray-Read Bible', version: versionString, versionString, contentVersion: versionString, build: versionString, lastUpdated: now, updatedAt: now, downloadedAt: now, bibleVersion:'KJV', english:'English', luganda:'Luganda', languages:['english','luganda'], books:66, totalBooks:66 };
+    const version = versionObj; // object, not string
+    const versionData = versionObj;
+    const versions = [
+      { id:'english', code:'en', name:'English', language:'english', version:'English', versionString, books:66 },
+      { id:'luganda', code:'lg', name:'Luganda', language:'luganda', version:'Luganda', versionString, books:66 },
+      { id:'both', code:'both', name:'English & Luganda', language:'both', version:'Both', versionString, books:66 },
+    ];
+    const bibleVersions = versions;
     const data:any = {
-      version, versionData, lastUpdated: versionData.lastUpdated, updatedAt: versionData.updatedAt, contentVersion: version,
+      version, versionData, versionString, versions, bibleVersions, lastUpdated: versionData.lastUpdated, updatedAt: versionData.updatedAt, contentVersion: version,
       books: books.length?books: [],
       verses: mapVerses(versesRaw),
       chapters: chaptersRaw,
@@ -73,7 +83,7 @@ export async function GET(req: Request){
     return NextResponse.json({ success:true, ...data, data });
   }catch(e:any){
     // NEVER 500 — return empty-but-valid payload so Download never shows "Request failed (500)"
-    return NextResponse.json({ success:true, version: 'fallback-v2', versionData:{ version:'fallback-v2', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString() }, lastUpdated:new Date().toISOString(), books:[], verses:[], chapters:[], prayers:[], crossReferences:[], devotionals:[], commentary:[], qa:[], verseOfDay:null, bibleReader:{books:[],chapters:[],verses:[],crossReferences:[],prayers:[]}, counts:{books:0,verses:0,chapters:0,prayers:0,crossReferences:0,devotionals:0,commentary:0,qa:0}, downloadedAt:new Date().toISOString(), data:{}, warning:'offline-sync fallback: no DB rows returned' });
+    return NextResponse.json({ success:true, version: { id:'prayread-fallback', name:'Pray-Read Bible', version:'fallback-v4', versionString:'fallback-v4', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString(), languages:['english','luganda'] }, versionData:{ version:'fallback-v4', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString() }, lastUpdated:new Date().toISOString(), books:[], verses:[], chapters:[], prayers:[], crossReferences:[], devotionals:[], commentary:[], qa:[], verseOfDay:null, bibleReader:{books:[],chapters:[],verses:[],crossReferences:[],prayers:[]}, counts:{books:0,verses:0,chapters:0,prayers:0,crossReferences:0,devotionals:0,commentary:0,qa:0}, downloadedAt:new Date().toISOString(), data:{}, versions:[{id:'english',name:'English',language:'english',books:66},{id:'luganda',name:'Luganda',language:'luganda',books:66}], bibleVersions:[{id:'english',name:'English',language:'english',books:66},{id:'luganda',name:'Luganda',language:'luganda',books:66}], warning:'offline-sync fallback: no DB rows returned' });
   }
 }
 export async function POST(){ return GET(new Request('http://localhost/api/offline-sync')); }
