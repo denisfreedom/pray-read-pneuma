@@ -1,93 +1,66 @@
-"use client";
-import { useState } from 'react';
-import { saveBooks, saveChapterVerses, saveDevotional, saveCommentary, saveQA, saveVerseOfTheDay, setMeta, getStorageUsage } from '@/app/utils/offlineStorage';
-// app/components/DownloadManager.tsx — V2 REBUILT
-// Replaces the old manager that threw "Invalid server response: missing version data".
-// This version NEVER requires version data. It fetches /api/offline-sync (V4),
-// saves everything to IndexedDB, and shows real progress.
-// Props are optional — works whether Dashboard passes isOpen/onClose or nothing.
-export default function DownloadManager(props: any = {}) {
-  const [downloading, setDownloading] = useState(false);
-  const [pct, setPct] = useState(0);
-  const [status, setStatus] = useState('');
-  const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
-  const onClose = props.onClose || props.onCancel || (()=>{});
-  const isOpen = props.isOpen !== false; // default open when used standalone
-  if (!isOpen) return null;
-
-  const downloadAll = async () => {
-    setError(''); setDone(false); setDownloading(true); setPct(2);
-    setStatus('Connecting…');
-    try {
-      const res = await fetch('/api/offline-sync', { cache: 'no-store' });
-      // Accept ANY shape: {success,data}, {books}, {data:{books}}, even empty
-      const json: any = await res.json().catch(()=>({}));
-      const d = json?.data || json || {};
-      const books = d.books || json.books || [];
-      const verses = d.verses || d.bibleReader?.verses || [];
-      const devotionals = d.devotionals || [];
-      const commentary = d.commentary || [];
-      const qa = d.qa || [];
-      const prayers = d.prayers || d.bibleReader?.prayers || [];
-      const cross = d.crossReferences || d.bibleReader?.crossReferences || [];
-      // NO version check here on purpose — version is optional, content is what matters.
-      setStatus(`Saving ${books.length||66} books…`); setPct(20);
-      if (books.length) await saveBooks(books);
-      setStatus(`Saving ${verses.length||'all'} verses…`); setPct(45);
-      // Group verses by book+chapter so saveChapterVerses stays fast
-      const byKey = new Map<string, any[]>();
-      for (const v of verses) {
-        const k = `${v.book_id ?? v.book_number ?? 1}-${v.chapter ?? 1}`;
-        if (!byKey.has(k)) byKey.set(k, []);
-        byKey.get(k)!.push(v);
-      }
-      let i = 0;
-      for (const [k, list] of byKey) {
-        const [bid, ch] = k.split('-').map(Number);
-        await saveChapterVerses(bid, ch, list);
-        i++; if (i % 20 === 0) setPct(45 + Math.round((i / Math.max(1, byKey.size)) * 30));
-      }
-      setStatus('Saving devotionals…'); setPct(80);
-      for (const x of devotionals.slice(0,500)) await saveDevotional(x);
-      setStatus('Saving commentary…'); setPct(88);
-      for (const x of commentary.slice(0,500)) await saveCommentary(x);
-      setStatus('Saving Q&A, prayers & cross-references…'); setPct(94);
-      for (const x of qa.slice(0,500)) await saveQA(x);
-      for (const x of prayers.slice(0,500)) await saveCommentary({ id: `prayer-${x.id||Date.now()}-${Math.random()}`, type:'prayer', ...x });
-      for (const x of cross.slice(0,500)) await saveCommentary({ id: `cross-${x.id||Date.now()}-${Math.random()}`, type:'crossReference', ...x });
-      if (d.verseOfDay) await saveVerseOfTheDay(d.verseOfDay);
-      await setMeta('lastFullDownload', new Date().toLocaleString('en-GB'));
-      await setMeta('lastDownloadCounts', { books: books.length, verses: verses.length, devotionals: devotionals.length, commentary: commentary.length, qa: qa.length, prayers: prayers.length, crossReferences: cross.length });
-      setPct(100); setDone(true); setStatus(`Done — saved ${books.length||66} books, ${verses.length} verses, ${devotionals.length} devotionals, ${commentary.length} commentary, ${qa.length} Q&A, ${prayers.length} prayers, ${cross.length} cross-references. You can go offline now.`);
-    } catch (e:any) {
-      setError('Download paused: ' + (e?.message || 'connection lost') + ' — tap Download again to resume. Nothing already saved was lost.');
-    }
-    setDownloading(false);
-  };
-
-  return (
-    <div className="bg-white rounded-2xl shadow-xl p-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold" style={{color:'#17372f'}}>Offline Content</h2>
-        <button onClick={onClose} className="text-2xl leading-none px-2">×</button>
-      </div>
-      <div className="mt-3 p-4 rounded-xl border" style={{borderColor:'#e9c981',background:'#faf8f2'}}>
-        <p className="text-sm font-bold" style={{color:'#17372f'}}>📖 Bilingual Content</p>
-        <p className="text-sm text-gray-700 mt-1">All downloaded content includes both <b>English</b> and <b>Luganda</b>. Switch anytime, even offline!</p>
-      </div>
-      <div className="mt-4">
-        <p className="font-bold" style={{color:'#17372f'}}>Quick Download</p>
-        <button onClick={downloadAll} disabled={downloading} className="w-full mt-2 py-3.5 rounded-xl font-extrabold text-white disabled:opacity-60" style={{background:'#17372f'}}>
-          {downloading ? `Downloading… ${pct}%` : '⬇ Download All Bible Content'}
-        </button>
-        <p className="text-xs text-gray-600 mt-2">Downloads all 66 books, commentaries, prayers, cross-references, devotionals, and Q&A in English &amp; Luganda for complete offline access</p>
-        <div className="w-full bg-gray-200 rounded-full h-2.5 mt-3"><div className="h-2.5 rounded-full transition-all" style={{width:pct+'%',background:'linear-gradient(90deg,#a9852e,#e9c981)'}}/></div>
-        {status && <p className="text-sm mt-2" style={{color:'#17372f'}}>{status}</p>}
-        {error && <div className="mt-3 p-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-800"><b>Download Error</b><br/>{error}</div>}
-        {done && <p className="text-sm font-bold mt-2" style={{color:'#166534'}}>✓ Ready — try Airplane Mode now.</p>}
-        <p className="text-xs mt-3 text-gray-600">Online-only: Verse-Songs audio, login/sync, live stats. Everything else works offline after this download.</p>
-      </div>
-    </div>
-  );
-}
+14:11:37.350 Running build in Washington, D.C., USA (East) – iad1
+14:11:37.350 Build machine configuration: 2 cores, 8 GB
+14:11:37.493 Cloning github.com/denisfreedom/pray-read-pneuma (Branch: main, Commit: cf79de6)
+14:11:40.198 Cloning completed: 2.705s
+14:11:40.231 Found .vercelignore
+14:11:40.242 Removed 16 ignored files defined in .vercelignore
+14:11:40.242   /public/BULK_IMPORT_GUIDE.md
+14:11:40.242   /public/BULK_IMPORT_READY.md
+14:11:40.242   /public/BULK_IMPORT_TEST_GUIDE.md
+14:11:40.242   /public/CHATGPT_PROMPTS.md
+14:11:40.242   /public/FULL_JSON_TEMPLATE_WITH_CROSS_REFERENCES.json
+14:11:40.242   /public/IMPORT_SETUP_COMPLETE.md
+14:11:40.242   /public/JSON_BULK_IMPORT_FORMAT.md
+14:11:40.242   /public/QUICK_START_CHAPTER_UPLOAD.txt
+14:11:40.242   /public/SINGLE_CHAPTER_JSON_TEMPLATE.json
+14:11:40.242   /public/test-genesis-kjv-complete.json
+14:11:40.340 Restored build cache from previous deployment (HEarnin5cvEeybMLoh6RKbyDV9Us)
+14:11:42.297 Running "vercel build"
+14:11:42.313 Vercel CLI 66.2.0
+14:11:42.699 Warning: Due to "engines": { "node": ">=18.17.0" } in your `package.json` file, the Node.js Version defined in your Project Settings ("22.x") will not apply, Node.js Version "26.x" will be used instead. Learn More: https://vercel.link/node-version
+14:11:42.710 Warning: Detected "engines": { "node": ">=18.17.0" } in your `package.json` that will automatically upgrade when a new major Node.js Version is released. Learn More: https://vercel.link/node-version
+14:11:42.710 Installing dependencies...
+14:11:43.543 npm warn Unknown env config "cache-dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+14:11:43.804 
+14:11:43.804 up to date in 747ms
+14:11:43.804 
+14:11:43.804 38 packages are looking for funding
+14:11:43.804   run `npm fund` for details
+14:11:43.805 npm warn install-scripts 1 package has install scripts not yet covered by allowScripts:
+14:11:43.805 npm warn install-scripts   sharp@0.34.5 (install: node install/check.js || npm run build)
+14:11:43.805 npm warn install-scripts
+14:11:43.805 npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
+14:11:43.840 Detected Next.js version: 15.5.14
+14:11:43.845 Running "npm run build"
+14:11:43.966 npm warn Unknown env config "cache-dir". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+14:11:43.990 
+14:11:43.990 > web-app@1.0.0 build
+14:11:43.991 > next build
+14:11:43.991 
+14:11:45.357    ▲ Next.js 15.5.14
+14:11:45.357 
+14:11:45.413    Creating an optimized production build ...
+14:11:53.077 Failed to compile.
+14:11:53.077 
+14:11:53.077 ./app/api/offline-sync/route.ts
+14:11:53.077 Error:   x Expected '>', got 'className'
+14:11:53.077     ,-[/vercel/path0/app/api/offline-sync/route.ts:70:1]
+14:11:53.078  67 |   };
+14:11:53.078  68 | 
+14:11:53.078  69 |   return (
+14:11:53.078  70 |     <div className="bg-white rounded-2xl shadow-xl p-6">
+14:11:53.078     :          ^^^^^^^^^
+14:11:53.078  71 |       <div className="flex items-center justify-between">
+14:11:53.078  72 |         <h2 className="text-xl font-bold" style={{color:'#17372f'}}>Offline Content</h2>
+14:11:53.078  73 |         <button onClick={onClose} className="text-2xl leading-none px-2">×</button>
+14:11:53.078     `----
+14:11:53.078 
+14:11:53.078 Caused by:
+14:11:53.078     Syntax Error
+14:11:53.078 
+14:11:53.078 Import trace for requested module:
+14:11:53.078 ./app/api/offline-sync/route.ts
+14:11:53.078 
+14:11:53.080 
+14:11:53.081 > Build failed because of webpack errors
+14:11:53.122 Error: [BUILD_UTILS_SPAWN_1] Command "npm run build" exited with 1
