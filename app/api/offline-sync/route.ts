@@ -42,7 +42,10 @@ export async function GET(req: Request){
     const qa = [...await safeFind(prisma,'qA'), ...await safeFind(prisma,'qa'), ...await safeFind(prisma,'question')];
     const verseOfDay = await safeFind(prisma,'verseOfTheDay');
 
+    const version = new Date().toISOString().slice(0,10) + '-v2';
+    const versionData = { version, lastUpdated: new Date().toISOString(), updatedAt: new Date().toISOString(), build: version, contentVersion: version };
     const data:any = {
+      version, versionData, lastUpdated: versionData.lastUpdated, updatedAt: versionData.updatedAt, contentVersion: version,
       books: books.length?books: [],
       verses: mapVerses(versesRaw),
       chapters: chaptersRaw,
@@ -70,7 +73,7 @@ export async function GET(req: Request){
     return NextResponse.json({ success:true, ...data, data });
   }catch(e:any){
     // NEVER 500 — return empty-but-valid payload so Download never shows "Request failed (500)"
-    return NextResponse.json({ success:true, books:[], verses:[], chapters:[], prayers:[], crossReferences:[], devotionals:[], commentary:[], qa:[], verseOfDay:null, bibleReader:{books:[],chapters:[],verses:[],crossReferences:[],prayers:[]}, counts:{books:0,verses:0,chapters:0,prayers:0,crossReferences:0,devotionals:0,commentary:0,qa:0}, downloadedAt:new Date().toISOString(), data:{}, warning:'offline-sync fallback: no DB rows returned' });
+    return NextResponse.json({ success:true, version: 'fallback-v2', versionData:{ version:'fallback-v2', lastUpdated:new Date().toISOString(), updatedAt:new Date().toISOString() }, lastUpdated:new Date().toISOString(), books:[], verses:[], chapters:[], prayers:[], crossReferences:[], devotionals:[], commentary:[], qa:[], verseOfDay:null, bibleReader:{books:[],chapters:[],verses:[],crossReferences:[],prayers:[]}, counts:{books:0,verses:0,chapters:0,prayers:0,crossReferences:0,devotionals:0,commentary:0,qa:0}, downloadedAt:new Date().toISOString(), data:{}, warning:'offline-sync fallback: no DB rows returned' });
   }
 }
 export async function POST(){ return GET(new Request('http://localhost/api/offline-sync')); }
