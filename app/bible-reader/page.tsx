@@ -6,6 +6,7 @@ import Link from 'next/link';
 // FIXED: removed useRouter — it was imported + const router = useRouter() but never used (dead code / lint warning)
 
 // app/bible-reader/page.tsx — BOOK LIST (NOT the chapter reader)
+// OFFLINE VERSION of 14-19 Nov LIST-FIXED — same layout/features, offline-first data only.
 // This file = "Choose a book" list. Do NOT edit this to fix the duplicate sidebar.
 // Duplicate sidebar lives in: app/bible-reader/[book]/[chapter]/page.tsx
 
@@ -77,23 +78,44 @@ function BibleReaderContent() {
     };
   }, []);
 
+  // OFFLINE-FIRST PATCH — LAYOUT / JSX / STYLES UNCHANGED (14-19 Nov LIST-FIXED).
+  // Only the DATA SOURCE changed: IndexedDB first, API only as a background refresh.
+  // Old code fetched /api/bible-books FIRST, so in flight mode it waited for the
+  // network to fail before ever reading the cache — and if the cache read then
+  // failed, the list stayed empty. This version shows the cached list instantly.
   useEffect(() => {
+    let cancelled = false;
     const loadBooks = async () => {
+      // 1) Show cached books INSTANTLY — this is what makes it work offline.
+      try {
+        const { getBooks } = await import('@/app/utils/offlineStorage');
+        const cachedBooks = await getBooks();
+        if (!cancelled && Array.isArray(cachedBooks) && cachedBooks.length > 0) {
+          setBooks(cachedBooks);
+          setLoading(false);
+        }
+      } catch (error) { console.error('Failed to load books from offline storage:', error); }
+      // 2) If nothing cached yet, we still need the network once to fill the cache.
+      // 3) If online, refresh in the BACKGROUND and re-save to IndexedDB.
+      //    Never blank the list while refreshing — setBooks only on success.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) { if (!cancelled) setLoading(false); return; }
       try {
         const response = await fetch('/api/bible-books');
         if (response.ok) {
           const data = await response.json();
-          if (Array.isArray(data)) { setBooks(data); setLoading(false); return; }
+          if (!cancelled && Array.isArray(data) && data.length > 0) {
+            setBooks(data);
+            try {
+              const { saveBooks } = await import('@/app/utils/offlineStorage');
+              await saveBooks(data);
+            } catch {}
+          }
         }
-      } catch { console.log('Online fetch failed, trying offline cache'); }
-      try {
-        const { getBooks } = await import('@/app/utils/offlineStorage');
-        const cachedBooks = await getBooks();
-        if (cachedBooks && cachedBooks.length > 0) setBooks(cachedBooks);
-      } catch (error) { console.error('Failed to load books from offline storage:', error); }
-      finally { setLoading(false); }
+      } catch { /* offline / API down — cached list above already shown */ }
+      finally { if (!cancelled) setLoading(false); }
     };
     loadBooks();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
