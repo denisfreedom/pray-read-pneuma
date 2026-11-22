@@ -1,179 +1,307 @@
 "use client";
-import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link';
-export const dynamic = 'force-dynamic';
-// app/bible-reader/page.tsx — V3 FULL-FEATURED OFFLINE-FIRST, SINGLE PAGE
-// Views: 'books' (grid) + 'chapter' — switching views NEVER navigates, so offline never shows the splash.
-// DB: prayread-offline v2 (same as offlineStorage V2 + DownloadManager V5)
-// Features: book grid, search, OT/NT, chapter intro, highlight, underline, bookmark,
-// Pray-Read, cross-refs, commentary, copy. Highlights/bookmarks saved in IndexedDB.
 
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((res, rej) => {
-    const req = indexedDB.open('prayread-offline', 2);
-    req.onerror = () => rej(req.error);
-    req.onsuccess = () => res(req.result);
-    req.onupgradeneeded = () => { const db = req.result; for (const s of ['books','chapters','verses','devotionals','commentary','qa','verseOfDay','meta','highlights','bookmarks']) { if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: 'id' }); } };
-  });
+import { useState, useEffect, useRef, Suspense, useMemo } from 'react';
+import { Search, BookOpen, ChevronLeft, X, WifiOff, Download, ChevronRight, Sparkles } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+interface Book {
+  id: number;
+  book_number: number;
+  name_english: string;
+  name_luganda: string;
+  testament: string;
+  total_chapters: number;
+  abbreviation_english: string;
+  abbreviation_luganda: string;
 }
-async function getAll(store: string): Promise<any[]> {
-  try { const db = await openDB(); return await new Promise((res) => { const tx = db.transaction(store, 'readonly'); const req = tx.objectStore(store).getAll(); req.onsuccess = () => res((req.result as any[]) || []); req.onerror = () => res([]); }); } catch { return []; }
-}
-async function putIn(store: string, value: any) {
-  try { const db = await openDB(); await new Promise<void>((res) => { const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).put(value); tx.oncomplete = () => res(); tx.onerror = () => res(); }); } catch {}
-}
-async function delFrom(store: string, key: string) {
-  try { const db = await openDB(); await new Promise<void>((res) => { const tx = db.transaction(store, 'readwrite'); tx.objectStore(store).delete(key); tx.oncomplete = () => res(); tx.onerror = () => res(); }); } catch {}
-}
-async function getOne(store: string, key: string): Promise<any | null> {
-  try { const db = await openDB(); return await new Promise((res) => { const tx = db.transaction(store, 'readonly'); const req = tx.objectStore(store).get(key); req.onsuccess = () => res(req.result || null); req.onerror = () => res(null); }); } catch { return null; }
+
+function BibleReaderContent() {
+  const [books, setBooks] = useState<Book[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'old' | 'new'>('old');
+  const [isOffline, setIsOffline] = useState(false);
+  const [downloadedBookIds, setDownloadedBookIds] = useState<Set<number>>(new Set());
+  const router = useRouter();
+  const ntRef = useRef<HTMLDivElement>(null);
+  const otRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const updateOnlineStatus = () => setIsOffline(!navigator.onLine);
+    updateOnlineStatus();
+    window.addEventListener('online', updateOnlineStatus);
+    window.addEventListener('offline', updateOnlineStatus);
+    return () => {
+      window.removeEventListener('online', updateOnlineStatus);
+      window.removeEventListener('offline', updateOnlineStatus);
+    };
+  }, []);
+
+  useEffect(() => {
+    const loadBooks = async () => {
+      try {
+        const response = await fetch('/api/bible-books');
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data)) {
+            setBooks(data);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (error) {
+        console.log('Online fetch failed, trying offline cache');
+      }
+      try {
+        const { getBooks } = await import('@/app/utils/offlineStorage');
+        const cachedBooks = await getBooks();
+        if (cachedBooks && cachedBooks.length > 0) setBooks(cachedBooks);
+      } catch (error) {
+        console.error('Failed to load books from offline storage:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadBooks();
+  }, []);
+
+  useEffect(() => {
+    const checkDownloadedBooks = async () => {
+      try {
+        const { getAllFromStore } = await import('@/app/utils/offlineStorage');
+        const allVerses = await getAllFromStore('verses');
+        const bookIds = new Set<number>();
+        allVerses.forEach((verse: any) => { if (verse.book_id) bookIds.add(verse.book_id); });
+        setDownloadedBookIds(bookIds);
+      } catch (error) {
+        console.error('Error checking downloaded books:', error);
+      }
+    };
+    if (books.length > 0) checkDownloadedBooks();
+  }, [books]);
+
+  const filtered = useMemo(() => {
+    const q = searchTerm.trim().toLowerCase();
+    if (!q) return books;
+    return books.filter(b =>
+      b.name_english?.toLowerCase().includes(q) ||
+      b.name_luganda?.toLowerCase().includes(q) ||
+      b.abbreviation_english?.toLowerCase().includes(q) ||
+      b.abbreviation_luganda?.toLowerCase().includes(q)
+    );
+  }, [books, searchTerm]);
+
+  const oldTestament = useMemo(() => filtered.filter(b => b.testament === 'Old Testament'), [filtered]);
+  const newTestament = useMemo(() => filtered.filter(b => b.testament === 'New Testament'), [filtered]);
+  const otTotal = books.filter(b => b.testament === 'Old Testament').length;
+  const ntTotal = books.filter(b => b.testament === 'New Testament').length;
+
+  const switchTab = (tab: 'old' | 'new') => {
+    setActiveTab(tab);
+    setTimeout(() => {
+      const ref = tab === 'old' ? otRef : ntRef;
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#0F172A]">
+        <div className="text-center">
+          <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-500/30">
+            <BookOpen className="w-7 h-7 text-white" />
+          </div>
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-white/20 border-t-amber-500 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm font-medium">Loading books…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const BookGrid = ({ bookList, testament }: { bookList: Book[]; testament: 'old' | 'new' }) => {
+    const isOT = testament === 'old';
+    return (
+      <div className="grid gap-2.5 sm:gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(108px, 1fr))' }}>
+        {bookList.map(book => {
+          const isDownloaded = downloadedBookIds.has(book.id);
+          return (
+            <Link
+              key={book.id}
+              href={`/bible-reader/${book.book_number}`}
+              className="group relative flex flex-col items-start justify-between rounded-2xl p-3.5 min-h-[108px] bg-white border border-slate-200/80 shadow-[0_1px_2px_rgba(15,23,42,0.06)] hover:shadow-[0_12px_28px_-8px_rgba(15,23,42,0.18)] hover:-translate-y-0.5 hover:border-slate-300 transition-all duration-200 active:scale-[0.98] touch-manipulation overflow-hidden"
+            >
+              <div className={`absolute top-0 left-0 right-0 h-[3px] ${isOT ? 'bg-amber-500' : 'bg-blue-600'}`} />
+              {isDownloaded && (
+                <span className="absolute top-2.5 right-2.5 inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> Offline
+                </span>
+              )}
+              <div className="mt-1">
+                <span className={`block text-[19px] leading-none font-extrabold tracking-tight ${isOT ? 'text-slate-900' : 'text-slate-900'}`}>
+                  {book.abbreviation_english || book.name_english.substring(0, 4)}
+                </span>
+                <span className="block mt-1.5 text-[13px] leading-tight font-semibold text-slate-700 line-clamp-1">
+                  {book.name_english}
+                </span>
+                <span className="block text-[12px] leading-tight text-slate-500 truncate w-full">
+                  {book.name_luganda}
+                </span>
+              </div>
+              <div className="flex items-center justify-between w-full mt-3">
+                <span className={`text-[11px] font-bold px-2 py-1 rounded-full ${isOT ? 'bg-amber-50 text-amber-800 border border-amber-200/70' : 'bg-blue-50 text-blue-800 border border-blue-200/70'}`}>
+                  {book.total_chapters} {book.total_chapters === 1 ? 'chapter' : 'chapters'}
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5 transition-all" />
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-[#F7F5F0] text-slate-900">
+      {/* Top bar */}
+      <div className="sticky top-0 z-30 bg-white/90 backdrop-blur-md border-b border-slate-200/80 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3">
+          <div className="flex items-center gap-2">
+            <Link href="/dashboard" className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-900 text-white text-[13px] font-semibold rounded-xl hover:bg-slate-800 transition-colors">
+              <ChevronLeft className="h-4 w-4" /> Dashboard
+            </Link>
+            <Link href="/" className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 text-slate-700 text-[13px] font-semibold rounded-xl hover:bg-slate-200 transition-colors">
+              <ChevronLeft className="h-4 w-4" /> Home
+            </Link>
+            <div className="ml-auto flex items-center gap-2">
+              {isOffline && (
+                <span className="hidden sm:inline-flex items-center gap-1.5 bg-amber-50 text-amber-800 border border-amber-200 text-xs font-semibold px-2.5 py-1.5 rounded-full">
+                  <WifiOff className="w-3.5 h-3.5" /> Offline · {downloadedBookIds.size} available
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 bg-amber-500 text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">
+                <BookOpen className="w-3.5 h-3.5" /> Bible Reader
+              </span>
+            </div>
+          </div>
+
+          {/* Hero */}
+          <div className="mt-4 mb-3 flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-[26px] sm:text-[32px] leading-[1.1] font-extrabold tracking-tight text-slate-900">
+                Choose a book
+                <span className="block text-slate-500 font-semibold text-[15px] sm:text-base mt-1">Pray · Read · Listen — English &amp; Luganda</span>
+              </h1>
+            </div>
+            <div className="hidden sm:flex shrink-0 items-center gap-2 bg-slate-900 text-white rounded-2xl px-3.5 py-2.5">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              <div className="leading-none">
+                <div className="text-sm font-bold">{books.length} books</div>
+                <div className="text-[11px] text-slate-400 mt-0.5">66 · OT {otTotal} · NT {ntTotal}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Search */}
+          <div className="relative">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search books…  e.g. Psalms, Okubikkulirwa, Philemon"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full pl-10 pr-10 py-3 text-[14px] bg-white border border-slate-300 rounded-2xl shadow-sm focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500 outline-none placeholder:text-slate-400"
+            />
+            {searchTerm && (
+              <button onClick={() => setSearchTerm('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center">
+                <X className="w-3.5 h-3.5 text-slate-600" />
+              </button>
+            )}
+          </div>
+          {searchTerm.trim() && (
+            <p className="mt-2 text-[13px] text-slate-500 font-medium">{filtered.length} result{filtered.length === 1 ? '' : 's'} for “{searchTerm.trim()}”</p>
+          )}
+
+          {/* OT / NT */}
+          <div className="mt-3 flex p-1 bg-slate-100 rounded-2xl">
+            <button
+              onClick={() => switchTab('old')}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-[13px] font-bold transition-all ${activeTab === 'old' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              📖 Old Testament <span className="ml-1 text-xs font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">{otTotal}</span>
+            </button>
+            <button
+              onClick={() => switchTab('new')}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-[13px] font-bold transition-all ${activeTab === 'new' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              📕 New Testament <span className="ml-1 text-xs font-semibold px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-800">{ntTotal}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="bg-slate-900 text-white px-4 py-2.5 text-center text-[13px] font-medium">
+          📵 You&apos;re offline · Only downloaded books are available
+          {downloadedBookIds.size > 0 && <span className="ml-2 px-2 py-0.5 bg-white/15 rounded-full text-xs">{downloadedBookIds.size} book{downloadedBookIds.size > 1 ? 's' : ''} available</span>}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-8 pb-12">
+        {oldTestament.length > 0 && (
+          <section ref={otRef} className="scroll-mt-44">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center text-[15px]">📖</span>
+                <h2 className="text-[17px] font-extrabold tracking-tight">Old Testament</h2>
+              </div>
+              <span className="text-xs font-bold text-amber-800 bg-amber-100 border border-amber-200 px-2.5 py-1 rounded-full">{oldTestament.length} books</span>
+            </div>
+            <BookGrid bookList={oldTestament} testament="old" />
+          </section>
+        )}
+
+        {newTestament.length > 0 && (
+          <section ref={ntRef} className="scroll-mt-44">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-8 h-8 rounded-xl bg-blue-600 text-white flex items-center justify-center text-[15px]">📕</span>
+                <h2 className="text-[17px] font-extrabold tracking-tight">New Testament</h2>
+              </div>
+              <span className="text-xs font-bold text-blue-800 bg-blue-100 border border-blue-200 px-2.5 py-1 rounded-full">{newTestament.length} books</span>
+            </div>
+            <BookGrid bookList={newTestament} testament="new" />
+          </section>
+        )}
+
+        {filtered.length === 0 && (
+          <div className="text-center py-14 bg-white rounded-3xl border border-slate-200">
+            <div className="text-4xl mb-3">📖</div>
+            <p className="font-bold text-slate-800">No books found for “{searchTerm}”</p>
+            <p className="text-sm text-slate-500 mt-1">Try English, Luganda, or abbreviation — e.g. Psalms, Zabbuli, Phil</p>
+            <button onClick={() => setSearchTerm('')} className="mt-4 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-xl">Clear search</button>
+          </div>
+        )}
+
+        <div className="text-center text-[12px] text-slate-400 space-y-1.5 pt-2">
+          <div>Tap any book to open · English name · Luganda name · Chapters</div>
+          {downloadedBookIds.size > 0 && (
+            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-full font-semibold">
+              <Download className="w-3.5 h-3.5" /> {downloadedBookIds.size} book{downloadedBookIds.size > 1 ? 's' : ''} available offline
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function BibleReaderPage() {
-  const [view, setView] = useState<'books' | 'chapter'>('books');
-  const [books, setBooks] = useState<any[]>([]);
-  const [bookId, setBookId] = useState<number>(1);
-  const [chapter, setChapter] = useState<number>(1);
-  const [verses, setVerses] = useState<any[]>([]);
-  const [intro, setIntro] = useState<any | null>(null);
-  const [bookIntro, setBookIntro] = useState<any | null>(null);
-  const [lang, setLang] = useState<'english' | 'luganda' | 'both'>('both');
-  const [loading, setLoading] = useState(true);
-  const [offline, setOffline] = useState(false);
-  const [hasData, setHasData] = useState(false);
-  const [diag, setDiag] = useState('');
-  const [search, setSearch] = useState('');
-  const [testament, setTestament] = useState<'OT' | 'NT'>('OT');
-  const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
-  const [panel, setPanel] = useState<'pray' | 'cross' | 'commentary' | null>(null);
-  const [panelData, setPanelData] = useState<any>(null);
-  const [highlights, setHighlights] = useState<Record<string, 'highlight' | 'underline'>>({});
-  const [bookmarks, setBookmarks] = useState<Record<string, boolean>>({});
-  const [toast, setToast] = useState('');
-
-  const verseKey = (v: number) => `${bookId}-${chapter}-${v}`;
-
-  const loadChapter = useCallback(async (bid: number, ch: number) => {
-    setLoading(true);
-    setOffline(typeof navigator !== 'undefined' && !navigator.onLine);
-    let list: any[] = [];
-    try { const db = await openDB(); const chap: any = await new Promise((res) => { const tx = db.transaction('chapters', 'readonly'); const req = tx.objectStore('chapters').get(`chapter-${bid}-${ch}`); req.onsuccess = () => res(req.result || null); req.onerror = () => res(null); }); if (chap?.verses?.length) list = chap.verses; } catch {}
-    if (!list.length) { const allVerses = await getAll('verses'); list = (allVerses || []).filter((v: any) => Number(v.book_id ?? v.bookId) === Number(bid) && Number(v.chapter) === Number(ch)).sort((a: any, b: any) => Number(a.verse) - Number(b.verse)); }
-    else list = [...list].sort((a: any, b: any) => Number(a.verse) - Number(b.verse));
-    setVerses(list);
-    const allCom = await getAll('commentary');
-    setIntro((allCom || []).find((c: any) => c._table === 'chapter_introductions' && Number(c.book_id) === Number(bid) && Number(c.chapter) === Number(ch)) || null);
-    setBookIntro((allCom || []).find((c: any) => (c._table === 'book_introductions' || c._table === 'book_commentaries') && Number(c.book_id) === Number(bid)) || null);
-    const hl = await getAll('highlights'); const hmap: Record<string, 'highlight' | 'underline'> = {}; hl.forEach((h: any) => { if (h?.verseKey) hmap[h.verseKey] = h.kind || 'highlight'; }); setHighlights(hmap);
-    const bm = await getAll('bookmarks'); const bmap: Record<string, boolean> = {}; bm.forEach((b: any) => { if (b?.verseKey) bmap[b.verseKey] = true; }); setBookmarks(bmap);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { (async () => { const list = await getAll('books'); const sorted = (list || []).sort((a: any, b: any) => (a.book_number ?? a.id) - (b.book_number ?? b.id)); setBooks(sorted); setHasData(sorted.length > 0); const chaps = await getAll('chapters'); const vers = await getAll('verses'); setDiag(`Saved — Books: ${sorted.length} · Chapters: ${chaps.length} · Verses: ${vers.length}`); setLoading(false); })(); }, []);
-  useEffect(() => { const upd = () => { setOffline(!navigator.onLine); if (!navigator.onLine && view === 'chapter') loadChapter(bookId, chapter); }; window.addEventListener('online', upd); window.addEventListener('offline', upd); return () => { window.removeEventListener('online', upd); window.removeEventListener('offline', upd); }; }, [bookId, chapter, view, loadChapter]);
-
-  const openBook = async (bid: number) => { setBookId(bid); setChapter(1); setSelectedVerse(null); setPanel(null); setView('chapter'); await loadChapter(bid, 1); };
-  const goChapter = async (ch: number) => { setChapter(ch); setSelectedVerse(null); setPanel(null); await loadChapter(bookId, ch); };
-
-  const showToast = (t: string) => { setToast(t); setTimeout(() => setToast(''), 2200); };
-  const toggleHighlight = async (kind: 'highlight' | 'underline') => {
-    if (selectedVerse == null) return; const k = verseKey(selectedVerse);
-    if (highlights[k] === kind) { const nh = { ...highlights }; delete nh[k]; setHighlights(nh); await delFrom('highlights', k); }
-    else { setHighlights({ ...highlights, [k]: kind }); await putIn('highlights', { id: k, verseKey: k, bookId, chapter, verse: selectedVerse, kind, savedAt: Date.now() }); }
-  };
-  const toggleBookmark = async () => {
-    if (selectedVerse == null) return; const k = verseKey(selectedVerse);
-    if (bookmarks[k]) { const nb = { ...bookmarks }; delete nb[k]; setBookmarks(nb); await delFrom('bookmarks', k); showToast('Bookmark removed'); }
-    else { setBookmarks({ ...bookmarks, [k]: true }); await putIn('bookmarks', { id: k, verseKey: k, bookId, chapter, verse: selectedVerse, savedAt: Date.now() }); showToast('Bookmarked ✓'); }
-  };
-  const openPanel = async (kind: 'pray' | 'cross' | 'commentary') => {
-    if (selectedVerse == null) return; setPanel(kind);
-    const allCom = await getAll('commentary');
-    if (kind === 'pray') setPanelData((allCom || []).find((c: any) => c._table === 'verse_pray_read' && Number(c.book_id) === Number(bookId) && Number(c.chapter) === Number(chapter) && Number(c.verse) === Number(selectedVerse)) || null);
-    if (kind === 'commentary') setPanelData((allCom || []).find((c: any) => c._table === 'verse_commentaries' && Number(c.book_id) === Number(bookId) && Number(c.chapter) === Number(chapter) && Number(c.verse) === Number(selectedVerse)) || (allCom || []).find((c: any) => c._table === 'chapter_commentaries' && Number(c.book_id) === Number(bookId) && Number(c.chapter) === Number(chapter)) || null);
-    if (kind === 'cross') {
-      const refs = (allCom || []).filter((c: any) => c._table === 'cross_references' && ((Number(c.from_book_id) === Number(bookId) && Number(c.from_chapter) === Number(chapter) && Number(c.from_verse) === Number(selectedVerse)) || (Number(c.book_id) === Number(bookId) && Number(c.chapter) === Number(chapter) && Number(c.verse) === Number(selectedVerse)) || (Number(c.from_book_id) === Number(bookId) && Number(c.from_chapter) === Number(chapter))));
-      setPanelData(refs.slice(0, 30));
-    }
-  };
-  const copyVerse = async () => {
-    if (selectedVerse == null) return; const v = verses.find((x: any) => Number(x.verse) === selectedVerse); if (!v) return;
-    const text = `${book?.name_english} ${chapter}:${selectedVerse} — ${v.text_english}${v.text_luganda ? `\n${v.text_luganda}` : ''}`;
-    try { await navigator.clipboard.writeText(text); showToast('Copied ✓'); } catch { showToast('Copy not available offline'); }
-  };
-
-  const book = books.find((b: any) => Number(b.book_number ?? b.id) === Number(bookId)) || books[0];
-  const totalCh = book?.total_chapters || book?.chapters || 50;
-  const filteredBooks = books.filter((b: any) => { const n = Number(b.book_number ?? b.id); const isOT = n <= 39; if (testament === 'OT' && !isOT) return false; if (testament === 'NT' && isOT) return false; if (search) { const q = search.toLowerCase(); return String(b.name_english || '').toLowerCase().includes(q) || String(b.name_luganda || '').toLowerCase().includes(q); } return true; });
-
-  if (!hasData && !loading) return (<div className="min-h-screen flex items-center justify-center p-6" style={{ background: '#faf8f2' }}><div className="max-w-md text-center bg-white rounded-2xl shadow p-8"><p className="text-4xl">📖</p><h1 className="text-2xl font-bold mt-2" style={{ color: '#17372f' }}>No offline Bible yet</h1><p className="text-sm text-gray-600 mt-2">Connect once, go to Dashboard → Offline Content → Download All Bible Content, then come back here.</p><Link href="/dashboard" className="inline-block mt-4 px-5 py-3 rounded-xl font-bold text-white" style={{ background: '#17372f' }}>Go to Dashboard → Download</Link></div></div>);
-
   return (
-    <div className="min-h-screen" style={{ background: '#faf8f2' }}>
-      <header className="bg-[#17372f] text-[#fdf6e3] sticky top-0 z-40 border-b-4 border-[#e9c981]">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
-          {view === 'chapter' ? <button onClick={() => { setView('books'); setPanel(null); }} className="font-bold text-sm px-3 py-2 rounded-lg" style={{ background: '#e9c981', color: '#17372f' }}>← Books</button> : <Link href="/" className="flex items-center gap-2 font-bold"><img src="/assets/PrayRead-logo.png" alt="Pray-Read" width={38} height={38} className="object-contain rounded" /><span>Pray-Read <span className="text-[#e9c981]">Bible</span></span></Link>}
-          <span className="text-xs font-bold px-3 py-1 rounded-full" style={{ background: offline ? '#FEF3C7' : '#DCFCE7', color: offline ? '#92400E' : '#166534' }}>{offline ? '○ Offline — reading saved Bible' : '● Online'}</span>
-        </div>
-      </header>
-      {toast && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full text-sm font-bold text-white shadow" style={{ background: '#17372f' }}>{toast}</div>}
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        {diag && <p className="text-center text-xs font-bold mb-3" style={{ color: '#17372f' }}>{diag}</p>}
-
-        {view === 'books' ? (
-          <div>
-            <div className="bg-[#1d4035] rounded-2xl p-4 shadow">
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search books... (e.g. Psalms, Philemon)" className="w-full p-3 rounded-xl text-sm" style={{ background: '#faf8f2' }} />
-              <div className="flex gap-2 mt-3"><button onClick={() => setTestament('OT')} className="flex-1 py-2.5 rounded-xl font-bold text-sm" style={{ background: testament === 'OT' ? '#e9c981' : '#17372f', color: testament === 'OT' ? '#17372f' : '#fdf6e3', border: '1px solid #e9c981' }}>📖 Old Testament (39)</button><button onClick={() => setTestament('NT')} className="flex-1 py-2.5 rounded-xl font-bold text-sm" style={{ background: testament === 'NT' ? '#e9c981' : '#17372f', color: testament === 'NT' ? '#17372f' : '#fdf6e3', border: '1px solid #e9c981' }}>📕 New Testament (27)</button></div>
-            </div>
-            <h2 className="font-bold mt-5 mb-3" style={{ color: '#17372f' }}>{testament === 'OT' ? '📖 Old Testament' : '📕 New Testament'} — {filteredBooks.length} books</h2>
-            <div className="grid grid-cols-3 gap-3">{filteredBooks.map((b: any) => { const id = Number(b.book_number ?? b.id); const short = String(b.abbreviation || b.name_english || '').slice(0, 6); return (<button key={id} onClick={() => openBook(id)} className="bg-white rounded-2xl shadow p-3 text-center border" style={{ borderColor: '#e9c981' }}><p className="font-extrabold" style={{ color: '#a9852e' }}>{short}</p><p className="text-xs text-gray-600 truncate">{b.name_luganda || b.name_english}</p><p className="text-xs font-bold mt-1" style={{ color: '#17372f' }}>{b.total_chapters || b.chapters || ''}ch</p><p className="text-[11px] font-bold" style={{ color: '#166534' }}>✓ Offline</p></button>); })}</div>
-          </div>
-        ) : (
-          <div>
-            <div className="bg-white rounded-2xl shadow p-4">
-              <label className="text-xs font-bold tracking-widest" style={{ color: '#a9852e' }}>BOOK — {book?.name_english}{book?.name_luganda ? ` — ${book.name_luganda}` : ''}</label>
-              <div className="flex gap-2 mt-2"><button onClick={() => setView('books')} className="px-3 py-2 rounded-xl text-sm font-bold border" style={{ borderColor: '#e9c981' }}>Change Book</button><select value={bookId} onChange={e => goChapter(1) || setBookId(Number(e.target.value))} onChangeCapture={(e: any) => { setBookId(Number(e.target.value)); loadChapter(Number(e.target.value), 1); }} className="flex-1 p-2 rounded-xl border font-bold" style={{ borderColor: '#e9c981' }}>{books.map((b: any) => { const id = b.book_number ?? b.id; return <option key={id} value={id}>{b.name_english}{b.name_luganda ? ` — ${b.name_luganda}` : ''}</option>; })}</select></div>
-              <label className="text-xs font-bold tracking-widest mt-4 block" style={{ color: '#a9852e' }}>CHAPTER</label>
-              <div className="flex flex-wrap gap-2 mt-1">{Array.from({ length: Math.min(Number(totalCh) || 50, 150) }, (_, i) => i + 1).map(ch => (<button key={ch} onClick={() => goChapter(ch)} className="px-3 py-2 rounded-lg text-sm font-bold" style={{ background: ch === chapter ? '#17372f' : '#faf8f2', color: ch === chapter ? '#fff' : '#17372f', border: '1px solid #e9c981' }}>{ch}</button>))}</div>
-              <div className="flex gap-2 mt-4">{(['english', 'luganda', 'both'] as const).map(k => (<button key={k} onClick={() => setLang(k)} className="px-4 py-2 rounded-full text-sm font-bold" style={{ background: lang === k ? '#17372f' : '#fff', color: lang === k ? '#fff' : '#17372f', border: '1px solid #e9c981' }}>{k === 'english' ? 'English' : k === 'luganda' ? 'Luganda' : 'Both'}</button>))}</div>
-            </div>
-
-            {loading ? <p className="text-center py-10 text-gray-500">Loading {book?.name_english} {chapter}…</p> : verses.length === 0 ? <div className="bg-white rounded-2xl shadow p-6 mt-4 text-center"><p className="font-bold" style={{ color: '#17372f' }}>This chapter is not downloaded yet.</p><Link href="/dashboard" className="inline-block mt-3 px-4 py-2 rounded-xl font-bold text-white" style={{ background: '#17372f' }}>Download</Link></div> : (
-              <>
-                {(intro || bookIntro) && <div className="bg-white rounded-2xl shadow p-5 mt-4"><h2 className="font-bold" style={{ color: '#17372f' }}>{intro ? 'Chapter Introduction' : 'Book Introduction'}</h2><p className="text-sm mt-1 text-gray-700">{String((intro?.introduction_english || intro?.content || '') || (bookIntro?.introduction_english || bookIntro?.content || '')).slice(0, 900)}</p>{bookIntro && intro && <details className="mt-3"><summary className="text-sm font-bold cursor-pointer" style={{ color: '#a9852e' }}>Book Introduction — {book?.name_english}</summary><p className="text-sm mt-2 text-gray-700">{String(bookIntro?.introduction_english || bookIntro?.content || '').slice(0, 1200)}</p></details>}</div>}
-                <div className="bg-white rounded-2xl shadow p-5 md:p-8 mt-4">
-                  <h1 className="text-2xl font-bold text-center" style={{ color: '#17372f', fontFamily: 'Georgia,serif' }}>{book?.name_english} {chapter}</h1>
-                  <p className="text-center text-xs text-gray-500 mt-1">Tap a verse to highlight, pray, cross-reference, or bookmark — all saved offline.</p>
-                  <div className="mt-4 space-y-4">{verses.map((v: any) => { const k = verseKey(Number(v.verse)); const hl = highlights[k]; const bm = bookmarks[k]; return (
-                    <div key={v.id || `${v.chapter}-${v.verse}`} onClick={() => { setSelectedVerse(Number(v.verse)); setPanel(null); }} className="cursor-pointer rounded-xl p-3" style={{ background: hl === 'highlight' ? '#FEF08A' : selectedVerse === Number(v.verse) ? '#faf8f2' : 'transparent', border: selectedVerse === Number(v.verse) ? '1px solid #e9c981' : '1px solid transparent', textDecoration: hl === 'underline' ? 'underline' : 'none', textDecorationColor: '#a9852e', textDecorationThickness: '2px' }}>
-                      <p className="text-lg leading-relaxed" style={{ fontFamily: 'Georgia,serif' }}><sup className="font-bold mr-1" style={{ color: '#a9852e' }}>{v.verse}</sup>{bm && ' 🔖 '}{(lang === 'english' || lang === 'both') && <span>{v.text_english}</span>}{(lang === 'both') && v.text_luganda && <><br /><span className="italic text-gray-600">{v.text_luganda}</span></>}{(lang === 'luganda') && <span className="italic">{v.text_luganda}</span>}</p>
-                    </div>); })}</div>
-
-                  {selectedVerse != null && (
-                    <div className="sticky bottom-4 mt-6 p-3 rounded-2xl shadow-lg bg-white border" style={{ borderColor: '#e9c981' }}>
-                      <p className="text-sm font-bold text-center" style={{ color: '#17372f' }}>Verse {selectedVerse} — Tools</p>
-                      <div className="flex flex-wrap justify-center gap-2 mt-2">
-                        <button onClick={() => toggleHighlight('highlight')} className="px-3 py-2 rounded-full text-xs font-bold" style={{ background: highlights[verseKey(selectedVerse)] === 'highlight' ? '#FEF08A' : '#faf8f2', border: '1px solid #e9c981' }}>🖍 Highlight</button>
-                        <button onClick={() => toggleHighlight('underline')} className="px-3 py-2 rounded-full text-xs font-bold" style={{ background: '#faf8f2', border: '1px solid #e9c981', textDecoration: 'underline' }}>✏ Underline</button>
-                        <button onClick={() => openPanel('pray')} className="px-3 py-2 rounded-full text-xs font-bold text-white" style={{ background: '#17372f' }}>🙏 Pray-Read</button>
-                        <button onClick={() => openPanel('cross')} className="px-3 py-2 rounded-full text-xs font-bold" style={{ background: '#faf8f2', border: '1px solid #e9c981' }}>🔗 Cross-refs</button>
-                        <button onClick={() => openPanel('commentary')} className="px-3 py-2 rounded-full text-xs font-bold" style={{ background: '#faf8f2', border: '1px solid #e9c981' }}>📖 Commentary</button>
-                        <button onClick={toggleBookmark} className="px-3 py-2 rounded-full text-xs font-bold" style={{ background: '#faf8f2', border: '1px solid #e9c981' }}>{bookmarks[verseKey(selectedVerse)] ? '🔖 Saved' : '🔖 Bookmark'}</button>
-                        <button onClick={copyVerse} className="px-3 py-2 rounded-full text-xs font-bold" style={{ background: '#faf8f2', border: '1px solid #e9c981' }}>📋 Copy</button>
-                      </div>
-                      {panel === 'pray' && <div className="mt-3 p-3 rounded-xl" style={{ background: '#faf8f2', border: '1px solid #e9c981' }}><h3 className="font-bold text-sm" style={{ color: '#17372f' }}>🙏 Pray-Read — Verse {selectedVerse}</h3>{panelData ? <><p className="text-sm mt-1">{panelData.pray_read_english || panelData.content || panelData.text_english}</p>{panelData.pray_read_luganda && <p className="text-sm italic text-gray-600 mt-2">{panelData.pray_read_luganda}</p>}</> : <p className="text-sm mt-1 text-gray-600">No Pray-Read saved for this verse yet — check Dashboard → Download again while online.</p>}</div>}
-                      {panel === 'commentary' && <div className="mt-3 p-3 rounded-xl" style={{ background: '#faf8f2', border: '1px solid #e9c981' }}><h3 className="font-bold text-sm" style={{ color: '#17372f' }}>📖 Commentary — Verse {selectedVerse}</h3>{panelData ? <p className="text-sm mt-1">{String(panelData.commentary_english || panelData.content || panelData.text_english || '').slice(0, 1500)}</p> : <p className="text-sm mt-1 text-gray-600">No commentary saved for this verse yet.</p>}</div>}
-                      {panel === 'cross' && <div className="mt-3 p-3 rounded-xl" style={{ background: '#faf8f2', border: '1px solid #e9c981' }}><h3 className="font-bold text-sm" style={{ color: '#17372f' }}>🔗 Cross-references — Verse {selectedVerse}</h3>{Array.isArray(panelData) && panelData.length ? panelData.map((r: any, i: number) => <p key={i} className="text-sm mt-1">• {r.to_book || r.to_book_name || r.reference || r.ref_text || `${r.to_book_id || r.to_book} ${r.to_chapter}:${r.to_verse}`} {r.to_text_english ? `— ${String(r.to_text_english).slice(0, 200)}` : ''}</p>) : <p className="text-sm mt-1 text-gray-600">No cross-references saved for this verse yet.</p>}</div>}
-                    </div>
-                  )}
-                  <div className="flex justify-between mt-6"><button disabled={chapter <= 1} onClick={() => goChapter(chapter - 1)} className="px-4 py-2 rounded-xl font-bold border disabled:opacity-40" style={{ borderColor: '#e9c981' }}>← Prev</button><button disabled={chapter >= Number(totalCh)} onClick={() => goChapter(chapter + 1)} className="px-4 py-2 rounded-xl font-bold text-white disabled:opacity-40" style={{ background: '#17372f' }}>Next →</button></div>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen bg-[#F7F5F0]">Loading...</div>}>
+      <BibleReaderContent />
+    </Suspense>
   );
 }
