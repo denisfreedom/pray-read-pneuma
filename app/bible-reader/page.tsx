@@ -2,22 +2,19 @@
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 export const dynamic = 'force-dynamic';
-// app/bible-reader/page.tsx — V2.1 OFFLINE-FIRST SELF-CONTAINED
+// app/bible-reader/page.tsx — V2.2 OFFLINE-FIRST — MATCHES offlineStorage V2
 // NO import from @/app/utils/offlineReader — all IndexedDB code is inside this file.
 // If offline, reads IndexedDB immediately. No network, no hanging loader.
 
 // ---- IndexedDB helpers (same DB DownloadManager V5 writes to) ----
 function openDB(): Promise<IDBDatabase> {
   return new Promise((res, rej) => {
-    const req = indexedDB.open('pray-read-offline', 1);
+    const req = indexedDB.open('prayread-offline', 2);
     req.onerror = () => rej(req.error);
     req.onsuccess = () => res(req.result);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains('books')) db.createObjectStore('books', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains('verses')) db.createObjectStore('verses', { keyPath: 'id' });
-      if (!db.objectStoreNames.contains('commentary')) db.createObjectStore('commentary', { keyPath: 'id', autoIncrement: true });
-      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'key' });
+      for (const s of ['books','chapters','verses','devotionals','commentary','qa','verseOfDay','meta','highlights','bookmarks']) { if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: 'id' }); }
     };
   });
 }
@@ -45,13 +42,25 @@ export default function BibleReaderPage() {
   const [hasData, setHasData] = useState(false);
   const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
   const [prayRead, setPrayRead] = useState<any | null>(null);
+  const [diag, setDiag] = useState('');
 
   const loadChapter = useCallback(async (bid: number, ch: number) => {
     setLoading(true);
     const isOff = typeof navigator !== 'undefined' && !navigator.onLine;
     setOffline(isOff);
-    const allVerses = await getAll('verses');
-    const list = (allVerses || []).filter((v: any) => Number(v.book_id) === Number(bid) && Number(v.chapter) === Number(ch)).sort((a: any, b: any) => Number(a.verse) - Number(b.verse));
+    // Verses live in 'chapters' store in offlineStorage V2: id `chapter-{book}-{chapter}` -> .verses
+    let list: any[] = [];
+    try {
+      const db = await openDB();
+      const chap: any = await new Promise((res) => { const tx = db.transaction('chapters', 'readonly'); const req = tx.objectStore('chapters').get(`chapter-${bid}-${ch}`); req.onsuccess = () => res(req.result || null); req.onerror = () => res(null); });
+      if (chap?.verses?.length) list = chap.verses;
+    } catch {}
+    if (!list.length) {
+      const allVerses = await getAll('verses');
+      list = (allVerses || []).filter((v: any) => (Number(v.book_id ?? v.bookId) === Number(bid)) && Number(v.chapter) === Number(ch)).sort((a: any, b: any) => Number(a.verse) - Number(b.verse));
+    } else {
+      list = [...list].sort((a: any, b: any) => Number(a.verse) - Number(b.verse));
+    }
     if (list.length) {
       setVerses(list);
       const allCom = await getAll('commentary');
@@ -71,6 +80,8 @@ export default function BibleReaderPage() {
   useEffect(() => {
     (async () => {
       const list = await getAll('books');
+      const chaps = await getAll('chapters'); const vers = await getAll('verses');
+      setDiag(`Saved on this device — Books: ${list.length} · Chapters: ${chaps.length} · Verses: ${vers.length}`);
       const sorted = (list || []).sort((a: any, b: any) => (a.book_number ?? a.id) - (b.book_number ?? b.id));
       setBooks(sorted);
       setHasData(sorted.length > 0);
@@ -121,6 +132,7 @@ export default function BibleReaderPage() {
         </div>
       </header>
       <div className="max-w-4xl mx-auto px-4 py-6">
+        {diag && <p className="text-center text-xs font-bold mb-3" style={{color:'#17372f'}}>{diag} — <button onClick={()=>window.location.reload()} className="underline">Re-check</button></p>}
         <div className="bg-white rounded-2xl shadow p-4">
           <label className="text-xs font-bold tracking-widest" style={{ color: '#a9852e' }}>BOOK</label>
           <select value={bookId} onChange={e => { setBookId(Number(e.target.value)); setChapter(1); setSelectedVerse(null); }} className="w-full mt-1 p-3 rounded-xl border text-lg font-bold" style={{ borderColor: '#e9c981' }}>
