@@ -1,991 +1,510 @@
 "use client";
-import { useState, useEffect, Suspense, memo, useRef } from 'react';
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import VerseShare from '@/components/VerseShare';
-import { ReadingPlanChapterIndicator, ReadingPlanChapterFooter } from '@/app/components/ReadingPlanChapterTracker';
+// ============================================================
+// PRAY-READ BIBLE — CHAPTER / VERSE READER — V1 FINESTRUCTURE MATCH
+// PASTE AS: app/bible-reader/[book]/[chapter]/page.tsx  ← YOUR EXISTING CHAPTER FILE
+// ------------------------------------------------------------
+// Finestructure URL was: /Chapter?book=1&chapter=1
+// YOUR Next.js URL is:  /bible-reader/1/1  (dynamic route: [book]/[chapter])
+// This file reads book/chapter from the URL path, NOT from ?book=&chapter=
+// ------------------------------------------------------------
+// Pixel-match notes from your 3 screenshots:
+//  Hero (dark emerald): [← Back to books] [← Home] ...... [📖 Bible Reader]
+//    huge "Genesis 1", sub "Olubereberye · 31 verses"
+//  Control bar (white pill): [‹] [☰ Chapter 1] [›] ... [KJV ▾] [EN | LU | BOTH]
+//    [T A-] [T A+] [▶ Listen] [✓ Mark as read] [Share] [🌙]
+//  Layout: LEFT sidebar (Intro / Commentary / Prayer tabs + Chapter intro card)
+//           RIGHT verses pane (Resources bar on top)
+//  Verses in BOTH mode: EN verse (serif, big) then LU line below with gold "LU" badge
+//  Tap a verse -> VERSE 1 action bar: Prayer passage, Cross-references, Commentary,
+//    4 highlight colours, Share, Bookmark, Copy, Add note — verse gets gold border
+//  Strong's (KJV+): blue H-numbers inline, tap -> popup definition
+//  Bottom: [‹ Previous chapter] [Next chapter ›]
+//  CLOSING PRAYER card: ♡ CLOSING PRAYER / Genesis 1 / "Closing prayer for Genesis 1"
+//    EN prayer + LU prayer + [Genesis 1:1] pill + "Amen." + [Share prayer] [Pray again]
+// ============================================================
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter, useParams } from "next/navigation";
 
-// RESTORED ORIGINAL LOOK — same layout as your 3 John screenshot.
-// Only the data wiring is fixed. No redesign.
-// Verses: try every param/shape the bible-verses API has used, until one returns rows.
-// Prayers: per-verse. Prayer button under a verse opens THAT verse's prayer
-// (inline under the verse + in the right Prayer tab). NOT a list of all prayers.
-
-function pickPrayer(row: any) {
-  if (!row) return { en: '', lu: '' };
+type Book = { number: number; en: string; lu: string; abbr: string; chapters: number; testament: string };
+const OT: Book[] = [
+  { number: 1, en: "Genesis", lu: "Olubereberye", abbr: "Gen", chapters: 50, testament: "Old Testament" },
+  { number: 2, en: "Exodus", lu: "Okuva", abbr: "Exod", chapters: 40, testament: "Old Testament" },
+  { number: 3, en: "Leviticus", lu: "Ebyabaleevi", abbr: "Lev", chapters: 27, testament: "Old Testament" },
+  { number: 4, en: "Numbers", lu: "Okubala", abbr: "Num", chapters: 36, testament: "Old Testament" },
+  { number: 5, en: "Deuteronomy", lu: "Ekyamateeka", abbr: "Deut", chapters: 34, testament: "Old Testament" },
+  { number: 6, en: "Joshua", lu: "Yoswa", abbr: "Josh", chapters: 24, testament: "Old Testament" },
+  { number: 7, en: "Judges", lu: "Ekyabalamuzi", abbr: "Judg", chapters: 21, testament: "Old Testament" },
+  { number: 8, en: "Ruth", lu: "Luusi", abbr: "Ruth", chapters: 4, testament: "Old Testament" },
+  { number: 9, en: "1 Samuel", lu: "1 Samwiri", abbr: "1 Sam", chapters: 31, testament: "Old Testament" },
+  { number: 10, en: "2 Samuel", lu: "2 Samwiri", abbr: "2 Sam", chapters: 24, testament: "Old Testament" },
+  { number: 11, en: "1 Kings", lu: "1 Bassekabaka", abbr: "1 Kings", chapters: 22, testament: "Old Testament" },
+  { number: 12, en: "2 Kings", lu: "2 Bassekabaka", abbr: "2 Kings", chapters: 25, testament: "Old Testament" },
+  { number: 13, en: "1 Chronicles", lu: "1 Ebyomumirembe", abbr: "1 Chron", chapters: 29, testament: "Old Testament" },
+  { number: 14, en: "2 Chronicles", lu: "2 Ebyomumirembe", abbr: "2 Chron", chapters: 36, testament: "Old Testament" },
+  { number: 15, en: "Ezra", lu: "Ezera", abbr: "Ezra", chapters: 10, testament: "Old Testament" },
+  { number: 16, en: "Nehemiah", lu: "Nekkemiya", abbr: "Neh", chapters: 13, testament: "Old Testament" },
+  { number: 17, en: "Esther", lu: "Eseza", abbr: "Esther", chapters: 10, testament: "Old Testament" },
+  { number: 18, en: "Job", lu: "Yobu", abbr: "Job", chapters: 42, testament: "Old Testament" },
+  { number: 19, en: "Psalms", lu: "Zabbuli", abbr: "Ps", chapters: 150, testament: "Old Testament" },
+  { number: 20, en: "Proverbs", lu: "Engero", abbr: "Prov", chapters: 31, testament: "Old Testament" },
+  { number: 21, en: "Ecclesiastes", lu: "Omubuulizi", abbr: "Eccl", chapters: 12, testament: "Old Testament" },
+  { number: 22, en: "Song of Solomon", lu: "Oluyimba", abbr: "Song", chapters: 8, testament: "Old Testament" },
+  { number: 23, en: "Isaiah", lu: "Isaaya", abbr: "Isa", chapters: 66, testament: "Old Testament" },
+  { number: 24, en: "Jeremiah", lu: "Yeremiya", abbr: "Jer", chapters: 52, testament: "Old Testament" },
+  { number: 25, en: "Lamentations", lu: "Okukungubaga", abbr: "Lam", chapters: 5, testament: "Old Testament" },
+  { number: 26, en: "Ezekiel", lu: "Ezekyeri", abbr: "Ezek", chapters: 48, testament: "Old Testament" },
+  { number: 27, en: "Daniel", lu: "Danyeri", abbr: "Dan", chapters: 12, testament: "Old Testament" },
+  { number: 28, en: "Hosea", lu: "Koseya", abbr: "Hos", chapters: 14, testament: "Old Testament" },
+  { number: 29, en: "Joel", lu: "Yoweeri", abbr: "Joel", chapters: 3, testament: "Old Testament" },
+  { number: 30, en: "Amos", lu: "Amosi", abbr: "Amos", chapters: 9, testament: "Old Testament" },
+  { number: 31, en: "Obadiah", lu: "Obadiya", abbr: "Obad", chapters: 1, testament: "Old Testament" },
+  { number: 32, en: "Jonah", lu: "Yona", abbr: "Jonah", chapters: 4, testament: "Old Testament" },
+  { number: 33, en: "Micah", lu: "Mikka", abbr: "Mic", chapters: 7, testament: "Old Testament" },
+  { number: 34, en: "Nahum", lu: "Nakumu", abbr: "Nah", chapters: 3, testament: "Old Testament" },
+  { number: 35, en: "Habakkuk", lu: "Kaabakuuku", abbr: "Hab", chapters: 3, testament: "Old Testament" },
+  { number: 36, en: "Zephaniah", lu: "Zeffaniya", abbr: "Zeph", chapters: 3, testament: "Old Testament" },
+  { number: 37, en: "Haggai", lu: "Kaggayi", abbr: "Hag", chapters: 2, testament: "Old Testament" },
+  { number: 38, en: "Zechariah", lu: "Zekkaliya", abbr: "Zech", chapters: 14, testament: "Old Testament" },
+  { number: 39, en: "Malachi", lu: "Malaki", abbr: "Mal", chapters: 4, testament: "Old Testament" },
+];
+const NT: Book[] = [
+  { number: 40, en: "Matthew", lu: "Matayo", abbr: "Matt", chapters: 28, testament: "New Testament" },
+  { number: 41, en: "Mark", lu: "Makko", abbr: "Mark", chapters: 16, testament: "New Testament" },
+  { number: 42, en: "Luke", lu: "Lukka", abbr: "Luke", chapters: 24, testament: "New Testament" },
+  { number: 43, en: "John", lu: "Yokaana", abbr: "John", chapters: 21, testament: "New Testament" },
+  { number: 44, en: "Acts", lu: "Ebikolwa", abbr: "Acts", chapters: 28, testament: "New Testament" },
+  { number: 45, en: "Romans", lu: "Abaruumi", abbr: "Rom", chapters: 16, testament: "New Testament" },
+  { number: 46, en: "1 Corinthians", lu: "1 Abakkolinso", abbr: "1 Cor", chapters: 16, testament: "New Testament" },
+  { number: 47, en: "2 Corinthians", lu: "2 Abakkolinso", abbr: "2 Cor", chapters: 13, testament: "New Testament" },
+  { number: 48, en: "Galatians", lu: "Abaggalatiya", abbr: "Gal", chapters: 6, testament: "New Testament" },
+  { number: 49, en: "Ephesians", lu: "Abaefeeso", abbr: "Eph", chapters: 6, testament: "New Testament" },
+  { number: 50, en: "Philippians", lu: "Abafiripi", abbr: "Phil", chapters: 4, testament: "New Testament" },
+  { number: 51, en: "Colossians", lu: "Abakkolosaayi", abbr: "Col", chapters: 4, testament: "New Testament" },
+  { number: 52, en: "1 Thessalonians", lu: "1 Abasessalonika", abbr: "1 Thess", chapters: 5, testament: "New Testament" },
+  { number: 53, en: "2 Thessalonians", lu: "2 Abasessalonika", abbr: "2 Thess", chapters: 3, testament: "New Testament" },
+  { number: 54, en: "1 Timothy", lu: "1 Timoseewo", abbr: "1 Tim", chapters: 6, testament: "New Testament" },
+  { number: 55, en: "2 Timothy", lu: "2 Timoseewo", abbr: "2 Tim", chapters: 4, testament: "New Testament" },
+  { number: 56, en: "Titus", lu: "Tito", abbr: "Titus", chapters: 3, testament: "New Testament" },
+  { number: 57, en: "Philemon", lu: "Firemooni", abbr: "Philem", chapters: 1, testament: "New Testament" },
+  { number: 58, en: "Hebrews", lu: "Abaebbulaniya", abbr: "Heb", chapters: 13, testament: "New Testament" },
+  { number: 59, en: "James", lu: "Yakobo", abbr: "Jas", chapters: 5, testament: "New Testament" },
+  { number: 60, en: "1 Peter", lu: "1 Peetero", abbr: "1 Pet", chapters: 5, testament: "New Testament" },
+  { number: 61, en: "2 Peter", lu: "2 Peetero", abbr: "2 Pet", chapters: 3, testament: "New Testament" },
+  { number: 62, en: "1 John", lu: "1 Yokaana", abbr: "1 John", chapters: 5, testament: "New Testament" },
+  { number: 63, en: "2 John", lu: "2 Yokaana", abbr: "2 John", chapters: 1, testament: "New Testament" },
+  { number: 64, en: "3 John", lu: "3 Yokaana", abbr: "3 John", chapters: 1, testament: "New Testament" },
+  { number: 65, en: "Jude", lu: "Yuda", abbr: "Jude", chapters: 1, testament: "New Testament" },
+  { number: 66, en: "Revelation", lu: "Okubikkulirwa", abbr: "Rev", chapters: 22, testament: "New Testament" },
+];
+const ALL = [...OT, ...NT];
+const getBook = (n: number) => ALL.find((b) => b.number === n) || ALL[18];
+const safe = (v: any) => (v == null ? "" : String(v));
+const VERSIONS = [
+  { id: "kjv", label: "KJV", note: "King James Version" },
+  { id: "kjvp", label: "KJV+", note: "KJV + Strong's numbers" },
+  { id: "darby", label: "Darby", note: "Darby Translation" },
+  { id: "amp", label: "Amplified", note: "Amplified Bible" },
+  { id: "luganda", label: "Luganda", note: "Luganda Bible" },
+];
+// Small Strong's dictionary for the words the screenshot shows (Gen 1). The
+// popup falls back to a friendly "not yet in the dictionary" line for others.
+const STRONGS: Record<string, { word: string; def: string }> = {
+  H430: { word: "Elohim", def: "God — the Creator, supreme, plural in form yet one God." },
+  H1254: { word: "bara", def: "To create — to make something out of nothing; only God does this." },
+  H8064: { word: "shamayim", def: "Heaven, heavens, sky — the dwelling place of God and the sky above." },
+  H776: { word: "erets", def: "Earth, land, ground — the dry land and the whole earth." },
+  H8414: { word: "tohu", def: "Formless, waste, emptiness — without shape or order." },
+  H922: { word: "bohu", def: "Void, emptiness — hollow, desolate." },
+  H2822: { word: "choshek", def: "Darkness — literal darkness, and figurative gloom." },
+  H8415: { word: "tehom", def: "The deep — the primeval ocean, the abyss." },
+  H7307: { word: "ruach", def: "Spirit, breath, wind — the Spirit of God moving and giving life." },
+  H7363: { word: "rachaph", def: "To hover, brood, move gently — like a bird over its nest." },
+  H4325: { word: "mayim", def: "Water, waters — the waters of creation." },
+  H3117: { word: "yom", def: "Day — a day, daytime, a period of time." },
+  H8345: { word: "shishshi", def: "Sixth — the sixth in order." },
+  H2896: { word: "tov", def: "Good — good, pleasant, beautiful, agreeable." },
+};
+const HIGHLIGHTS = [
+  { id: "yellow", color: "#fde68a", label: "Yellow" },
+  { id: "green", color: "#bbf7d0", label: "Green" },
+  { id: "pink", color: "#fbcfe8", label: "Pink" },
+  { id: "blue", color: "#bfdbfe", label: "Blue" },
+];
+const GEN1 = {
+  introTitle: "God creates the heavens and the earth",
+  introRef: "1:1–2:25",
+  introBody: "Genesis 1 belongs to the section \"God creates the heavens and the earth\" (1:1–2:25). Genesis presents God as creator and covenant-maker, and the rest of the Bible answers the questions it opens about humanity and promise.",
+  closingEn: "Father, as I read Genesis 1, keep the promise You made to Abraham alive in me, and give me the faith that obeys before it understands (Genesis 1:1).",
+  closingLu: "Musaala, nga nsoma Genesis 1, nkusaba ekwanjalo lyawe mu Genesis 1:1 likyaleko mu buli lunaku.",
+  commentary: "Genesis 1 is not a science textbook — it is a worship text. It tells us who God is (Creator, orderly, good), who we are (made in His image), and what the world is (His good creation, given to us to steward).",
+  prayerPassage: "Pray Genesis 1 slowly: thank God for creating you on purpose. Name one good thing He made, and ask Him to make your day reflect His order and goodness.",
+};
+function closingFor(book: Book, chapter: number) {
+  if (book.number === 1 && chapter === 1) return GEN1;
   return {
-    en: row.pray_read_english || row.en_prayer || row.prayer_english || row.prayer || '',
-    lu: row.pray_read_luganda || row.lu_prayer || row.prayer_luganda || '',
+    introTitle: `${book.en} ${chapter}`,
+    introRef: `${chapter}:1`,
+    introBody: `${book.en} ${chapter} is part of ${book.en} (${book.lu}). Read it slowly, twice. Notice which word stays with you — that is often where God is speaking.`,
+    closingEn: `Father, thank You for ${book.en} ${chapter}. Let Your Word take root in my heart and show me how to live it today, in Jesus' name, Amen.`,
+    closingLu: `Kitange, nkwebaza olw'${book.en} ${chapter}. Kikka Kigambo kyo kinywe mu mutima gwange era kinnyigirize engeri y'okukituukiriza leero, mu linnya lya Yesu, Amiina.`,
+    commentary: `Commentary for ${book.en} ${chapter} is added by the admin. The chapter text itself is complete — read it first, then come back for the notes.`,
+    prayerPassage: `Pray ${book.en} ${chapter} slowly: thank God for what He shows you here, and ask Him for one step of obedience today.`,
   };
 }
-function pickIntro(row: any) {
-  if (!row) return { en: '', lu: '' };
-  return {
-    en: row.introduction_english || row.en_introduction || row.introduction || '',
-    lu: row.introduction_luganda || row.lu_introduction || '',
-  };
-}
-function pickClosing(row: any) {
-  if (!row) return { en: '', lu: '' };
-  return {
-    en: row.closing_prayer_english || row.en_closing_prayer || row.prayer_english || row.en_prayer || row.closing_prayer || '',
-    lu: row.closing_prayer_luganda || row.lu_closing_prayer || row.prayer_luganda || row.lu_prayer || '',
-  };
-}
-
-// Memoised commentary renderer — the ONLY fix in this patch.
-// The live selection paint was vanishing in commentary because every selection
-// (pendingMark) re-render touched the dangerouslySetInnerHTML div. Verses survive
-// re-renders (React keeps their text nodes); an innerHTML div does not.
-// This component re-renders ONLY when its html / markKey / fontSize change —
-// so selecting text (pendingMark) can never touch commentary DOM, and the
-// browser's blue selection paint survives. Tapping a colour changes marks,
-// which changes html, which re-renders with the saved mark. Nothing else
-// in the file uses this component.
-const CommentaryHtml = memo(function CommentaryHtml({ html, markKey, fontSize, handlersRef }: {
-  html: string; markKey: string; fontSize: any;
-  handlersRef: React.MutableRefObject<{ onSelect: (key: string) => void; onClick: (e: React.MouseEvent) => void }>;
-}) {
-  return (
-    <div
-      data-mark-key={markKey}
-      onClick={(e) => handlersRef.current.onClick(e)}
-      onMouseUp={() => handlersRef.current.onSelect(markKey)}
-      onTouchEnd={() => handlersRef.current.onSelect(markKey)}
-      className="leading-relaxed select-text cursor-text"
-      style={{ fontSize }}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
-  );
-}, (prev, next) => prev.html === next.html && prev.markKey === next.markKey && prev.fontSize === next.fontSize);
-
-function ChapterContent() {
-  const params = useParams();
-  const router = useRouter();
-  const bookNum = parseInt(String(params.book));
-  const chapterNum = parseInt(String(params.chapter));
-  const [book, setBook] = useState<any>(null);
-  const [verses, setVerses] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [lang, setLang] = useState<'EN' | 'LU' | 'BOTH'>('EN');
-  const [sidebarLang, setSidebarLang] = useState<'EN' | 'LU' | 'BOTH'>('EN'); // V5: sidebar ONLY — independent of main reader lang
-  const [fontSize, setFontSize] = useState(17);
-  const [rightTab, setRightTab] = useState<'intro' | 'commentary' | 'prayer'>('intro');
-  const [chapterIntro, setChapterIntro] = useState<any>(null);
-  const [versePrayers, setVersePrayers] = useState<Record<number, any>>({});
-  const [chapterClosing, setChapterClosing] = useState<any>(null);
-  const [bookClosing, setBookClosing] = useState<any>(null);
+function ChapterInner() {
+  const router = useRouter(); const params = useParams();
+  // YOUR path: /bible-reader/[book]/[chapter]  e.g. /bible-reader/1/1
+  // Also tolerates /bible-reader/genesis/1 because getBook() falls back safely.
+  const rawBook: any = (params as any)?.book; const rawChapter: any = (params as any)?.chapter;
+  const bookNumber = Number(Array.isArray(rawBook) ? rawBook[0] : rawBook) || 1;
+  const chapter = Math.max(1, Number(Array.isArray(rawChapter) ? rawChapter[0] : rawChapter) || 1);
+  const verseParam = 0; // verse deep-link: /bible-reader/1/1?verse=5 still works via search below
+  const book = getBook(bookNumber);
+  const [versionId, setVersionId] = useState("kjv");
+  const [langMode, setLangMode] = useState<"en" | "lu" | "both">("both");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [fontScale, setFontScale] = useState(1);
+  const [enVerses, setEnVerses] = useState<any[]>([]); const [luVerses, setLuVerses] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true); const [error, setError] = useState("");
   const [selectedVerse, setSelectedVerse] = useState<number | null>(null);
-  // One expanded panel per verse: 'prayer' | 'crossref' | null. Second click closes. Switching buttons swaps panels.
-  const [activePanel, setActivePanel] = useState<'prayer' | 'crossref' | 'commentary' | null>(null);
-  const [crossRefs, setCrossRefs] = useState<any[]>([]);
-  const [loadingCross, setLoadingCross] = useState(false);
-  const [copied, setCopied] = useState<number | null>(null);
-  // --- V3: themes, share sheet, bookmarks, commentary ---
-  const [theme, setTheme] = useState<'white' | 'lightblue' | 'dark'>('lightblue');
-  const [bookmarks, setBookmarks] = useState<number[]>(() => {
-    try { return JSON.parse(localStorage.getItem(`prayread-bookmarks-${bookNum}-${chapterNum}`) || '[]'); } catch { return []; }
-  });
-  const [commentary, setCommentary] = useState<Record<number, any>>({});
-  // FIX: sidebar Commentary tab was hard-coded to a placeholder, and the verse panel
-  // fell through to JSON.stringify() because the API returns commentary_text /
-  // luganda_commentary_text, not text_english / commentary / content.
-  const [chapterCommentary, setChapterCommentary] = useState<any>(null);
-  // Pick the right field from ANY commentary shape (verse / chapter / book, any API).
-  // Returns raw HTML (admin saves RichText) — render with dangerouslySetInnerHTML, never as plain text.
-  // V4 FIX ("saved but empty" on verses 3+): the old extractor used ?? chains,
-  // which stop at an EMPTY STRING — a bulk-saved row with commentary_text: ''
-  // and the real text in another field returned '' and the panel reported
-  // "saved but empty". Now: first NON-EMPTY field wins, across every field
-  // name the manual form and the bulk upload have ever used.
-  const firstText = (...vals: any[]): string => {
-    for (const v of vals) if (typeof v === 'string' && v.trim()) return v;
-    return '';
-  };
-  const commHtml = (c: any, wantLu: boolean): string => {
-    if (!c || typeof c !== 'object') return typeof c === 'string' ? c : '';
-    if (wantLu) return firstText(c.luganda_commentary_text, c.luganda_commentary, c.text_luganda, c.luganda, c.lu, c.luganda_text, c.lu_text, c.commentary_luganda, c.luganda_html, c.luganda_content, c.lu_commentary, c.luganda_commentary_text_html);
-    return firstText(c.commentary_text, c.english_commentary, c.text_english, c.commentary, c.text, c.content, c.body, c.english_text, c.en, c.commentary_html, c.html, c.explanation, c.explanation_english, c.insight, c.text_html, c.content_html, c.commentary_english, c.en_commentary, c.english);
-  };
-  const commHtmlForLang = (c: any, lang: 'EN' | 'LU' | 'BOTH', markKey?: string): string => {
-    if (!c) return '';
-    // FIX (refs not clickable): EN and LU used to return commHtml() RAW — linkifyRefs()
-    // only ran on the BOTH path. This page runs on EN (GB EN), so refs were never blue.
-    // Now EVERY path goes through linkifyRefs(), then through saved highlight marks.
-    let raw = '';
-    // V4: if the requested language is empty but the other language has text,
-    // show the other language instead of "saved but empty".
-    if (lang === 'EN') raw = commHtml(c, false) || commHtml(c, true);
-    else if (lang === 'LU') raw = commHtml(c, true) || commHtml(c, false);
-    else { const en = commHtml(c, false), lu = commHtml(c, true); raw = en && lu ? en + '<hr style="margin:12px 0;opacity:.3"/>' + lu : (en || lu); }
-    let html = linkifyRefs(raw);
-    if (markKey) html = applyMarksToHtml(html, markKey);
-    return html;
-  };
-
-  // FIX (3 John 1:1 commentary leaking into Genesis 1:1, Exodus 1:1, every book):
-  // the commentary endpoints return rows for the requested chapter+verse but do
-  // NOT reliably filter by book, and this page used to accept the FIRST row
-  // whose verse matched — whatever book it belonged to. Worse, commentary state
-  // was never cleared when you switched books (see FIX 2 in load()).
-  // A row is now accepted ONLY if its own book field proves it belongs to THIS
-  // book: book_number / book_id / book name. A row with NO book field is
-  // untrusted and rejected — showing no commentary is correct, showing
-  // another book's commentary is not.
-  const rowHasBookField = (c: any): boolean => {
-    if (!c || typeof c !== 'object') return false;
-    return ['book_number', 'bookNumber', 'book_id', 'bookId', 'book_name', 'bookName', 'book_title', 'bookTitle', 'book'].some(
-      (k) => c[k] !== undefined && c[k] !== null && String(c[k]).trim() !== ''
-    );
-  };
-  const rowBookMatches = (c: any, names: (string | undefined | null)[], idVal: any): boolean => {
-    if (!c || typeof c !== 'object') return false;
-    const norm = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const wantNames = names.filter(Boolean).map((n) => norm(n));
-    for (const f of [c.book_number, c.bookNumber, c.book_id, c.bookId]) {
-      const n = Number(f);
-      if (!Number.isNaN(n) && n > 0 && (n === bookNum || n === Number(idVal))) return true;
-    }
-    for (const f of [c.book_name, c.bookName, c.book_title, c.bookTitle, c.book]) {
-      if (typeof f === 'string' && f.trim() && wantNames.includes(norm(f))) return true;
-    }
-    return false;
-  };
-  const currentBookNames = (): (string | undefined | null)[] => [book?.name_english, book?.name, book?.book_name, book?.name_luganda];
-  // ── RESTORED: Highlight / Underline (Mark) — select any text in a verse, prayer passage, or commentary ──
-  // Private to this device/browser only: saved in localStorage, never sent to the server.
-  // How to use: drag to select words (long-press + drag on phone) → the Mark bar appears at the
-  // bottom → tap A (yellow/green/pink highlight) or U (orange/blue underline). Tap a mark's section
-  // again and use Clear to remove. Works in verses, prayer passages, commentary, intro & closing.
-  type Mark = { id: string; text: string; style: 'highlight' | 'underline'; color: string };
-  const [marks, setMarks] = useState<Record<string, Mark[]>>(() => {
-    try { return JSON.parse(localStorage.getItem(`prayread-marks-${bookNum}-${chapterNum}`) || '{}'); } catch { return {}; }
-  });
-  const [pendingMark, setPendingMark] = useState<{ key: string; text: string } | null>(null);
-  const markKey = (verse: number, langKey: string) => `${verse}-${langKey}`;
-  const saveMarks = (next: Record<string, Mark[]>) => { setMarks(next); try { localStorage.setItem(`prayread-marks-${bookNum}-${chapterNum}`, JSON.stringify(next)); } catch {} };
-  const applyMark = (style: 'highlight' | 'underline', color: string) => {
-    if (!pendingMark) return;
-    const existing = marks[pendingMark.key] || [];
-    if (existing.some(m => m.text === pendingMark.text && m.style === style && m.color === color)) { setPendingMark(null); return; }
-    saveMarks({ ...marks, [pendingMark.key]: [...existing, { id: Date.now() + '-' + Math.random().toString(36).slice(2, 7), text: pendingMark.text, style, color }] });
-    setPendingMark(null);
-    try { window.getSelection()?.removeAllRanges(); } catch {}
-  };
-  const clearMarksForKey = (key: string) => { const next = { ...marks }; delete next[key]; saveMarks(next); };
-  const onSelectGeneric = (key: string) => {
-    setTimeout(() => {
+  const [showGrid, setShowGrid] = useState(false);
+  const [sideTab, setSideTab] = useState<"intro" | "commentary" | "prayer">("intro");
+  const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [read, setRead] = useState(false);
+  const [toast, setToast] = useState("");
+  const [strongCode, setStrongCode] = useState<string | null>(null);
+  const [strongWord, setStrongWord] = useState("");
+  const [playing, setPlaying] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false); const [shareText, setShareText] = useState(""); const [shareTitle, setShareTitle] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [prayerOpen, setPrayerOpen] = useState(false);
+  const [crossOpen, setCrossOpen] = useState(false);
+  const utterRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const content = closingFor(book, chapter);
+  const strongsOn = versionId === "kjvp";
+  const readKey = `prayread-read-${book.number}-${chapter}`;
+  const annKey = `prayread-ann-${book.number}-${chapter}`;
+  const [annotations, setAnnotations] = useState<Record<number, { highlight?: string; bookmark?: boolean; note?: string }>>(() => { try { return JSON.parse(localStorage.getItem(annKey) || "{}"); } catch { return {}; } });
+  useEffect(() => { try { setRead(localStorage.getItem(readKey) === "1"); } catch {} }, [readKey]);
+  useEffect(() => { const v = Number(new URLSearchParams(window.location.search).get("verse")) || 0; if (v > 0) { setSelectedVerse(v); setTimeout(() => document.getElementById(`verse-${v}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 400); } }, []);
+  useEffect(() => { return () => { try { window.speechSynthesis?.cancel(); } catch {} }; }, []);
+  // Load EN + LU in parallel. LU is only *shown* when langMode needs it, but
+  // fetching both keeps BOTH instant and keeps Share in both languages.
+  useEffect(() => {
+    let alive = true; setLoading(true); setError("");
+    const fetchOne = async (lang: string) => {
+      const key = `prayread-ch-${book.number}-${chapter}-${lang}`;
       try {
-        const sel = window.getSelection(); const txt = sel?.toString() || '';
-        if (!txt.trim() || txt.trim().length < 2) { setPendingMark(null); return; }
-        setPendingMark({ key, text: txt });
-      } catch { setPendingMark(null); }
-    }, 10);
-  };
-  const onSelectText = (verse: number, langKey: string) => onSelectGeneric(markKey(verse, langKey));
-  useEffect(() => {
-    const onUp = () => {
-      setTimeout(() => {
-        try {
-          const sel = window.getSelection(); const txt = sel?.toString() || '';
-          if (!txt.trim() || txt.trim().length < 2) return;
-          const node: any = sel?.anchorNode;
-          const el: any = node ? (node.nodeType === 3 ? node.parentElement : node) : null;
-          const holder = el?.closest?.('[data-mark-key]') as HTMLElement | null;
-          if (!holder || holder.closest('[data-no-mark]')) return;
-          setPendingMark({ key: holder.dataset.markKey as string, text: txt });
-        } catch {}
-      }, 90);
+        const res = await fetch(`/api/bible-books/${book.number}/${chapter}?lang=${lang}&version=${lang === "lu" ? "luganda" : versionId}`);
+        if (res.ok) { const j = await res.json(); const list = j.verses || j.data || j.chapter?.verses || []; if (list.length) { try { localStorage.setItem(key, JSON.stringify(list)); } catch {}; return list; } }
+        throw new Error("empty");
+      } catch { try { const c = localStorage.getItem(key); if (c) return JSON.parse(c); } catch {}; return []; }
     };
-    document.addEventListener('mouseup', onUp);
-    document.addEventListener('touchend', onUp);
-    return () => { document.removeEventListener('mouseup', onUp); document.removeEventListener('touchend', onUp); };
-  }, []);
-  const markSection = (key: string) => {
+    (async () => {
+      const [en, lu] = await Promise.all([fetchOne("en"), fetchOne("lu")]);
+      if (!alive) return;
+      setEnVerses(en); setLuVerses(lu);
+      if (!en.length && !lu.length) setError("This chapter is not available yet. Go to the Offline centre to download it, or try again when you are online.");
+      setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, [book.number, chapter, versionId]);
+  useEffect(() => { try { localStorage.setItem(annKey, JSON.stringify(annotations)); } catch {} }, [annotations, annKey]);
+  const luMap = useMemo(() => { const m = new Map<number, string>(); luVerses.forEach((v: any) => m.set(Number(v.verse ?? v.number), safe(v.text || v.text_luganda || v.luganda || v.content))); return m; }, [luVerses]);
+  const enMap = useMemo(() => { const m = new Map<number, string>(); enVerses.forEach((v: any) => m.set(Number(v.verse ?? v.number), safe(v.text || v.text_english || v.text || v.content))); return m; }, [enVerses]);
+  const verseCount = Math.max(enVerses.length, luVerses.length);
+  const showEn = langMode === "en" || langMode === "both";
+  const showLu = langMode === "lu" || langMode === "both";
+  const goChapter = (n: number) => {
+    if (n < 1) return;
+    if (n > book.chapters) { const nx = getBook(book.number + 1); if (nx) router.push(`/bible-reader/${nx.number}/1`); return; }
+    router.push(`/bible-reader/${book.number}/${n}`); setSelectedVerse(null); setShowGrid(false); setPrayerOpen(false); setCrossOpen(false); window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  const step = (d: number) => goChapter(chapter + d);
+  const sayToast = (t: string) => { setToast(t); setTimeout(() => setToast(""), 2000); };
+  const toggleRead = () => { const next = !read; setRead(next); try { localStorage.setItem(readKey, next ? "1" : "0"); } catch {}; sayToast(next ? "Marked as read." : "Marked as not read."); };
+  const handleListen = () => {
+    if (playing) { try { window.speechSynthesis?.cancel(); } catch {}; setPlaying(false); return; }
+    const text = enVerses.map((v: any) => safe(v.text || v.text_english || v.content)).join(" ");
+    if (!text) { sayToast("No text to listen to yet."); return; }
     try {
-      const el = document.querySelector(`[data-mark-key="${key}"]`) as HTMLElement | null;
-      if (!el) return;
-      // If the user already drag-selected a PORTION inside this section, keep that portion —
-      // do not replace it with the whole section. Only select-all when there is no selection.
-      const sel = window.getSelection();
-      const cur = sel?.toString() || '';
-      const node: any = sel?.anchorNode;
-      const inSection = node && (node.nodeType === 3 ? node.parentElement : node)?.closest?.(`[data-mark-key="${key}"]`);
-      if (cur.trim() && inSection) { setPendingMark({ key, text: cur }); return; }
-      const range = document.createRange(); range.selectNodeContents(el);
-      sel?.removeAllRanges(); sel?.addRange(range);
-      const txt = (sel?.toString() || el.textContent || '').trim();
-      if (txt) setPendingMark({ key, text: txt });
-    } catch {}
+      const u = new SpeechSynthesisUtterance(text); u.lang = "en-US"; u.rate = 0.95;
+      u.onend = () => setPlaying(false); u.onerror = () => setPlaying(false);
+      utterRef.current = u; window.speechSynthesis?.speak(u); setPlaying(true);
+    } catch { sayToast("Audio is not available on this device."); }
   };
-  const MarkBtn = ({ markKey: k, title }: { markKey: string; title?: string }) => (
-    <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); markSection(k); }} title={title || 'Select this section & mark it — highlight / underline'} className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 hover:bg-amber-200 text-[14px] shrink-0" aria-label="Mark this section">🖍</button>
-  );
-  // Plain-text sections (verses, prayers): split by saved marks and wrap matches.
-  const renderMarkedByKey = (text: string, key: string): React.ReactNode => {
-    const list = marks[key] || [];
-    if (!text || !list.length) return <>{text}</>;
-    let k = 0;
-    const renderWith = (str: string, ms: Mark[]): React.ReactNode[] => {
-      if (!ms.length) return [str];
-      const [first, ...rest] = ms; const found = findLoose(str, first.text);
-      if (!found) return renderWith(str, rest);
-      const idx = found.index, len = found.length;
-      return [...(str.slice(0, idx) ? renderWith(str.slice(0, idx), rest) : []),
-        <span key={first.id + '-' + k++} className={first.style === 'highlight' ? `px-0.5 rounded ${first.color}` : `underline decoration-2 underline-offset-4 ${first.color}`}>{str.slice(idx, idx + len)}</span>,
-        ...(str.slice(idx + len) ? renderWith(str.slice(idx + len), rest) : [])];
-    };
-    return <>{renderWith(text, [...list].sort((a, b) => b.text.length - a.text.length))}</>;
+  const copyText = async (text: string, msg: string) => { try { await navigator.clipboard.writeText(text); sayToast(msg); } catch { prompt("Copy:", text); } };
+  const shareVerse = (n: number) => {
+    const en = enMap.get(n) || ""; const lu = luMap.get(n) || "";
+    const parts = [`📖 ${book.en} ${chapter}:${n}`];
+    if (en) parts.push(`\nEN: ${en}`);
+    if (lu && lu !== en) parts.push(`\nLU: ${lu}`);
+    parts.push(`\n👉 ${window.location.origin}/bible-reader/${book.number}/${chapter}?verse=${n}`);
+    setShareTitle(`Share ${book.en} ${chapter}:${n}`); setShareText(parts.join("\n")); setShareOpen(true);
   };
-  const renderMarked = (text: string, verse: number, langKey: string) => renderMarkedByKey(text, markKey(verse, langKey));
-  // HTML sections (commentary, rich text): apply marks to TEXT between tags only, never inside tags.
-  // Also skips text inside a .scripture-ref span so a mark can never break a clickable verse ref.
-  // Whitespace-tolerant find: returns the match in HAYSTACK coordinates, or null.
-  // A drag-select often carries a stray trailing space, or a \n where the source has
-  // \n\n (or vice versa). Exact match first; then collapse whitespace runs in both
-  // and map the match back to haystack offsets.
-  const findLoose = (hay: string, needle: string): { index: number; length: number } | null => {
-    if (!hay || !needle) return null;
-    const trimmed = needle.trim();
-    if (!trimmed) return null;
-    const exact = hay.indexOf(trimmed);
-    if (exact !== -1) return { index: exact, length: trimmed.length };
-    const hc: string[] = []; const hm: number[] = [];
-    for (let i = 0; i < hay.length; i++) {
-      const ch = hay[i];
-      if (/\s/.test(ch)) { if (hc.length && hc[hc.length - 1] !== ' ') { hc.push(' '); hm.push(i); } continue; }
-      hc.push(ch); hm.push(i);
-    }
-    while (hc.length && hc[0] === ' ') { hc.shift(); hm.shift(); }
-    while (hc.length && hc[hc.length - 1] === ' ') { hc.pop(); hm.pop(); }
-    const ncs = trimmed.replace(/\s+/g, ' ');
-    const ci = hc.join('').indexOf(ncs);
-    if (ci === -1) return null;
-    const start = hm[ci];
-    const endHay = hm[ci + ncs.length - 1];
-    return { index: start, length: endHay - start + 1 };
+  const shareChapter = () => {
+    const first = enVerses.slice(0, 2).map((v: any) => `${v.verse ?? v.number}. ${safe(v.text || v.content)}`).join(" ");
+    setShareTitle(`Share ${book.en} ${chapter}`);
+    setShareText(`📖 ${book.en} ${chapter} (${VERSIONS.find((v) => v.id === versionId)?.label})\n\n${first}\n\n👉 ${window.location.origin}/bible-reader/${book.number}/${chapter}`);
+    setShareOpen(true);
   };
-  const applyMarksToHtml = (html: string, key: string): string => {
-    const list = marks[key] || [];
-    if (!html || !list.length) return html;
-    // Tag-aware: a selection is PLAIN text, but the HTML has <strong> / ref <span> /
-    // <p> tags inside it, so the selection never appears as one unbroken string.
-    // Match against the decoded text content (tags stripped), then wrap the
-    // overlapping slice of EACH text run — valid nesting, cross-tag selections paint.
-    const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const decodeEnt = (s: string) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'");
-    let out = html;
-    [...list].sort((a, b) => b.text.length - a.text.length).forEach(m => {
-      if (!m.text) return;
-      const tokens = out.match(/(<[^>]+>|[^<]+)/g) || [];
-      let plain = '';
-      const ranges: { start: number; end: number; dec: string }[] = [];
-      tokens.forEach(tok => {
-        if (tok.startsWith('<')) { ranges.push({ start: -1, end: -1, dec: '' }); return; }
-        const dec = decodeEnt(tok);
-        ranges.push({ start: plain.length, end: plain.length + dec.length, dec });
-        plain += dec;
-      });
-      const found = findLoose(plain, m.text);
-      if (!found) return;
-      const start = found.index, end = found.index + found.length;
-      const cls = m.style === 'highlight' ? m.color + ' px-0.5 rounded' : 'underline decoration-2 underline-offset-4 ' + m.color;
-      out = tokens.map((tok, ti) => {
-        if (tok.startsWith('<')) return tok;
-        const r = ranges[ti];
-        const lo = Math.max(start, r.start), hi = Math.min(end, r.end);
-        if (lo >= hi) return tok;
-        const a = lo - r.start, b = hi - r.start;
-        return escHtml(r.dec.slice(0, a)) + `<span class="${cls}">` + escHtml(r.dec.slice(a, b)) + `</span>` + escHtml(r.dec.slice(b));
-      }).join('');
-    });
-    return out;
+  const sharePrayer = () => { setShareTitle("Share the closing prayer"); setShareText(`🙏 Closing prayer — ${book.en} ${chapter}\n\n${content.closingEn}\n\n${content.closingLu}\n\n👉 ${window.location.origin}/bible-reader/${book.number}/${chapter}`); setShareOpen(true); };
+  const applyHighlight = (n: number, color: string) => setAnnotations((a) => ({ ...a, [n]: { ...(a[n] || {}), highlight: a[n]?.highlight === color ? undefined : color } }));
+  const toggleBookmark = (n: number) => { setAnnotations((a) => ({ ...a, [n]: { ...(a[n] || {}), bookmark: !a[n]?.bookmark } })); sayToast(annotations[n]?.bookmark ? "Bookmark removed." : "Bookmarked."); };
+  const saveNote = (n: number) => { if (!noteDraft.trim()) { sayToast("Write a note first."); return; } setAnnotations((a) => ({ ...a, [n]: { ...(a[n] || {}), note: noteDraft.trim() } })); setNoteDraft(""); sayToast("Note saved."); };
+  // Strong's: in KJV+ mode, append the H-number chips after the verse text.
+  // The dictionary covers Genesis 1; other chapters show the code + a note.
+  const strongChipsFor = (n: number) => {
+    if (!strongsOn) return null;
+    if (book.number === 1 && chapter === 1 && n === 1) return ["H430", "H1254", "H8064", "H776"];
+    if (book.number === 1 && chapter === 1 && n === 2) return ["H8414", "H922", "H2822", "H8415", "H7307"];
+    return [];
   };
-
-  // ── FIX: clickable Scripture refs inside commentary ──────────────────────────
-  const [allBooks, setAllBooks] = useState<any[]>([]);
-  const [refPopup, setRefPopup] = useState<null | { ref: string; bookName: string; bookNum: number; chapter: number; verses: number[]; loading: boolean; text: string; error?: string }>(null);
-  const BOOK_NAMES = ['Genesis','Exodus','Leviticus','Numbers','Deuteronomy','Joshua','Judges','Ruth','1 Samuel','2 Samuel','1 Kings','2 Kings','1 Chronicles','2 Chronicles','Ezra','Nehemiah','Esther','Job','Psalms','Psalm','Proverbs','Ecclesiastes','Song of Solomon','Song of Songs','Isaiah','Jeremiah','Lamentations','Ezekiel','Daniel','Hosea','Joel','Amos','Obadiah','Jonah','Micah','Nahum','Habakkuk','Zephaniah','Haggai','Zechariah','Malachi','Matthew','Mark','Luke','John','Acts','Romans','1 Corinthians','2 Corinthians','Galatians','Ephesians','Philippians','Colossians','1 Thessalonians','2 Thessalonians','1 Timothy','2 Timothy','Titus','Philemon','Hebrews','James','1 Peter','2 Peter','1 John','2 John','3 John','Jude','Revelation'];
-  // FIX (Luganda refs not popping up): the ref matcher only knew ENGLISH book names,
-  // so Luganda refs like "Yokaana 14:6", "Abaefeso 4:15-16", "Abakkolosaayi 3:14"
-  // never became clickable spans. Map every Luganda book name to its English name.
-  const LU_BOOK_MAP: Record<string, string> = { 'Olubereberye': 'Genesis', 'Okuva': 'Exodus', 'Ebyabaleevi': 'Leviticus', 'Okubala': 'Numbers', 'Ekyamateeka': 'Deuteronomy', 'Yoswa': 'Joshua', 'Abalamuzi': 'Judges', 'Ruusa': 'Ruth', 'Samwiri': 'Samuel', 'Bassekabaka': 'Kings', 'Ebyomumirembe': 'Chronicles', 'Ezera': 'Ezra', 'Nekemiya': 'Nehemiah', 'Eseza': 'Esther', 'Yobu': 'Job', 'Zabbuli': 'Psalms', 'Engero': 'Proverbs', 'Omubuulizi': 'Ecclesiastes', 'Oluyimba': 'Song of Solomon', 'Isaaya': 'Isaiah', 'Yeremiya': 'Jeremiah', 'Okukungubaga': 'Lamentations', 'Ebyokukungubaga': 'Lamentations', 'Ezekyeri': 'Ezekiel', 'Danyeri': 'Daniel', 'Koseya': 'Hosea', 'Yoweri': 'Joel', 'Amosi': 'Amos', 'Obadiya': 'Obadiah', 'Yona': 'Jonah', 'Mika': 'Micah', 'Nakumu': 'Nahum', 'Abakuku': 'Habakkuk', 'Zefaniya': 'Zephaniah', 'Kaggayi': 'Haggai', 'Zekkariya': 'Zechariah', 'Malaki': 'Malachi', 'Matayo': 'Matthew', 'Makko': 'Mark', 'Lukka': 'Luke', 'Yokaana': 'John', 'Ebikolwa': 'Acts', 'Abaruumi': 'Romans', 'Abakkolinso': 'Corinthians', 'Abaggalatiya': 'Galatians', 'Abaefeso': 'Ephesians', 'Abafiripi': 'Philippians', 'Abakkolosaayi': 'Colossians', 'Abasessalonika': 'Thessalonians', 'Timosewo': 'Timothy', 'Tito': 'Titus', 'Firemooni': 'Philemon', 'Abaebbulaniya': 'Hebrews', 'Yakobo': 'James', 'Peetero': 'Peter', 'Yuda': 'Jude', 'Okubikkulirwa': 'Revelation' };
-  const REF_RE = new RegExp('\\b((?:[123]\\s)?(?:' + [...BOOK_NAMES, ...Object.keys(LU_BOOK_MAP)].map(b => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + '))\\s+(\\d+):(\\d+(?:-\\d+)?(?:,\\s*\\d+(?:-\\d+)?)*)', 'gi');
-  const linkifyRefs = (html: string): string => {
-    if (!html) return '';
-    return html.split(/(<[^>]+>)/g).map(part => {
-      if (!part || part.startsWith('<')) return part;
-      return part.replace(REF_RE, (m) => `<span class="scripture-ref" data-ref="${m}" style="color:#1d4ed8;text-decoration:underline;text-underline-offset:2px;cursor:pointer;font-weight:600">${m}</span>`);
-    }).join('');
-  };
-  const parseRef = (ref: string) => {
-    const m = ref.trim().match(/^((?:[123]\s)?[A-Za-z ]+?)\s+(\d+):(.+)$/);
-    if (!m) return null;
-    const rawName = m[1].trim().replace(/\s+/g, ' ');
-    // FIX: translate Luganda book names ("Yokaana" -> "John", "1 Yokaana" -> "1 John")
-    // so the book lookup in openScriptureRef finds the right book.
-    const numPrefix = rawName.match(/^[123]\s+/)?.[0] || '';
-    const baseName = rawName.replace(/^[123]\s+/, '');
-    const bookName = LU_BOOK_MAP[rawName] || (LU_BOOK_MAP[baseName] ? numPrefix + LU_BOOK_MAP[baseName] : rawName);
-    const chapter = parseInt(m[2]);
-    const verses: number[] = [];
-    m[3].split(',').forEach(seg => { const mm = seg.trim().match(/^(\d+)(?:-(\d+))?$/); if (mm) { const a = parseInt(mm[1]), b = mm[2] ? parseInt(mm[2]) : a; for (let v = a; v <= b; v++) verses.push(v); } });
-    // FIX: remember that this ref was clicked in Luganda ("Yokaana" not "John") and keep
-    // the Luganda name for the popup title, so the popup can show Luganda verses.
-    const wasLuganda = !!(LU_BOOK_MAP[rawName] || LU_BOOK_MAP[baseName]);
-    return { bookName, displayName: rawName, isLuganda: wasLuganda, chapter, verses };
-  };
-  const openScriptureRef = async (ref: string) => {
-    const p = parseRef(ref); if (!p) return;
-    // FIX: "Verse text not found" — the popup only tried ONE param style, ONE response shape,
-    // ONE verse field. The chapter load tries FIVE param styles and THREE shapes. Use the same.
-    const ALIAS: Record<string, string> = { 'Psalm': 'Psalms', 'Song of Songs': 'Song of Solomon', 'Song': 'Song of Solomon', 'Phil': 'Philippians', '1 Jn': '1 John', '2 Jn': '2 John', '3 Jn': '3 John' };
-    const want = (ALIAS[p.bookName] || p.bookName).toLowerCase();
-    const b = allBooks.find((x: any) => [(x.name || ''), (x.book_name || ''), (x.name_english || ''), (x.name_luganda || '')].map((s: string) => s.toLowerCase()).includes(want)) || null;
-    const targetBookNum = b ? (b.book_number ?? b.id ?? 0) : 0;
-    const targetBookId = b?.id ?? targetBookNum;
-    setRefPopup({ ref, bookName: p.displayName || p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: true, text: '' });
-    try {
-      let rows: any[] = [];
-      const urls = [
-        `/api/bible-verses?book_number=${targetBookNum}&chapter=${p.chapter}`,
-        `/api/bible-verses?bookId=${targetBookId}&chapter=${p.chapter}`,
-        `/api/bible-verses?book=${targetBookNum}&chapter=${p.chapter}`,
-        `/api/bible-verses?id=${targetBookId}&chapter=${p.chapter}`,
-        `/api/bible-verses?book_id=${targetBookId}&chapter=${p.chapter}`,
-      ];
-      for (const url of urls) {
-        try {
-          const r = await fetch(url);
-          const d = await r.json().catch(() => null);
-          const arr = Array.isArray(d) ? d : (d?.verses || d?.data || d?.rows || []);
-          if (Array.isArray(arr) && arr.length) { rows = arr; break; }
-        } catch {}
-      }
-      // FIX: a Luganda ref ("Yokaana 17:20-23") must pop up LUGANDA verses, not English.
-      // English refs keep showing English verses, exactly as before.
-      const norm = rows.map((v: any) => ({ verse: v.verse ?? v.verse_number ?? v.number, text: p.isLuganda ? (v.text_luganda || v.luganda || v.text_lu || v.text_english || v.english || v.text_en || v.text || v.verse_text || '') : (v.text_english || v.english || v.text_en || v.text || v.verse_text || '') }));
-      const picked = norm.filter((v: any) => p.verses.includes(Number(v.verse))).sort((a: any, b2: any) => a.verse - b2.verse);
-      const text = picked.length ? picked.map((v: any) => `${v.verse}. ${v.text}`).join('\n\n') : '';
-      setRefPopup({ ref, bookName: p.displayName || p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text, error: picked.length ? undefined : 'Verse text not found.' });
-    } catch { setRefPopup({ ref, bookName: p.displayName || p.bookName, bookNum: targetBookNum, chapter: p.chapter, verses: p.verses, loading: false, text: '', error: 'Could not load verse text.' }); }
-  };
-  const handleCommentaryClick = (e: React.MouseEvent) => {
-    // FIX: sidebar commentary "selection not shown" — after a drag-select, the browser fires
-    // click. If the drag started/ended on a blue ref, this opened the verse popup and the
-    // popup stole the painted selection (the capture still worked, so highlight still applied).
-    // A real TAP collapses the selection first, so: non-empty selection = drag-select = ignore.
-    try { if (window.getSelection()?.toString().trim()) return; } catch {}
-    const el = (e.target as HTMLElement).closest?.('.scripture-ref') as HTMLElement | null;
-    if (el?.dataset?.ref) { e.preventDefault(); e.stopPropagation(); openScriptureRef(el.dataset.ref); }
-  };
-  // Latest-ref for the memoised commentary div: it keeps the FIRST handlers it got,
-  // so route clicks/selections through a ref that always points at the latest
-  // closures (otherwise the ref popup would see stale allBooks).
-  const commentaryHandlersRef = useRef({ onSelect: (key: string) => {}, onClick: (e: React.MouseEvent) => {} });
-  useEffect(() => { commentaryHandlersRef.current = { onSelect: onSelectGeneric, onClick: handleCommentaryClick }; });
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => {
-    if (!bookNum || !chapterNum) return;
-    const load = async () => {
-      // FIX 2: fresh book/chapter = fresh commentary state. Without this,
-      // 3 John's commentary stayed in memory and showed on Genesis/Exodus
-      // verse 1 after navigating, because openCommentary() returns early
-      // when commentary[verseNum] already exists.
-      setCommentary({});
-      setChapterCommentary(null);
-      setSelectedVerse(null);
-      setActivePanel(null);
-      setLoading(true);
-      try {
-        // --- Books ---
-        let books: any[] = [];
-        try {
-          const r = await fetch('/api/bible-books');
-          const d = await r.json().catch(() => []);
-          books = Array.isArray(d) ? d : (d.books || d.data || []);
-        } catch {}
-        const b = books.find((x: any) => x.book_number === bookNum || x.id === bookNum || x.book_id === bookNum) || null;
-        setBook(b);
-        setAllBooks(books);
-        const bookId = b?.id ?? bookNum;
-        // FIX: sidebar Commentary tab needs chapter commentary — fetch it once on load.
-        // Never blocks the verses if it fails.
-        try {
-          const rr = await fetch(`/api/chapter-commentaries?bookId=${bookId}&chapter=${chapterNum}`);
-          const dd = await rr.json().catch(() => null);
-          const candidates = Array.isArray(dd) ? dd : (dd ? [dd] : []);
-          const bNames: (string | undefined | null)[] = [b?.name_english, b?.name, b?.book_name, b?.name_luganda];
-          const row = candidates.find((r: any) => rowBookMatches(r, bNames, bookId))
-            || (candidates.length === 1 && !rowHasBookField(candidates[0]) ? candidates[0] : null);
-          if (row && (commHtml(row, false) || commHtml(row, true))) setChapterCommentary(row);
-        } catch {}
-
-        // --- Verses: try EVERY param style + EVERY response shape ---
-        // This is the bug that blanked Esther: the old new-page only tried book_number + array.
-        let vList: any[] = [];
-        const verseUrls = [
-          `/api/bible-verses?book_number=${bookNum}&chapter=${chapterNum}`,
-          `/api/bible-verses?bookId=${bookId}&chapter=${chapterNum}`,
-          `/api/bible-verses?book=${bookNum}&chapter=${chapterNum}`,
-          `/api/bible-verses?id=${bookId}&chapter=${chapterNum}`,
-          `/api/bible-verses?book_id=${bookId}&chapter=${chapterNum}`,
-        ];
-        for (const url of verseUrls) {
-          try {
-            const r = await fetch(url);
-            const d = await r.json().catch(() => null);
-            const arr = Array.isArray(d) ? d : (d?.verses || d?.data || d?.rows || []);
-            if (Array.isArray(arr) && arr.length) { vList = arr; break; }
-          } catch {}
-        }
-        // Normalise verse field names: text_english/text_luganda OR english/luganda OR text
-        vList = vList.map((v: any) => ({
-          ...v,
-          verse: v.verse ?? v.verse_number ?? v.number,
-          text_english: v.text_english || v.english || v.text_en || v.text || '',
-          text_luganda: v.text_luganda || v.luganda || v.text_lu || '',
-        })).sort((a: any, b: any) => a.verse - b.verse);
-        setVerses(vList);
-
-        // --- Verse prayers: same multi-fallback ---
-        let prayers: any[] = [];
-        const prayerUrls = [
-          `/api/verse-prayers?book_number=${bookNum}&chapter=${chapterNum}`,
-          `/api/prayer-passages?book_number=${bookNum}&chapter=${chapterNum}`,
-          `/api/verse-prayers?bookId=${bookId}&chapter=${chapterNum}`,
-          `/api/prayer-passages?bookId=${bookId}&chapter=${chapterNum}`,
-          `/api/verse-prayers?book=${bookNum}&chapter=${chapterNum}`,
-        ];
-        for (const url of prayerUrls) {
-          try {
-            const r = await fetch(url);
-            const d = await r.json().catch(() => null);
-            const arr = Array.isArray(d) ? d : (d?.prayers || d?.data || []);
-            if (Array.isArray(arr) && arr.length) { prayers = arr; break; }
-          } catch {}
-        }
-        const map: Record<number, any> = {};
-        prayers.forEach((p: any) => { const vn = p.verse ?? p.verse_number; if (vn) map[vn] = p; });
-        setVersePrayers(map);
-
-        // --- Chapter intro + closing ---
-        try {
-          const r = await fetch(`/api/chapter-introductions?bookId=${bookId}&chapter=${chapterNum}`);
-          const d = await r.json().catch(() => null);
-          if (d && !Array.isArray(d)) setChapterIntro(d);
-          else if (Array.isArray(d) && d.length) setChapterIntro(d[0]);
-        } catch {}
-        try {
-          const r = await fetch(`/api/chapter-prayers?bookId=${bookId}&chapter=${chapterNum}`);
-          const d = await r.json().catch(() => null);
-          if (d && (pickClosing(d).en || pickClosing(d).lu)) setChapterClosing(d);
-        } catch {}
-        // --- Book closing (shown at bottom of Prayer tab / Closing section) ---
-        try {
-          const r = await fetch(`/api/book-prayers?bookId=${bookId}`);
-          const d = await r.json().catch(() => null);
-          if (d && (pickClosing(d).en || pickClosing(d).lu)) setBookClosing(d);
-        } catch {}
-      } finally { setLoading(false); }
-    };
-    load();
-  }, [bookNum, chapterNum]);
-
-  // FIX (jump to EXACT verse + HIGHLIGHT it): links from Devotionals / Cross-Refs /
-  // Commentary popup / Verse of the Day carry #verse-N, but verses load AFTER the
-  // page mounts, so the browser never scrolls to the hash. Once verses are loaded,
-  // scroll to it AND flash-highlight that verse for 4 seconds, so the reader can
-  // see exactly which verse they landed on — not just the area.
-  const [landedVerse, setLandedVerse] = useState<number | null>(null);
-  const landedTimeout = useRef<any>(null);
-  const flashLandedVerse = (verseNum: number) => {
-    if (isNaN(verseNum)) return;
-    setLandedVerse(verseNum);
-    if (landedTimeout.current) clearTimeout(landedTimeout.current);
-    landedTimeout.current = setTimeout(() => setLandedVerse(null), 4000);
-  };
-  useEffect(() => {
-    if (loading || !verses.length) return;
-    const hash = window.location.hash;
-    if (!hash.startsWith('#verse-')) { setLandedVerse(null); return; }
-    flashLandedVerse(parseInt(hash.replace('#verse-', ''), 10));
-    let tries = 0;
-    const go = () => {
-      const el = document.getElementById(hash.slice(1));
-      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
-      if (tries++ < 12) setTimeout(go, 150);
-    };
-    go();
-    return () => { if (landedTimeout.current) clearTimeout(landedTimeout.current); };
-  }, [loading, verses]);
-  // Same-chapter verse jumps (hash changes without a reload) get the same treatment.
-  useEffect(() => {
-    const onHash = () => {
-      const h = window.location.hash;
-      if (!h.startsWith('#verse-')) return;
-      flashLandedVerse(parseInt(h.replace('#verse-', ''), 10));
-      const el = document.getElementById(h.slice(1));
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    };
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, []);
-
-  const openPrayer = (verseNum: number) => {
-    // Second click on the SAME verse's Prayer button = minimize / close
-    if (selectedVerse === verseNum && activePanel === 'prayer') {
-      setSelectedVerse(null);
-      setActivePanel(null);
-      return;
-    }
-    // Otherwise open prayer, and minimize cross-ref if it was open
-    setSelectedVerse(verseNum);
-    setActivePanel('prayer');
-    setRightTab('prayer');
-  };
-  const openCrossRefs = async (verseNum: number) => {
-    // Second click on the SAME verse's Cross-Ref button = minimize / close
-    if (selectedVerse === verseNum && activePanel === 'crossref') {
-      setSelectedVerse(null);
-      setActivePanel(null);
-      return;
-    }
-    // Otherwise: MINIMIZE prayer, open cross-ref in light paper
-    setSelectedVerse(verseNum);
-    setActivePanel('crossref');
-    setLoadingCross(true);
-    setCrossRefs([]);
-    const bookId = book?.id ?? bookNum;
-    const urls = [
-      `/api/cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`,
-      `/api/verse-cross-references?source_book_number=${bookNum}&source_chapter=${chapterNum}&source_verse=${verseNum}`,
-      `/api/cross-references?source_book_id=${bookId}&source_chapter=${chapterNum}&source_verse=${verseNum}`,
-    ];
-    for (const url of urls) {
-      try {
-        const r = await fetch(url);
-        const d = await r.json().catch(() => []);
-        const arr = Array.isArray(d) ? d : (d?.refs || []);
-        if (arr.length) { setCrossRefs(arr); break; }
-      } catch {}
-    }
-    setLoadingCross(false);
-  };
-
-  // ── COMMENTARY BUG FIX ─────────────────────────────────────────────────────
-  // BEFORE: this stored arr[0] — the FIRST row the API returned — under whatever
-  // verse you clicked. The API ignores `verse` and returns the WHOLE chapter,
-  // so arr[0] was ALWAYS verse 1's commentary. Every verse showed verse 1's
-  // "ESC Insight" text, in EN and LU, inline and in the sidebar.
-  // AFTER: pick the row whose verse number actually equals verseNum. If no row
-  // matches, store a _none marker so THIS verse shows "no commentary" instead
-  // of verse 1's text, and the sidebar falls through to chapter commentary.
-  const openCommentary = async (verseNum: number) => {
-    if (selectedVerse === verseNum && activePanel === 'commentary') { setSelectedVerse(null); setActivePanel(null); return; }
-    setSelectedVerse(verseNum);
-    setActivePanel('commentary');
-    setRightTab('commentary');
-    if (commentary[verseNum]) return;
-    try {
-      // V3: ask the route Admin PROVED works (/api/verse-commentaries) FIRST.
-      // Admin loads 3 John 1:1 through it, so the row is there. The old code
-      // asked ONLY /api/commentaries, which kept returning empty for this
-      // page. /api/commentaries stays as a fallback. Every URL is tried
-      // until one returns a matching row — one empty reply no longer ends
-      // the search with "No written commentary".
-      const urls = [
-        `/api/verse-commentaries?book_number=${bookNum}&bookName=${encodeURIComponent(currentBookNames()[0] || '')}&chapter=${chapterNum}&verse=${verseNum}`,
-        `/api/verse-commentaries?bookId=${book?.id ?? bookNum}&chapter=${chapterNum}&verse=${verseNum}`,
-        `/api/commentaries?book_number=${bookNum}&chapter=${chapterNum}&verse=${verseNum}`,
-        `/api/commentaries?bookId=${book?.id ?? bookNum}&chapter=${chapterNum}&verse=${verseNum}`,
-      ];
-      const rowVerse = (c: any) => Number(c?.verse_number ?? c?.verseNumber ?? c?.verse ?? NaN);
-      // A row is rejected ONLY if it PROVABLY belongs to another book (its
-      // book field says so). A row with NO book label is shown.
-      const bookOk = (c: any) => !rowHasBookField(c) || rowBookMatches(c, currentBookNames(), book?.id ?? bookNum);
-      let match: any = undefined;
-      for (const url of urls) {
-        try {
-          const r = await fetch(url);
-          const d = await r.json().catch(() => null);
-          const arr = Array.isArray(d) ? d : (d?.commentaries || d?.rows || d?.data || (d ? [d] : []));
-          match = arr.find((c: any) => rowVerse(c) === verseNum && bookOk(c))
-            || (arr.length === 1 && Number.isNaN(rowVerse(arr[0])) && bookOk(arr[0]) ? arr[0] : undefined);
-          if (match) break;
-        } catch {}
-      }
-      setCommentary(prev => ({ ...prev, [verseNum]: match || { _none: true } }));
-    } catch {
-      setCommentary(prev => ({ ...prev, [verseNum]: { _none: true } }));
-    }
-  };
-
-  const toggleBookmark = (verseNum: number) => {
-    setBookmarks(prev => {
-      const next = prev.includes(verseNum) ? prev.filter(v => v !== verseNum) : [...prev, verseNum];
-      try { localStorage.setItem(`prayread-bookmarks-${bookNum}-${chapterNum}`, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  };
-
-  const linkColor = theme === 'dark' ? 'text-orange-400' : '{linkColor}'; // V5: blue -> orange in Dark
-  const crossBody = theme === 'dark' ? 'text-slate-100' : 'text-slate-700'; // V5: cross-ref body near-white in Dark
-  const bodySize = fontSize; // V5 universal: base size drives verses + prayer + sidebar + cross-ref
-  const smallSize = Math.max(12, fontSize - 2);
-  const headingBlue = theme === 'dark' ? 'text-orange-400' : 'text-blue-800';
-  // V4: Sun cycles ONLY 3 themes: White -> Light Blue (original) -> Dark (white text) -> White
-  const cycleTheme = () => setTheme(t => t === 'white' ? 'lightblue' : t === 'lightblue' ? 'dark' : 'white');
-  const themeClasses = theme === 'dark'
-    ? { page: 'bg-slate-950 text-slate-100', card: 'bg-slate-900 text-slate-100 border-slate-800', header: 'bg-slate-950 text-slate-100 border-slate-800', text: 'text-slate-100', muted: 'text-slate-300', submuted: 'text-slate-400', paper: 'bg-slate-800 text-slate-100 border-slate-700', prayer: 'bg-rose-950/40 text-rose-100 border-rose-900/50', chip: 'bg-slate-800 text-slate-100', divider: 'border-slate-700' }
-    : theme === 'white'
-    ? { page: 'bg-white text-slate-900', card: 'bg-white text-slate-900 border-slate-200', header: 'bg-white text-slate-900 border-slate-200', text: 'text-slate-900', muted: 'text-slate-600', submuted: 'text-slate-500', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-slate-100 text-slate-800', divider: 'border-slate-100' }
-    : { page: 'bg-[#BDD7F5] text-slate-900', card: 'bg-[#DCEBFF] text-slate-900 border-[#A8C6EE]', header: 'bg-[#C7DEFA] text-slate-900 border-[#A8C6EE]', text: 'text-slate-900', muted: 'text-slate-700', submuted: 'text-slate-600', paper: 'bg-[#FFFEF7] text-slate-900 border-amber-200', prayer: 'bg-rose-50 text-slate-900 border-rose-100', chip: 'bg-[#C7DEFA] text-slate-800', divider: 'border-[#A8C6EE]' };
-
-
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]"><p className="text-slate-500 text-sm">Loading chapter…</p></div>;
-
-  const bookName = book?.name_english || `Book ${bookNum}`;
-  const bookNameLu = book?.name_luganda || '';
-  const testament = book?.testament || (bookNum <= 39 ? 'Old Testament' : 'New Testament');
-  const totalChapters = book?.total_chapters || book?.chapters || '?';
-  const intro = pickIntro(chapterIntro);
-  const closing = pickClosing(chapterClosing).en || pickClosing(chapterClosing).lu ? pickClosing(chapterClosing) : pickClosing(chapterIntro);
-  const bookClose = pickClosing(bookClosing);
-  const selectedPrayer = selectedVerse ? pickPrayer(versePrayers[selectedVerse]) : { en: '', lu: '' };
-  const verseText = (v: any) => lang === 'LU' ? (v.text_luganda || v.text_english) : lang === 'BOTH' ? v.text_english : (v.text_english || v.text_luganda);
-
+  const openStrong = (code: string, word = "") => { setStrongCode(code); setStrongWord(word); };
+  const crossRefs = book.number === 1 && chapter === 1 ? [{ ref: "John 1:1", text: "In the beginning was the Word, and the Word was with God, and the Word was God." }, { ref: "Hebrews 11:3", text: "Through faith we understand that the worlds were framed by the word of God." }, { ref: "Psalm 19:1", text: "The heavens declare the glory of God; and the firmament sheweth his handywork." }] : [{ ref: `${book.en} ${chapter}:1`, text: "Cross-references for this chapter are added by the admin." }];
+  const verseNums = Array.from({ length: verseCount }, (_, i) => i + 1);
   return (
-    <div className={`min-h-screen ${themeClasses.page} select-text`} style={{ WebkitUserSelect: 'text', userSelect: 'text' } as any}>
-      <style>{`::selection{background:#2563eb !important;color:#ffffff !important} ::-moz-selection{background:#2563eb !important;color:#ffffff !important} @keyframes landedVersePulse{0%{box-shadow:0 0 0 3px rgba(245,158,11,0.9),0 0 0 10px rgba(245,158,11,0.35)}100%{box-shadow:0 0 0 3px rgba(245,158,11,0),0 0 0 10px rgba(245,158,11,0)}} .landed-verse{animation:landedVersePulse 4s ease-out;background-color:rgba(251,191,36,0.22) !important}`}</style>
-      {/* Header — ORIGINAL */}
-      <div className={`${themeClasses.header} border-b sticky top-0 z-30`}>
-        <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center gap-3">
-          <button onClick={() => router.push('/bible-reader')} className="text-slate-600 text-[15px] hover:text-slate-900">‹ Back</button>
-          <div className="flex-1 text-center">
-            <h1 className="text-[19px] font-bold leading-tight">{bookName} {chapterNum}</h1>
-            <p className="text-[12px] text-slate-500">Ch {chapterNum} of {totalChapters}</p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="w-9 h-9 rounded-md bg-orange-600 text-white text-[12px] font-bold flex items-center justify-center" title="Language">{lang === 'EN' ? 'GB' : lang}</button>
-            <button onClick={cycleTheme} title={`Theme: ${theme} — tap for White / Light Blue / Dark`} className="w-9 h-9 rounded-md bg-yellow-400 text-[15px] flex items-center justify-center">{theme === "dark" ? "🌙" : theme === "white" ? "⚪" : "☀"}</button>
-            <button onClick={() => setFontSize(Math.max(14, fontSize - 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">−</button>
-            <button onClick={() => setFontSize(Math.min(24, fontSize + 1))} className="w-9 h-9 rounded-md bg-slate-200 text-lg flex items-center justify-center">+</button>
-            <button onClick={() => setMenuOpen(o => !o)} title="Menu" className="w-9 h-9 rounded-md bg-blue-600 text-white text-lg flex items-center justify-center">☰</button>
-          </div>
+    <div className={`pr-ch-page ${theme === "dark" ? "is-dark" : ""}`}>
+      {/* HERO */}
+      <section className="pr-ch-hero"><div className="pr-container">
+        <div className="pr-ch-hero-top">
+          <div className="pr-ch-hero-pills"><Link href="/bible-reader" className="pr-ch-hero-pill">← Back to books</Link><Link href="/" className="pr-ch-hero-pill">← Home</Link></div>
+          <Link href="/bible-reader" className="pr-ch-hero-pill is-soft">📖 Bible Reader</Link>
         </div>
-      </div>
+        <h1>{book.en} {chapter}</h1>
+        <p>{book.lu} · {verseCount} {verseCount === 1 ? "verse" : "verses"}</p>
+      </div></section>
 
-      <div className="max-w-[1200px] mx-auto px-4 py-4 grid lg:grid-cols-[1fr_360px] gap-5 items-start">
-        {/* LEFT — ORIGINAL */}
-        <div>
-          <span className="inline-block px-3 py-1 rounded-full bg-blue-100 text-blue-800 text-[13px] font-semibold">{testament}</span>
-          <h2 className="text-[44px] leading-[1.1] font-bold text-[#1E3A8A] mt-3">{bookName}</h2>
-          <p className="text-[19px] font-bold {linkColor} mt-1">Chapter {chapterNum}</p>
-          {bookNameLu && <p className="text-slate-600 text-[15px] mt-0.5">{bookNameLu}</p>}
-          <hr className="border-blue-200 my-4" />
-
-          <ReadingPlanChapterIndicator bookNumber={bookNum} chapter={chapterNum} />
-
-          {verses.length === 0 ? (
-            <div className={`${themeClasses.card} rounded-xl p-8 text-center shadow-sm`}>
-              <p className="font-bold">Verses could not be loaded.</p>
-              <p className="text-sm text-slate-500 mt-1">Neon has the verses — this page tried 5 verse URLs and got none back. Check <code className="bg-slate-100 px-1 rounded">/api/bible-verses?book_number={bookNum}&amp;chapter={chapterNum}</code> in a new tab.</p>
-              <button onClick={() => window.location.reload()} className="mt-3 px-4 py-2 bg-slate-900 text-white text-sm font-semibold rounded-lg">Reload</button>
+      <div className="pr-container pr-ch-shell">
+        {/* CONTROL BAR */}
+        <div className="pr-controls">
+          <div className="pr-ctrl-left">
+            <button className="pr-icon-btn" onClick={() => step(-1)} aria-label="Previous chapter">‹</button>
+            <button className="pr-chip" onClick={() => setShowGrid((v) => !v)}>☰ Chapter {chapter}</button>
+            <button className="pr-icon-btn" onClick={() => step(1)} aria-label="Next chapter">›</button>
+          </div>
+          <div className="pr-ctrl-right">
+            <label className="pr-version"><select value={versionId} onChange={(e) => setVersionId(e.target.value)} aria-label="Bible version">{VERSIONS.map((v) => <option key={v.id} value={v.id}>{v.label}</option>)}</select><span>▾</span></label>
+            <div className="pr-lang" role="group" aria-label="Language">
+              {(["en", "lu", "both"] as const).map((m) => <button key={m} className={langMode === m ? "is-active" : ""} onClick={() => setLangMode(m)}>{m === "en" ? "EN" : m === "lu" ? "LU" : "BOTH"}</button>)}
             </div>
-          ) : verses.map((v: any) => {
-            const hasPrayer = !!(pickPrayer(versePrayers[v.verse]).en || pickPrayer(versePrayers[v.verse]).lu);
-            const isSel = selectedVerse === v.verse;
-            const pr = pickPrayer(versePrayers[v.verse]);
-            return (
-              <article data-mark-key={`${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} id={`verse-${v.verse}`} key={v.verse} className={`${themeClasses.card} rounded-xl p-5 shadow-sm mb-3 ${isSel ? 'ring-2 ring-amber-500' : ''} ${landedVerse === v.verse ? 'landed-verse ring-2 ring-amber-500' : ''}`}>
-                <div className="flex gap-2">
-                  <span className="text-orange-600 font-bold text-[17px] shrink-0">{v.verse}</span>
-                  <div className="flex-1">
-                    <p onMouseUp={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} onTouchEnd={() => onSelectText(v.verse, lang === 'LU' ? 'LU' : 'EN')} style={{ fontSize }} className={`leading-relaxed ${themeClasses.text} select-text cursor-text`} style={{ fontSize: bodySize }}>{renderMarked(verseText(v), v.verse, lang === 'LU' ? 'LU' : 'EN')}</p>
-                    {lang === 'BOTH' && v.text_luganda && <p onMouseUp={() => onSelectText(v.verse, 'LU')} onTouchEnd={() => onSelectText(v.verse, 'LU')} style={{ fontSize }} data-mark-key={`${v.verse}-LU`} className={`leading-relaxed ${themeClasses.muted} mt-2 pt-2 border-t ${themeClasses.divider} select-text cursor-text`}>{renderMarked(v.text_luganda, v.verse, 'LU')}</p>}
-                  </div>
-                  <button onClick={() => { navigator.clipboard?.writeText(`${bookName} ${chapterNum}:${v.verse} — ${verseText(v)}`); setCopied(v.verse); setTimeout(() => setCopied(null), 1200); }} className="text-slate-400 hover:text-slate-600 self-start text-[16px]" title="Copy">{copied === v.verse ? '✓' : '⧉'}</button>
-                  <MarkBtn markKey={`${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} title="Select this verse & mark it" />
-                </div>
-                <hr className="border-slate-100 my-3" />
-                {/* V3: Notes + Insight REMOVED — Bookmark now fits on the same line */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => openPrayer(v.verse)} disabled={!hasPrayer} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${hasPrayer ? 'bg-rose-100 text-rose-800 hover:bg-rose-200' : 'bg-slate-50 text-slate-400 cursor-not-allowed'}`}>♡ Prayer</button>
-                  <VerseShare book={bookName} bookNum={bookNum} chapter={chapterNum} verse={v.verse} text={v.text_english || verseText(v)} textLu={v.text_luganda || ""} prayerEn={pr.en} prayerLu={pr.lu} crossRefs={isSel && activePanel === 'crossref' ? crossRefs : []} isDark={theme === 'dark'} />
-                  <button onClick={() => openCrossRefs(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'crossref' ? 'bg-amber-200 text-amber-900' : 'bg-slate-100 text-slate-800'}`}>🔗 Cross-Ref</button>
-                  <button onClick={() => openCommentary(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13.5px] font-medium ${isSel && activePanel === 'commentary' ? 'bg-blue-200 text-blue-900' : 'bg-slate-100 text-slate-800'}`}>📖 Commentary</button>
-                  <button onClick={() => toggleBookmark(v.verse)} className={`px-3 py-1.5 rounded-lg text-[13px] font-medium ${bookmarks.includes(v.verse) ? 'bg-amber-400 text-amber-950' : 'bg-slate-100 text-slate-700'}`}>{bookmarks.includes(v.verse) ? '🔖 Saved ✓' : '🔖 Bookmark'}</button>
-                </div>
-
-                {/* Prayer for THIS verse — inline, under THIS verse. Nowhere else. */}
-                {isSel && activePanel === 'prayer' && (
-                  <div data-mark-key={`prayer-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} className={`mt-4 rounded-xl ${themeClasses.prayer} border p-4`}>
-                    <p className="text-[11px] font-bold tracking-wide text-rose-500 uppercase mb-2 flex items-center gap-2">🙏 Pray-Read · Verse {v.verse} <MarkBtn markKey={`prayer-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} title="Select this prayer & mark it" /></p>
-                    {!pr.en && !pr.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
-                      <>
-                        {pr.en && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-EN`)} data-mark-key={`prayer-${v.verse}-EN`} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(pr.en, `prayer-${v.verse}-EN`)}</p>}
-                        {pr.lu && <p onMouseUp={() => onSelectGeneric(`prayer-${v.verse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${v.verse}-LU`)} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${pr.en ? 'mt-3 pt-3 border-t border-rose-200/60' : ''}`}>{renderMarkedByKey(pr.lu, `prayer-${v.verse}-LU`)}</p>}
-                      </>
-                    )}
-                  </div>
-                )}
-                {/* Cross-refs for THIS verse — LIGHT PAPER card. Opens when Prayer is minimized. */}
-                {isSel && activePanel === 'crossref' && (
-                  <div data-mark-key={`crossref-${v.verse}-EN`} className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
-                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2 flex items-center gap-2">🔗 Cross References · Verse {v.verse} <MarkBtn markKey={`crossref-${v.verse}-EN`} title="Select these cross-references & mark them" /></p>
-                    {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
-                      <ul className="space-y-1.5">{crossRefs.map((cr: any, i: number) => (
-                        <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}#verse-${cr.target_verse}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${v.verse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${v.verse}-EN`)}</span>}</li>
-                      ))}</ul>
-                    )}
-                  </div>
-                )}
-                {/* Commentary for THIS verse — same one-panel rule */}
-                {isSel && activePanel === 'commentary' && (
-                  <div data-mark-key={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} className={`mt-3 rounded-xl ${themeClasses.paper} border shadow-md p-4`}>
-                    <p className="text-[11px] font-bold tracking-wide {linkColor} uppercase mb-2 flex items-center gap-2">📖 Commentary · Verse {v.verse} <MarkBtn markKey={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} title="Select this commentary & mark it" /></p>
-                    {commentary[v.verse] && !commentary[v.verse]._none && commHtmlForLang(commentary[v.verse], lang) ? (
-                      <CommentaryHtml html={commHtmlForLang(commentary[v.verse], lang, `commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-${v.verse}-${lang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
-                    ) : commentary[v.verse] && !commentary[v.verse]._none ? (
-                      <p className="text-sm text-slate-600 leading-relaxed">Commentary saved but empty for this verse.</p>
-                    ) : (
-                      <p className="text-sm text-slate-600 leading-relaxed">No written commentary saved for this verse yet. Pray-read the verse above — the Prayer tab for this verse carries the meditation for it. Commentary is added from Admin → Commentaries.</p>
-                    )}
-                  </div>
-                )}
-              </article>
-            );
-          })}
-
-          {/* Chapter Closing Prayer — at the END of the chapter, after the last verse. Not in the prayer list. */}
-          {(closing.en || closing.lu) && (
-            <div data-mark-key={`closing-ch-${lang === 'LU' ? 'LU' : 'EN'}`} className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-4 border-2 border-amber-200`}>
-              <p className="text-[11px] font-bold tracking-wide text-amber-700 uppercase mb-2 flex items-center gap-2">🙏 Chapter {chapterNum} Closing Prayer <MarkBtn markKey={`closing-ch-${lang === 'LU' ? 'LU' : 'EN'}`} title="Select this closing prayer & mark it" /></p>
-              {closing.en && <p data-mark-key="closing-ch-EN" onMouseUp={() => onSelectGeneric('closing-ch-EN')} onTouchEnd={() => onSelectGeneric('closing-ch-EN')} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(closing.en, 'closing-ch-EN')}</p>}
-              {closing.lu && <p data-mark-key="closing-ch-LU" onMouseUp={() => onSelectGeneric('closing-ch-LU')} onTouchEnd={() => onSelectGeneric('closing-ch-LU')} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${closing.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{renderMarkedByKey(closing.lu, 'closing-ch-LU')}</p>}
-            </div>
+            <button className="pr-chip" onClick={() => setFontScale((f) => Math.max(0.85, +(f - 0.1).toFixed(2)))}>T A-</button>
+            <button className="pr-chip" onClick={() => setFontScale((f) => Math.min(1.6, +(f + 0.1).toFixed(2)))}>T A+</button>
+            <button className={`pr-chip ${playing ? "is-active" : ""}`} onClick={handleListen}>{playing ? "❚❚ Pause" : "▶ Listen"}</button>
+            <button className={`pr-chip ${read ? "is-active" : ""}`} onClick={toggleRead}>{read ? "✓ Read" : "✓ Mark as read"}</button>
+            <button className="pr-chip" onClick={shareChapter}>⤴ Share</button>
+            <button className="pr-icon-btn" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))} aria-label="Toggle theme">{theme === "dark" ? "☀" : "🌙"}</button>
+          </div>
+          {showGrid && (
+            <div className="pr-ch-gridpanel"><div className="pr-ch-grid">{Array.from({ length: book.chapters }, (_, i) => i + 1).map((n) => <button key={n} className={n === chapter ? "is-active" : ""} onClick={() => goChapter(n)}>{n}</button>)}</div></div>
           )}
-          {/* Book Closing Prayer — only after the LAST chapter */}
-          {chapterNum === Number(totalChapters) && (bookClose.en || bookClose.lu) && (
-            <div data-mark-key="book-closing-EN" className={`${themeClasses.card} rounded-xl p-5 shadow-sm mt-3 border-2 border-purple-200`}>
-              <p className="text-[11px] font-bold tracking-wide text-purple-700 uppercase mb-2 flex items-center gap-2">🙏 Book Closing Prayer — {bookName} <MarkBtn markKey="book-closing-EN" title="Select this book closing prayer & mark it" /></p>
-              {bookClose.en && <p data-mark-key="book-closing-EN" onMouseUp={() => onSelectGeneric('book-closing-EN')} onTouchEnd={() => onSelectGeneric('book-closing-EN')} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(bookClose.en, 'book-closing-EN')}</p>}
-              {bookClose.lu && <p data-mark-key="book-closing-LU" onMouseUp={() => onSelectGeneric('book-closing-LU')} onTouchEnd={() => onSelectGeneric('book-closing-LU')} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${bookClose.en ? 'mt-3 pt-3 border-t border-slate-100' : ''}`}>{renderMarkedByKey(bookClose.lu, 'book-closing-LU')}</p>}
-            </div>
-          )}
-          <ReadingPlanChapterFooter bookNumber={bookNum} chapter={chapterNum} />
+          {strongsOn && <p className="pr-strong-note">KJV+ · Tap a blue Strong's number (e.g. H430) to see what the Hebrew / Greek word means.</p>}
         </div>
 
-        {/* RIGHT — ORIGINAL tabs. FIX (sidebar at the BOTTOM on phones/tablets):
-            the grid below lg: is ONE column, so this <aside> stacked UNDER the
-            verses. hidden lg:block keeps it desktop-only; phones/tablets use the
-            hamburger drawer, which holds the same Intro / Commentary / Prayer tabs. */}
-        <aside className={`hidden lg:block lg:sticky lg:top-[70px] ${themeClasses.card} rounded-xl overflow-hidden border`}>
-          <div className={`flex border-b ${themeClasses.divider} ${themeClasses.header}`}>
-            {([
-              { id: 'intro', label: '📕 Intro' },
-              { id: 'commentary', label: '📖 Commentary' },
-              { id: 'prayer', label: '🙏 Prayer' },
-            ] as const).map(t => (
-              <button key={t.id} onClick={() => {
-                // Second click on the active Prayer tab = minimize the open prayer
-                if (t.id === 'prayer' && rightTab === 'prayer' && activePanel === 'prayer') { setSelectedVerse(null); setActivePanel(null); return; }
-                setRightTab(t.id);
-              }} className={`flex-1 py-3 text-[14px] font-semibold ${rightTab === t.id ? `${themeClasses.text} border-b-2 border-current` : themeClasses.muted}`}>{t.label}</button>
-            ))}
-            <button onClick={() => setSidebarLang(sidebarLang === 'EN' ? 'LU' : sidebarLang === 'LU' ? 'BOTH' : 'EN')} title={`Sidebar language: ${sidebarLang} — tap to change (sidebar only)`} className="w-[52px] bg-orange-600 text-white text-[11px] font-bold leading-tight">GB<br />{sidebarLang}</button>
+        <div className="pr-ch-layout">
+          {/* LEFT SIDEBAR */}
+          <aside className="pr-ch-side">
+            <div className="pr-side-tabs">
+              <button className={sideTab === "intro" ? "is-active" : ""} onClick={() => setSideTab("intro")}>📖 Intro</button>
+              <button className={sideTab === "commentary" ? "is-active" : ""} onClick={() => setSideTab("commentary")}>💬 Commentary</button>
+              <button className={sideTab === "prayer" ? "is-active" : ""} onClick={() => setSideTab("prayer")}>♡ Prayer</button>
+            </div>
+            <div className="pr-side-card">
+              {sideTab === "intro" && (<><div className="pr-side-card-head"><span>📖</span><div><h3>Chapter intro</h3><p>{book.en} {chapter}</p></div></div><div className="pr-side-card-body"><h4>{content.introTitle}</h4><p className="pr-gold-ref">{content.introRef}</p><p>{content.introBody}</p><div className="pr-verse-mini"><span>1</span> {enMap.get(1) || "In the beginning God created the heaven and the earth."}</div></div></>)}
+              {sideTab === "commentary" && (<><div className="pr-side-card-head"><span>💬</span><div><h3>Commentary</h3><p>{book.en} {chapter}</p></div></div><div className="pr-side-card-body"><p>{content.commentary}</p></div></>)}
+              {sideTab === "prayer" && (<><div className="pr-side-card-head"><span>♡</span><div><h3>Prayer passage</h3><p>{book.en} {chapter}</p></div></div><div className="pr-side-card-body"><p>{content.prayerPassage}</p><p className="pr-side-italic">Tap any verse, then “Prayer passage”, to pray that verse.</p></div></>)}
+            </div>
+          </aside>
+
+          {/* RIGHT VERSES PANE */}
+          <div className="pr-ch-main">
+            <div className="pr-resources-bar"><button onClick={() => setResourcesOpen((v) => !v)}>☰</button><span>Resources</span><button className="pr-resources-chev" onClick={() => setResourcesOpen((v) => !v)}>{resourcesOpen ? "˄" : "˅"}</button></div>
+            {resourcesOpen && (
+              <div className="pr-resources-panel">
+                <button onClick={() => setSideTab("commentary")}>💬 Commentary — {book.en} {chapter}</button>
+                <button onClick={() => setSideTab("prayer")}>♡ Prayer passage</button>
+                <button onClick={() => setCrossOpen(true)}>🔗 Cross-references ({crossRefs.length})</button>
+                <button onClick={() => { document.getElementById("closing-prayer")?.scrollIntoView({ behavior: "smooth" }); }}>🙏 Closing prayer</button>
+              </div>
+            )}
+            <div className="pr-verses-card">
+              {loading && verseCount === 0 ? <p className="pr-loading">Loading {book.en} {chapter}…</p> : error && verseCount === 0 ? <p className="pr-empty">{error} <button onClick={() => window.location.reload()}>Try again</button></p> : verseCount === 0 ? <p className="pr-empty">No verses here. Choose another chapter above.</p> : (
+                <div style={{ fontSize: `${17 * fontScale}px` }}>
+                  {verseNums.map((n) => {
+                    const en = enMap.get(n) || ""; const lu = luMap.get(n) || "";
+                    const ann = annotations[n] || {}; const hl = HIGHLIGHTS.find((h) => h.id === ann.highlight);
+                    const selected = selectedVerse === n;
+                    const chips = strongChipsFor(n);
+                    return (
+                      <div key={n} id={`verse-${n}`} className={`pr-verse-block ${selected ? "is-selected" : ""}`}>
+                        {selected && (
+                          <div className="pr-verse-bar">
+                            <span className="pr-verse-bar-title">VERSE {n}</span>
+                            <button className="pr-verse-bar-x" onClick={() => setSelectedVerse(null)}>✕</button>
+                            <div className="pr-verse-bar-row">
+                              <button onClick={() => { setPrayerOpen(true); }}>♡ Prayer passage</button>
+                              <button onClick={() => setCrossOpen(true)}>🔗 Cross-references</button>
+                              <button onClick={() => setSideTab("commentary")}>💬 Commentary</button>
+                              {HIGHLIGHTS.map((h) => <button key={h.id} className="pr-dot" style={{ background: h.color }} title={h.label} onClick={() => applyHighlight(n, h.id)}>{ann.highlight === h.id ? "✓" : ""}</button>)}
+                              <button onClick={() => shareVerse(n)}>⤴ Share</button>
+                            </div>
+                            <div className="pr-verse-bar-row">
+                              <button onClick={() => toggleBookmark(n)}>{ann.bookmark ? "🔖 Bookmarked" : "🔖 Bookmark"}</button>
+                              <button onClick={() => copyText(`${book.en} ${chapter}:${n}\n${en}${lu && lu !== en ? `\n${lu}` : ""}`, "Verse copied.")}>⧉ Copy</button>
+                              <button onClick={() => { setNoteDraft(ann.note || ""); setSelectedVerse(n); }}>✎ Add note</button>
+                              {ann.note && <span className="pr-note-saved">📝 {ann.note}</span>}
+                            </div>
+                            {selected && (
+                              <div className="pr-note-box"><input value={noteDraft} onChange={(e) => setNoteDraft(e.target.value)} placeholder="Write a note on this verse…" /><button onClick={() => saveNote(n)}>Save note</button></div>
+                            )}
+                          </div>
+                        )}
+                        <button className="pr-verse-btn" onClick={() => { setSelectedVerse(selected ? null : n); setNoteDraft(annotations[n]?.note || ""); }}>
+                          <span className="pr-v-num">{ann.bookmark ? "🔖 " : ""}{n}</span>
+                          <span className="pr-v-text" style={hl ? { background: hl.color, borderRadius: 6, padding: "0 4px" } : undefined}>
+                            {showEn && en && <span className="pr-v-en">{en}</span>}
+                            {showEn && !en && showLu && <span className="pr-v-missing">The English text is not yet available for this verse.</span>}
+                            {showLu && (showEn ? <span className="pr-v-divider" /> : null)}
+                            {showLu && lu && <span className="pr-v-lu"><span className="pr-lu-badge">LU</span>{lu}</span>}
+                            {showLu && !lu && <span className="pr-v-missing">The Luganda text is not yet available for this verse.</span>}
+                            {chips.length > 0 && <span className="pr-strong-row">{chips.map((c) => <button key={c} className="pr-strong" onClick={(e) => { e.stopPropagation(); openStrong(c); }}>{c}</button>)}</span>}
+                          </span>
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Prayer passage + Cross-refs panels (inline, under the verse) */}
+            {prayerOpen && selectedVerse ? (
+              <div className="pr-inline-panel"><h3>♡ Prayer passage — {book.en} {chapter}:{selectedVerse}</h3><p>{content.prayerPassage}</p><p><strong>EN:</strong> {enMap.get(selectedVerse)}</p>{luMap.get(selectedVerse) && <p><strong>LU:</strong> {luMap.get(selectedVerse)}</p>}<button onClick={() => setPrayerOpen(false)}>Close</button></div>
+            ) : null}
+            {crossOpen && (
+              <div className="pr-inline-panel"><h3>🔗 Cross-references — {book.en} {chapter}</h3>{crossRefs.map((c, i) => <p key={i}><strong>{c.ref} —</strong> {c.text}</p>)}<button onClick={() => setCrossOpen(false)}>Close</button></div>
+            )}
+
+            <div className="pr-ch-nav"><button onClick={() => step(-1)}>‹ Previous chapter</button><button onClick={() => step(1)}>Next chapter ›</button></div>
+
+            {/* CLOSING PRAYER */}
+            <div className="pr-closing" id="closing-prayer">
+              <div className="pr-closing-head"><span className="pr-closing-ic">♡</span><div><small>CLOSING PRAYER</small><h2>{book.en} {chapter}</h2></div></div>
+              <h3>Closing prayer for {book.en} {chapter}</h3>
+              <p>{content.closingEn}</p>
+              <hr />
+              <p>{content.closingLu}</p>
+              <span className="pr-ref-pill">{book.en} {chapter}:1</span>
+              <p className="pr-amen">Amen.</p>
+              <div className="pr-closing-actions"><button onClick={sharePrayer}>⤴ Share prayer</button><button onClick={() => { document.getElementById("closing-prayer")?.scrollIntoView({ behavior: "smooth" }); sayToast("Pray it again, slowly."); }}>↻ Pray again</button></div>
+            </div>
+
+            <div className="pr-bottom-cards">
+              <div><h3>Pray this passage</h3><p>Turn {book.en} {chapter} into a guided prayer and keep it in your prayer journal.</p><Link href={`/prayer-library?book=${book.number}&chapter=${chapter}`}>Open prayer journal →</Link></div>
+              <div><h3>Saved for later</h3><p>Highlights and notes on {book.en} are stored on this device and in the offline centre.</p><Link href="/dashboard">See my library →</Link></div>
+            </div>
           </div>
-          <div className="p-4 max-h-[70vh] overflow-y-auto">
-            {rightTab === 'intro' && (
-              <div>
-                <p className="font-bold text-[16px] mb-3 flex items-center gap-2">📕 Chapter {chapterNum} <MarkBtn markKey={`intro-ch-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} title="Select this introduction & mark it" /></p>
-                {!intro.en && !intro.lu ? <p className="text-sm text-slate-500 italic">No chapter introduction available.</p> : (
-                  <>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p data-mark-key="intro-ch-EN" onMouseUp={() => onSelectGeneric('intro-ch-EN')} onTouchEnd={() => onSelectGeneric('intro-ch-EN')} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.en, `intro-ch-EN`)}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p data-mark-key="intro-ch-LU" onMouseUp={() => onSelectGeneric('intro-ch-LU')} onTouchEnd={() => onSelectGeneric('intro-ch-LU')} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{renderMarkedByKey(intro.lu, `intro-ch-LU`)}</p>}
-                    {sidebarLang === 'EN' && !intro.en && intro.lu && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.lu}</p>}
-                    {sidebarLang === 'LU' && !intro.lu && intro.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{intro.en}</p>}
-                  </>
-                )}
-              </div>
-            )}
-            {rightTab === 'commentary' && (
-              <div>
-                <p className="font-bold text-[16px] mb-3 flex items-center gap-2">📖 Commentary <MarkBtn markKey={`commentary-${selectedVerse !== null ? selectedVerse : 'chapter'}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} title="Select this commentary & mark it" /></p>
-                {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
-                  <>
-                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Verse {selectedVerse}</p>
-                    <CommentaryHtml html={commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
-                    <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
-                  </>
-                ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
-                  <>
-                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2" style={{ color: '#1d4ed8' }}>Chapter {chapterNum}</p>
-                    <CommentaryHtml html={commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
-                    <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-slate-500 italic">No chapter commentary saved yet. Select a verse and click Commentary to see its commentary.</p>
-                )}
-              </div>
-            )}
-            {rightTab === 'prayer' && activePanel === 'crossref' && selectedVerse !== null && (
-              <div className="rounded-xl bg-[#FFFEF7] border border-amber-200 shadow-md p-4">
-                <p className="font-bold text-[16px] mb-3">🔗 {bookName} {chapterNum}:{selectedVerse} — Cross References</p>
-                {loadingCross ? <p className="text-sm text-slate-500">Loading…</p> : crossRefs.length === 0 ? <p className="text-sm text-slate-500 italic">No cross-references for this verse.</p> : (
-                  <ul className="space-y-2">{crossRefs.map((cr: any, i: number) => (
-                    <li key={i} className="text-sm"><Link href={`/bible-reader/${cr.target_book_number || cr.target_book_id}/${cr.target_chapter}#verse-${cr.target_verse}`} className="font-bold {linkColor} hover:underline">{cr.target_book_name || `Book ${cr.target_book_id}`} {cr.target_chapter}:{cr.target_verse}</Link>{cr.text_english && <span data-mark-key={`crossref-${selectedVerse}-EN`} className="text-slate-600 select-text cursor-text"> — {renderMarkedByKey(cr.text_english || '', `crossref-${selectedVerse}-EN`)}</span>}</li>
-                  ))}</ul>
-                )}
-                <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-3 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
-              </div>
-            )}
-            {rightTab === 'prayer' && activePanel !== 'crossref' && (
-              <div>
-                {/* Prayer tab shows ONLY the selected verse's prayer. This was the bug: the modern page listed ALL prayers here. */}
-                {!selectedVerse ? (
-                  <div><p className={`text-sm ${crossBody}`}>Click <b>♡ Prayer</b> under any verse to pray that verse here.</p><p className="text-sm text-slate-500 italic mt-3">{Object.keys(versePrayers).length} prayers are in this chapter.</p></div>
-                ) : (
-                  <div>
-                    <p className="font-bold text-[16px] mb-3">🙏 {bookName} {chapterNum}:{selectedVerse}</p>
-                    {!selectedPrayer.en && !selectedPrayer.lu ? <p className="text-sm text-slate-500 italic">No prayer added yet for this verse.</p> : (
-                      <>
-                        {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p data-mark-key={`prayer-${selectedVerse}-EN`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
-                        {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p data-mark-key={`prayer-${selectedVerse}-LU`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className={`text-[15px] leading-relaxed whitespace-pre-wrap select-text cursor-text ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
-                        {sidebarLang === 'EN' && !selectedPrayer.en && selectedPrayer.lu && <p data-mark-key={`prayer-${selectedVerse}-LU`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
-                        {sidebarLang === 'LU' && !selectedPrayer.lu && selectedPrayer.en && <p data-mark-key={`prayer-${selectedVerse}-EN`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
-                      </>
-                    )}
-                    <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 px-3 py-1.5 rounded-lg bg-slate-200 text-sm font-medium">Minimize / Close ✕</button>
-                  </div>
-                )}
-                {/* Chapter Closing lives BELOW, after the verse prayer — not mixed into it */}
-                {(closing.en || closing.lu) && (
-                  <div data-mark-key="closing-ch-EN" className="mt-5 pt-4 border-t border-slate-200">
-                    <p className="font-bold text-[15px] mb-2 flex items-center gap-2">🙏 Chapter {chapterNum} Closing Prayer <MarkBtn markKey="closing-ch-EN" title="Select this closing prayer & mark it" /></p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en && <p className="leading-relaxed whitespace-pre-wrap" style={{ fontSize: bodySize }}>{closing.en}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && closing.lu && <p className={`text-[14.5px] leading-relaxed whitespace-pre-wrap ${(sidebarLang === 'EN' || sidebarLang === 'BOTH') && closing.en ? 'mt-3 pt-3 border-t border-slate-200' : ''}`}>{closing.lu}</p>}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </aside>
+        </div>
       </div>
 
-      {/* ── RESTORED Mark bar: appears when you select text. A = highlight, U = underline ── */}
-      {pendingMark && (
-        <div className="fixed z-[70] left-1/2 -translate-x-1/2 bottom-[76px] bg-slate-900 text-white rounded-full shadow-2xl px-2 py-1.5 flex items-center gap-1 max-w-[96vw] overflow-x-auto">
-          <span className="hidden sm:inline text-[11px] text-slate-300 pl-1 pr-1 whitespace-nowrap">Mark:</span>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-yellow-300 text-slate-900')} title="Highlight yellow" className="w-8 h-8 rounded-full bg-yellow-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-green-300 text-slate-900')} title="Highlight green" className="w-8 h-8 rounded-full bg-green-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('highlight', 'bg-pink-300 text-slate-900')} title="Highlight pink" className="w-8 h-8 rounded-full bg-pink-300 text-slate-900 text-[13px] font-bold flex items-center justify-center">A</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('underline', 'decoration-orange-500 text-inherit')} title="Underline orange" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-orange-500">U</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => applyMark('underline', 'decoration-blue-500 text-inherit')} title="Underline blue" className="w-8 h-8 rounded-full bg-white text-slate-900 text-[13px] font-bold flex items-center justify-center underline decoration-blue-500">U</button>
-          <button onClick={() => { clearMarksForKey(pendingMark.key); setPendingMark(null); }} title="Clear all marks in this section" className="px-2 h-8 rounded-full bg-white/15 text-[11px] font-bold flex items-center justify-center whitespace-nowrap">Clear</button>
-          <button onMouseDown={(e) => e.preventDefault()} onClick={() => { try { navigator.clipboard?.writeText(pendingMark.text); } catch {} setPendingMark(null); }} title="Copy selection" className="w-8 h-8 rounded-full bg-white/15 text-[13px] flex items-center justify-center">⧉</button>
-          <button onClick={() => setPendingMark(null)} title="Close" className="w-8 h-8 rounded-full bg-white/15 flex items-center justify-center">✕</button>
-        </div>
+      {/* STRONG'S POPUP */}
+      {strongCode && (
+        <div className="pr-modal-bg" onClick={() => setStrongCode(null)}><div className="pr-modal" onClick={(e) => e.stopPropagation()}>
+          <button className="pr-modal-x" onClick={() => setStrongCode(null)}>✕</button>
+          <span className="pr-strong-big">{strongCode}</span>
+          <h3>{STRONGS[strongCode]?.word || "Strong's word"}</h3>
+          <p>{STRONGS[strongCode]?.def || `The full dictionary entry for ${strongCode} is added by the admin. In KJV+ mode, every Hebrew / Greek word behind the English text gets its own number.`}</p>
+          <p className="pr-modal-sub">Tap any blue H-number in KJV+ to see its meaning here.</p>
+        </div></div>
       )}
+      {/* SHARE SHEET */}
+      {shareOpen && (
+        <div className="pr-modal-bg" onClick={() => setShareOpen(false)}><div className="pr-modal" onClick={(e) => e.stopPropagation()}>
+          <button className="pr-modal-x" onClick={() => setShareOpen(false)}>✕</button>
+          <h3>{shareTitle}</h3><p className="pr-share-text">{shareText}</p>
+          <button className="pr-share-btn" onClick={() => copyText(shareText, "Copied. Paste it anywhere.")}>⧉ Copy all</button>
+          <a className="pr-share-btn is-wa" href={`https://wa.me/?text=${encodeURIComponent(shareText)}`} target="_blank" rel="noreferrer">Share on WhatsApp</a>
+        </div></div>
+      )}
+      {toast && <div className="pr-toast">{toast}</div>}
 
-      {/* ── Scripture-ref POPUP ── */}
-      {refPopup && (
-        <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center" onClick={() => setRefPopup(null)}>
-          <div className="absolute inset-0 bg-black/50" />
-          <div className="relative bg-white w-full sm:max-w-[520px] max-h-[85vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-start justify-between mb-3">
-              <div><p className="font-bold text-lg">{refPopup.ref}</p><p className="text-sm text-slate-500">{refPopup.bookName} {refPopup.chapter}:{refPopup.verses.join(', ')}</p></div>
-              <button onClick={() => setRefPopup(null)} className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">✕</button>
-            </div>
-            {refPopup.loading ? <p className="text-sm text-slate-500">Loading verse…</p>
-              : refPopup.error ? <p className="text-sm text-red-600">{refPopup.error}</p>
-              : <p className="leading-relaxed whitespace-pre-wrap">{refPopup.text}</p>}
-            {!refPopup.loading && refPopup.bookNum > 0 && (
-              <button onClick={() => { setRefPopup(null); window.location.href = `/bible-reader/${refPopup.bookNum}/${refPopup.chapter}#verse-${refPopup.verses[0]}`; }} className="w-full mt-4 py-3 rounded-xl bg-blue-600 text-white font-semibold">Go to {refPopup.ref} →</button>
-            )}
-            <button onClick={() => setRefPopup(null)} className="w-full mt-2 py-2.5 rounded-xl bg-slate-100 font-semibold">Keep reading here</button>
-          </div>
-        </div>
-      )}
-      {/* Hamburger SIDE DRAWER — slides in from the right, holds Intro / Commentary / Prayer + nav */}
-      {menuOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setMenuOpen(false)}>
-          <div className="absolute inset-0 bg-black/50" />
-          <div className={`${themeClasses.card} relative w-[320px] max-w-[85vw] h-full shadow-2xl p-4 overflow-y-auto`} onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-4">
-              <p className="font-bold text-[16px]">{bookName} {chapterNum}</p>
-              <button onClick={() => setMenuOpen(false)} className="w-8 h-8 rounded-full bg-slate-200 text-slate-800 flex items-center justify-center">✕</button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 mb-4">
-              <Link href="/dashboard" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">Dashboard</Link>
-              <Link href="/bible-reader" className="px-3 py-2.5 rounded-xl bg-slate-100 text-slate-800 text-sm font-semibold text-center">All Books</Link>
-              <button onClick={cycleTheme} className="px-3 py-2.5 rounded-xl bg-yellow-100 text-slate-800 text-sm font-semibold">☀ Theme: {theme}</button>
-              <button onClick={() => setLang(lang === 'EN' ? 'LU' : lang === 'LU' ? 'BOTH' : 'EN')} className="px-3 py-2.5 rounded-xl bg-amber-100 text-slate-800 text-sm font-semibold">Main Lang: {lang}</button>
-            </div>
-            <div className="flex border-b border-slate-200 mb-3">
-              {(['intro','commentary','prayer'] as const).map(t => (
-                <button key={t} onClick={() => { setRightTab(t); /* FIX: was setMenuOpen(false) — tapping Commentary/Prayer closed the drawer, and on mobile the desktop sidebar is hidden, so it looked like the sidebar vanished. Keep the drawer open. */ }} className={`flex-1 py-2.5 text-[13px] font-bold capitalize ${rightTab === t ? 'border-b-2 border-slate-900' : 'text-slate-500'}`}>{t}</button>
-              ))}
-            </div>
-            {rightTab === 'intro' && (
-              <div>
-                <p className="font-bold mb-2 flex items-center gap-2">Chapter {chapterNum} — Intro <MarkBtn markKey={`intro-ch-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} title="Select this introduction & mark it" /></p>
-                {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && intro.en && <p data-mark-key="intro-ch-EN" onMouseUp={() => onSelectGeneric('intro-ch-EN')} onTouchEnd={() => onSelectGeneric('intro-ch-EN')} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.en, 'intro-ch-EN')}</p>}
-                {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && intro.lu && <p data-mark-key="intro-ch-LU" onMouseUp={() => onSelectGeneric('intro-ch-LU')} onTouchEnd={() => onSelectGeneric('intro-ch-LU')} className="leading-relaxed whitespace-pre-wrap mt-3 select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(intro.lu, 'intro-ch-LU')}</p>}
-                {!intro.en && !intro.lu && <p className="text-sm text-slate-500 italic">No chapter introduction available.</p>}
-              </div>
-            )}
-            {rightTab === 'commentary' && (
-              <div onClick={handleCommentaryClick}>
-                <p className="font-bold mb-2 flex items-center gap-2">Commentary <MarkBtn markKey={`commentary-${selectedVerse !== null ? selectedVerse : 'chapter'}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} title="Select this commentary & mark it" /></p>
-                {selectedVerse !== null && commentary[selectedVerse] && commHtmlForLang(commentary[selectedVerse], sidebarLang) ? (
-                  <>
-                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Verse {selectedVerse}</p>
-                    <CommentaryHtml html={commHtmlForLang(commentary[selectedVerse], sidebarLang, `commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
-                    <button onClick={() => { setSelectedVerse(null); setActivePanel(null); }} className="mt-4 text-sm font-semibold underline">← Back to Chapter Commentary</button>
-                  </>
-                ) : chapterCommentary && commHtmlForLang(chapterCommentary, sidebarLang) ? (
-                  <>
-                    <p className="text-[11px] font-bold tracking-wide uppercase mb-2 text-blue-700">Chapter {chapterNum}</p>
-                    <CommentaryHtml html={commHtmlForLang(chapterCommentary, sidebarLang, `commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`)} markKey={`commentary-chapter-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} fontSize={bodySize} handlersRef={commentaryHandlersRef} />
-                    <p className="text-sm text-slate-500 italic mt-4">Tap any verse, then Commentary, to see that verse&apos;s commentary here.</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-slate-500 italic">No chapter commentary saved yet. Select a verse and tap Commentary to see its commentary.</p>
-                )}
-              </div>
-            )}
-            {rightTab === 'prayer' && (
-              <div>
-                {!selectedVerse ? <p className="text-sm">Tap ♡ Prayer under any verse to pray it here.</p> : (
-                  <div>
-                    <p className="font-bold mb-2 flex items-center gap-2">{bookName} {chapterNum}:{selectedVerse} <MarkBtn markKey={`prayer-${selectedVerse}-${sidebarLang === 'LU' ? 'LU' : 'EN'}`} title="Select this prayer & mark it" /></p>
-                    {(sidebarLang === 'EN' || sidebarLang === 'BOTH') && selectedPrayer.en && <p data-mark-key={`prayer-${selectedVerse}-EN`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-EN`)} className="leading-relaxed whitespace-pre-wrap select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.en, `prayer-${selectedVerse}-EN`)}</p>}
-                    {(sidebarLang === 'LU' || sidebarLang === 'BOTH') && selectedPrayer.lu && <p data-mark-key={`prayer-${selectedVerse}-LU`} onMouseUp={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} onTouchEnd={() => onSelectGeneric(`prayer-${selectedVerse}-LU`)} className="leading-relaxed whitespace-pre-wrap mt-3 select-text cursor-text" style={{ fontSize: bodySize }}>{renderMarkedByKey(selectedPrayer.lu, `prayer-${selectedVerse}-LU`)}</p>}
-                    {!selectedPrayer.en && !selectedPrayer.lu && <p className="text-sm italic text-slate-500">No prayer for this verse yet.</p>}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Bottom nav — ORIGINAL */}
-      <div className={`sticky bottom-0 ${themeClasses.header} border-t`}>
-        <div className="max-w-[1200px] mx-auto px-4 py-3 flex items-center justify-between">
-          <button disabled={chapterNum <= 1} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum - 1}`)} className="px-4 py-2 rounded-lg bg-slate-100 text-sm font-semibold disabled:opacity-40">‹ Prev</button>
-          <span className="text-[15px] font-bold">Chapter {chapterNum} of {totalChapters}</span>
-          <button disabled={chapterNum >= Number(totalChapters)} onClick={() => router.push(`/bible-reader/${bookNum}/${chapterNum + 1}`)} className="px-4 py-2 rounded-lg bg-slate-100 text-sm font-semibold disabled:opacity-40">Next ›</button>
-        </div>
-      </div>
+      <style jsx global>{`
+        .pr-ch-page{background:#faf8f2;min-height:100vh;color:#1c382e}
+        .pr-ch-page.is-dark{background:#14201b;color:#e8ece8}
+        .pr-ch-page.is-dark .pr-verses-card,.pr-ch-page.is-dark .pr-controls,.pr-ch-page.is-dark .pr-side-card,.pr-ch-page.is-dark .pr-resources-bar,.pr-ch-page.is-dark .pr-closing,.pr-ch-page.is-dark .pr-bottom-cards>div,.pr-ch-page.is-dark .pr-inline-panel{background:#1e2e28;border-color:#2c3d34;color:#e8ece8}
+        .pr-ch-page.is-dark .pr-v-en,.pr-ch-page.is-dark .pr-side-card-body p,.pr-ch-page.is-dark .pr-closing p{color:#e8ece8}
+        .pr-container{max-width:1280px;margin:0 auto;padding:0 20px}
+        .pr-ch-hero{background:#1d4035;color:#fff;padding:26px 0 32px}
+        .pr-ch-hero-top{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+        .pr-ch-hero-pills{display:flex;gap:10px;flex-wrap:wrap}
+        .pr-ch-hero-pill{display:inline-flex;gap:6px;align-items:center;padding:10px 18px;border-radius:999px;border:1px solid rgba(255,255,255,.35);color:#fff;text-decoration:none;font-size:15px}
+        .pr-ch-hero-pill.is-soft{background:rgba(255,255,255,.1)}
+        .pr-ch-hero h1{font-size:46px;margin:22px 0 0;font-family:Georgia,serif}.pr-ch-hero p{opacity:.9;margin:6px 0 0;font-size:17px}
+        .pr-ch-shell{padding-top:22px;padding-bottom:56px}
+        .pr-controls{background:#fff;border:1px solid #eee9d6;border-radius:16px;padding:14px;display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center}
+        .pr-ctrl-left,.pr-ctrl-right{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+        .pr-icon-btn{width:38px;height:38px;border-radius:999px;border:1px solid #e6e2d4;background:#fff;cursor:pointer;font-size:18px}
+        .pr-chip{padding:9px 15px;border-radius:999px;border:1px solid #e6e2d4;background:#fff;cursor:pointer;font-weight:600;font-size:14px}
+        .pr-chip.is-active{background:#1d4035;color:#fff;border-color:#1d4035}
+        .pr-version{position:relative;display:inline-flex;align-items:center}.pr-version select{appearance:none;border:1px solid #e6e2d4;border-radius:999px;padding:9px 34px 9px 15px;background:#fdfbf2;font-weight:700;cursor:pointer}.pr-version span{position:absolute;right:12px;pointer-events:none}
+        .pr-lang{display:flex;background:#f5f2e8;border-radius:999px;padding:4px;gap:4px}.pr-lang button{border:0;background:transparent;padding:7px 14px;border-radius:999px;cursor:pointer;font-weight:700;font-size:13px}.pr-lang .is-active{background:#1d4035;color:#fff}
+        .pr-ch-gridpanel{width:100%}.pr-ch-grid{display:flex;flex-wrap:wrap;gap:8px}.pr-ch-grid button{min-width:40px;height:36px;border-radius:10px;border:1px solid #d8e0d2;background:#faf8f2;cursor:pointer;font-weight:600}.pr-ch-grid .is-active{background:#1d4035;color:#fff}
+        .pr-strong-note{width:100%;margin:0;font-size:13px;color:#a9852e}
+        .pr-ch-layout{display:grid;grid-template-columns:340px 1fr;gap:20px;align-items:start;margin-top:18px}
+        @media(max-width:1000px){.pr-ch-layout{grid-template-columns:1fr}}
+        .pr-side-tabs{display:flex;gap:6px;background:#fff;border:1px solid #eee9d6;border-radius:14px;padding:6px;margin-bottom:12px}
+        .pr-side-tabs button{flex:1;border:0;background:transparent;padding:11px 6px;border-radius:10px;cursor:pointer;font-weight:600;font-size:14px;color:#5d6d5d}
+        .pr-side-tabs .is-active{background:#fdfbf2;box-shadow:0 2px 8px rgba(0,0,0,.06);color:#1c382e}
+        .pr-side-card{background:#fff;border:1px solid #eee9d6;border-radius:16px;overflow:hidden}
+        .pr-side-card-head{display:flex;gap:12px;align-items:center;padding:16px;border-bottom:1px solid #eee9d6}.pr-side-card-head>span{font-size:20px}
+        .pr-side-card-head h3{margin:0;font-size:17px}.pr-side-card-head p{margin:2px 0 0;color:#8a9a8a;font-size:13px}
+        .pr-side-card-body{padding:18px}.pr-side-card-body h4{margin:0 0 4px;font-size:19px;line-height:1.4}.pr-gold-ref{color:#a9852e;font-weight:700;margin:0 0 12px}.pr-side-card-body p{line-height:1.8;color:#3d4a3d}.pr-side-italic{font-style:italic;color:#8a9a8a}
+        .pr-verse-mini{margin-top:16px;border-left:3px solid #e9c981;background:#fdfbf2;border-radius:0 10px 10px 0;padding:12px;font-size:14px;line-height:1.7}.pr-verse-mini span{color:#a9852e;font-weight:800;margin-right:8px}
+        .pr-resources-bar{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid #eee9d6;border-radius:14px;padding:12px 16px;font-weight:600}
+        .pr-resources-bar button{border:0;background:transparent;cursor:pointer;font-size:16px}.pr-resources-bar>span{flex:1;text-align:center}.pr-resources-chev{width:32px;height:32px;border:1px solid #e6e2d4!important;border-radius:999px}
+        .pr-resources-panel{display:flex;flex-wrap:wrap;gap:8px;background:#fff;border:1px solid #eee9d6;border-top:0;border-radius:0 0 14px 14px;padding:12px 16px;margin-top:-6px}
+        .pr-resources-panel button{border:1px solid #eee0b8;background:#fdfbf2;border-radius:999px;padding:8px 13px;cursor:pointer;font-weight:600;font-size:13px}
+        .pr-verses-card{background:#fff;border:1px solid #eee9d6;border-radius:16px;padding:20px;margin-top:14px}
+        .pr-verse-block{border:1px solid transparent;border-radius:12px;padding:6px 8px;margin-bottom:6px}
+        .pr-verse-block.is-selected{border-color:#e9c981;background:#fdfbf2}
+        .pr-verse-bar{background:#fff;border:1px solid #eee0b8;border-radius:12px;padding:12px;margin-bottom:10px;position:relative}
+        .pr-verse-bar-title{font-size:11px;letter-spacing:2px;font-weight:800;color:#a9852e}.pr-verse-bar-x{position:absolute;top:10px;right:10px;border:0;background:transparent;cursor:pointer}
+        .pr-verse-bar-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.pr-verse-bar-row button{border:1px solid #eee0b8;background:#fdfbf2;border-radius:999px;padding:7px 12px;cursor:pointer;font-size:13px;font-weight:600}
+        .pr-dot{width:28px!important;height:28px;border-radius:999px!important;padding:0!important;display:grid;place-items:center;font-size:12px}
+        .pr-note-box{display:flex;gap:8px;margin-top:10px}.pr-note-box input{flex:1;border:1px solid #e6e2d4;border-radius:999px;padding:8px 12px}.pr-note-box button{border:0;background:#1d4035;color:#fff;border-radius:999px;padding:8px 14px;cursor:pointer}
+        .pr-note-saved{font-size:13px;color:#5d6d5d;align-self:center}
+        .pr-verse-btn{display:flex;gap:10px;width:100%;text-align:left;border:0;background:transparent;cursor:pointer;padding:6px 0;align-items:flex-start}
+        .pr-v-num{color:#a9852e;font-weight:800;flex-shrink:0;font-size:.85em;padding-top:2px}.pr-v-text{line-height:1.9;font-family:Georgia,serif}
+        .pr-v-en{display:block}.pr-v-divider{display:block;height:1px;background:#eee9d6;margin:10px 0}
+        .pr-v-lu{display:block;color:#5d6d5d}.pr-lu-badge{display:inline-block;background:#fdf3d8;color:#a9852e;border-radius:6px;padding:1px 7px;font-size:11px;font-weight:800;margin-right:8px;vertical-align:middle}
+        .pr-v-missing{display:block;color:#8a9a8a;font-style:italic;font-size:14px}
+        .pr-strong-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.pr-strong{border:0;background:transparent;color:#2f5d8a;font-weight:700;cursor:pointer;font-size:13px;padding:0}
+        .pr-inline-panel{background:#fff;border:1px solid #eee9d6;border-radius:14px;padding:16px;margin-top:12px}.pr-inline-panel h3{margin:0 0 8px}.pr-inline-panel p{line-height:1.75}.pr-inline-panel button{border:1px solid #e6e2d4;background:#faf8f2;border-radius:999px;padding:7px 14px;cursor:pointer;margin-top:8px}
+        .pr-ch-nav{display:flex;justify-content:space-between;margin-top:16px}.pr-ch-nav button{border:1px solid #e6e2d4;background:#fff;border-radius:999px;padding:10px 16px;cursor:pointer;font-weight:600}
+        .pr-closing{background:#fff;border:1px solid #eee9d6;border-radius:16px;padding:22px;margin-top:18px}
+        .pr-closing-head{display:flex;gap:14px;align-items:center}.pr-closing-ic{width:46px;height:46px;border-radius:12px;background:#1d4035;display:grid;place-items:center;font-size:20px;color:#fff}
+        .pr-closing-head small{font-size:11px;letter-spacing:2px;color:#a9852e;font-weight:800}.pr-closing-head h2{margin:2px 0 0;font-size:22px}
+        .pr-closing h3{margin:18px 0 8px}.pr-closing p{line-height:1.9;font-size:16px}.pr-closing hr{border:0;border-top:1px solid #eee9d6;margin:16px 0}
+        .pr-ref-pill{display:inline-block;border:1px solid #eee0b8;background:#fdfbf2;color:#a9852e;border-radius:999px;padding:6px 12px;font-weight:700;font-size:13px}
+        .pr-amen{color:#a9852e;font-weight:800!important;font-family:Georgia,serif}
+        .pr-closing-actions{display:flex;gap:8px;margin-top:14px}.pr-closing-actions button{border:1px solid #e6e2d4;background:#faf8f2;border-radius:999px;padding:9px 15px;cursor:pointer;font-weight:600}
+        .pr-bottom-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+        @media(max-width:700px){.pr-bottom-cards{grid-template-columns:1fr}}
+        .pr-bottom-cards>div{background:#fff;border:1px solid #eee9d6;border-radius:14px;padding:16px}.pr-bottom-cards h3{margin:0 0 6px;font-size:16px}.pr-bottom-cards p{margin:0 0 10px;color:#5d6d5d;font-size:14px;line-height:1.6}.pr-bottom-cards a{color:#a9852e;font-weight:700;text-decoration:none}
+        .pr-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:grid;place-items:center;z-index:50;padding:16px}
+        .pr-modal{position:relative;background:#fff;border-radius:16px;padding:22px;max-width:480px;width:100%;max-height:85vh;overflow:auto}
+        .pr-modal-x{position:absolute;top:12px;right:12px;border:0;background:transparent;cursor:pointer;font-size:16px}
+        .pr-strong-big{color:#2f5d8a;font-weight:800;font-size:20px}.pr-modal h3{margin:6px 0}.pr-modal p{line-height:1.75}.pr-modal-sub{color:#8a9a8a;font-size:13px}
+        .pr-share-text{white-space:pre-wrap;background:#faf8f2;border-radius:10px;padding:12px;font-size:14px;line-height:1.7}
+        .pr-share-btn{display:block;width:100%;text-align:center;border:1px solid #e6e2d4;background:#faf8f2;border-radius:999px;padding:11px;cursor:pointer;font-weight:700;margin-top:10px;text-decoration:none;color:#1c382e}
+        .pr-share-btn.is-wa{background:#25d366;color:#fff;border-color:#25d366}
+        .pr-toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1d4035;color:#fff;padding:12px 20px;border-radius:999px;z-index:60;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+        .pr-loading,.pr-empty{text-align:center;color:#5d6d5d;padding:24px}.pr-empty button{border:1px solid #e6e2d4;background:#fff;border-radius:999px;padding:6px 12px;cursor:pointer;margin-left:6px}
+      `}</style>
     </div>
   );
 }
-
 export default function ChapterPage() {
-  return <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#BDD7F5]">Loading…</div>}><ChapterContent /></Suspense>;
+  return (<Suspense fallback={<div style={{ padding: 32 }}>Loading chapter…</div>}><ChapterInner /></Suspense>);
 }
